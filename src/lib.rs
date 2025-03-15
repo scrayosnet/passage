@@ -1,11 +1,11 @@
 #![deny(clippy::all)]
 #![forbid(unsafe_code)]
 
+pub mod authentication;
 pub mod config;
 mod protocol;
 mod server;
 mod status;
-pub mod authentication;
 
 use crate::config::AppState;
 use std::sync::Arc;
@@ -24,7 +24,10 @@ use tracing::info;
 /// properly initialized.
 pub async fn start(state: Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
     // generate a new key pair
-    info!(bits = state.key_length, "generating a new cryptographic keypair");
+    info!(
+        bits = state.key_length,
+        "generating a new cryptographic keypair"
+    );
     let keys = authentication::generate_keypair()?;
 
     // bind the socket address on all interfaces

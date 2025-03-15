@@ -34,11 +34,7 @@ pub struct AppState {
 impl AppState {
     /// Creates a new [`AppState`] from the supplied configuration parameters that can be used in passage.
     #[must_use]
-    pub const fn new(
-        address: SocketAddr,
-        timeout: f64,
-        key_length: u32,
-    ) -> Self {
+    pub const fn new(address: SocketAddr, timeout: f64, key_length: u32) -> Self {
         Self {
             address,
             timeout,

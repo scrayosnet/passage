@@ -31,7 +31,9 @@ where
                         max: 10,
                         sample: None,
                     }),
-                    description: Some(RawValue::from_string(r#"{"text":"PASSAGE IS RUNNING","color":"gold"}"#.to_string())?),
+                    description: Some(RawValue::from_string(
+                        r#"{"text":"PASSAGE IS RUNNING","color":"gold"}"#.to_string(),
+                    )?),
                     favicon: None,
                     enforces_secure_chat: Some(true),
                 };

@@ -13,19 +13,16 @@
 use crate::authentication;
 use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, VerifyToken};
 use crate::status::ServerStatus;
-use aes::cipher;
 use aes::cipher::generic_array::GenericArray;
-use cfb8::cipher::{AsyncStreamCipher, BlockDecryptMut, BlockEncryptMut, BlockSizeUser, KeyIvInit, StreamCipher};
+use cfb8::cipher::{BlockDecryptMut, BlockEncryptMut, BlockSizeUser};
 use rsa::{RsaPrivateKey, RsaPublicKey};
 use std::io::Cursor;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::TcpStream;
-use tokio_stream::adapters::Map;
 use tokio_stream::StreamExt;
 use tokio_util::bytes::Bytes;
-use tokio_util::io::{ReaderStream, StreamReader};
-use tracing::{debug, info, instrument};
-use uuid::{uuid, Uuid};
+use tokio_util::io::StreamReader;
+use tracing::{debug, instrument};
+use uuid::Uuid;
 
 /// The internal error type for all errors related to the protocol communication.
 ///
@@ -785,7 +782,8 @@ where
     authentication::verify_token(verify_token, &decrypted_verify_token)?;
 
     // get the data for login success
-    let auth_response = authentication::authenticate_mojang(&login_start.name, &shared_secret, &public_key).await?;
+    let auth_response =
+        authentication::authenticate_mojang(&login_start.name, &shared_secret, &public_key).await?;
 
     // get stream ciphers
     let ciphers = authentication::create_ciphers(&shared_secret)?;
@@ -793,52 +791,45 @@ where
     let mut decryptor = ciphers.1;
 
     // create a new login success packet and send it
-    let login_success = LoginSuccessPacket::new(
-        auth_response.id,
-        auth_response.name,
-    );
+    let login_success = LoginSuccessPacket::new(auth_response.id, auth_response.name);
     debug!(
         packet = debug(&login_success),
         "sending login success packet"
     );
-    stream.write_encrypted_packet(&mut encryptor, login_success).await?;
-
+    stream
+        .write_encrypted_packet(&mut encryptor, login_success)
+        .await?;
 
     let mut halves = tokio::io::split(stream);
-    let str = tokio_util::io::ReaderStream::new(halves.0)
-        .map(move |byte_chunk| {
-            byte_chunk.map(|mut data| {
-                let mut d = data.to_vec();
-                for chunk in d.chunks_mut(Aes128Cfb8Dec::block_size()) {
-                    let gen_arr = GenericArray::from_mut_slice(chunk);
-                    decryptor.decrypt_block_mut(gen_arr);
-                }
+    let str = tokio_util::io::ReaderStream::new(halves.0).map(move |byte_chunk| {
+        byte_chunk.map(|data| {
+            let mut d = data.to_vec();
+            for chunk in d.chunks_mut(Aes128Cfb8Dec::block_size()) {
+                let gen_arr = GenericArray::from_mut_slice(chunk);
+                decryptor.decrypt_block_mut(gen_arr);
+            }
 
-                Bytes::from(d)
-            })
-        });
+            Bytes::from(d)
+        })
+    });
 
     let mut reader = StreamReader::new(str);
 
-    // await the encryption response packet and read it
-    debug!("awaiting and reading encryption response packet");
+    // await the login acknowledged packet and read it
+    debug!("awaiting and reading login acknowledged packet");
     let login_acknowledged: LoginAcknowledgedPacket = reader.read_packet().await?;
     debug!(
         packet = debug(&login_acknowledged),
         "received login acknowledged packet"
     );
 
-
     // create a new transfer packet and send it
-    let transfer = TransferPacket::new(
-        "justchunks.net".to_string(),
-        25565,
-    );
-    debug!(
-        packet = debug(&transfer),
-        "sending transfer packet"
-    );
-    halves.1.write_encrypted_packet(&mut encryptor, transfer).await?;
+    let transfer = TransferPacket::new("justchunks.net".to_string(), 25565);
+    debug!(packet = debug(&transfer), "sending transfer packet");
+    halves
+        .1
+        .write_encrypted_packet(&mut encryptor, transfer)
+        .await?;
 
     Ok(())
 }
