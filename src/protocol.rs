@@ -1,0 +1,844 @@
+//! This module defines and handles the Minecraft protocol and communication.
+//!
+//! This is necessary to exchange data with the target servers that should be probed. We only care about the packets
+//! related to the [Handshaking][handshaking], [Status][status], [Login][login] and [Configuration][configuration]
+//! phases and therefore only implement that part of the Minecraft protocol. The implementations may differ from the
+//! official Minecraft client implementation if the observed outcome is the same and the result is reliable.
+//!
+//! [handshaking]: https://minecraft.wiki/w/Java_Edition_protocol#Handshaking
+//! [status]: https://minecraft.wiki/w/Java_Edition_protocol#Status
+//! [login]: https://minecraft.wiki/w/Java_Edition_protocol#Login
+//! [configuration]: https://minecraft.wiki/w/Java_Edition_protocol#Configuration
+
+use crate::authentication;
+use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, VerifyToken};
+use crate::status::ServerStatus;
+use aes::cipher;
+use aes::cipher::generic_array::GenericArray;
+use cfb8::cipher::{AsyncStreamCipher, BlockDecryptMut, BlockEncryptMut, BlockSizeUser, KeyIvInit, StreamCipher};
+use rsa::{RsaPrivateKey, RsaPublicKey};
+use std::io::Cursor;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio_stream::adapters::Map;
+use tokio_stream::StreamExt;
+use tokio_util::bytes::Bytes;
+use tokio_util::io::{ReaderStream, StreamReader};
+use tracing::{debug, info, instrument};
+use uuid::{uuid, Uuid};
+
+/// The internal error type for all errors related to the protocol communication.
+///
+/// This includes errors with the expected packets, packet contents or encoding of the exchanged fields. Errors of the
+/// underlying data layer (for Byte exchange) are wrapped from the underlying IO errors. Additionally, the internal
+/// timeout limits also are covered as errors.
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    /// An error occurred while reading or writing to the underlying byte stream.
+    #[error("error reading or writing data: {0}")]
+    Io(#[from] std::io::Error),
+    /// The received packet is of an invalid length that we cannot process.
+    #[error("illegal packet length")]
+    IllegalPacketLength,
+    /// The received state index cannot be mapped to an existing state.
+    #[error("illegal state index: {state}")]
+    IllegalState {
+        /// The state index that was received.
+        state: usize,
+    },
+    /// The received `VarInt` cannot be correctly decoded (was formed incorrectly).
+    #[error("invalid VarInt data")]
+    InvalidVarInt,
+    /// The received packet ID is not mapped to an expected packet.
+    #[error("illegal packet ID: {actual} (expected {expected})")]
+    IllegalPacketId {
+        /// The expected value that should be present.
+        expected: usize,
+        /// The actual value that was observed.
+        actual: usize,
+    },
+    /// The JSON response of a packet is incorrectly encoded (not UTF-8).
+    #[error("invalid response body (invalid encoding)")]
+    InvalidEncoding,
+    #[error("could not encrypt connection: {0}")]
+    CryptographyFailed(#[from] authentication::Error),
+}
+
+/// State is the desired state that the connection should be in after the initial handshake.
+#[derive(Clone, Copy, Debug)]
+pub enum State {
+    /// Query the server information without connecting.
+    Status,
+    /// Log into the Minecraft server, establishing a connection.
+    Login,
+    /// The status s
+    Transfer,
+}
+
+impl From<State> for usize {
+    fn from(state: State) -> Self {
+        match state {
+            State::Status => 1,
+            State::Login => 2,
+            State::Transfer => 3,
+        }
+    }
+}
+
+impl TryFrom<usize> for State {
+    type Error = Error;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(State::Status),
+            2 => Ok(State::Login),
+            3 => Ok(State::Transfer),
+            _ => Err(Error::IllegalState { state: value }),
+        }
+    }
+}
+
+/// Packets are network packets that are part of the protocol definition and identified by a context and ID.
+trait Packet {
+    /// Returns the defined ID of this network packet.
+    fn get_packet_id() -> usize;
+}
+
+/// `OutboundPacket`s are packets that are written and therefore have a fixed, specific packet ID.
+trait OutboundPacket: Packet {
+    /// Creates a new buffer with the data from this packet.
+    async fn to_buffer(&self) -> Result<Vec<u8>, Error>;
+}
+
+/// `InboundPacket`s are packets that are read and therefore are expected to be of a specific packet ID.
+trait InboundPacket: Packet + Sized {
+    /// Creates a new instance of this packet with the data from the buffer.
+    async fn new_from_buffer(buffer: Vec<u8>) -> Result<Self, Error>;
+}
+
+/// This packet initiates the status request attempt and tells the server the details of the client.
+///
+/// The data in this packet can differ from the actual data that was used but will be considered by the server when
+/// assembling the response. Therefore, this data should mirror what a normal client would send.
+#[derive(Debug)]
+struct HandshakePacket {
+    /// The pretended protocol version.
+    protocol_version: isize,
+    /// The pretended server address.
+    server_address: String,
+    /// The pretended server port.
+    server_port: u16,
+    /// The protocol state to initiate.
+    next_state: State,
+}
+
+impl Packet for HandshakePacket {
+    fn get_packet_id() -> usize {
+        0x00
+    }
+}
+
+impl InboundPacket for HandshakePacket {
+    async fn new_from_buffer(buffer: Vec<u8>) -> Result<Self, Error> {
+        let mut reader = Cursor::new(buffer);
+
+        let protocol_version = reader.read_varint().await? as isize;
+        let server_address = reader.read_string().await?;
+        let server_port = reader.read_u16().await?;
+        let next_state = reader.read_varint().await?.try_into()?;
+
+        Ok(Self {
+            protocol_version,
+            server_address,
+            server_port,
+            next_state,
+        })
+    }
+}
+
+/// This packet will be sent after the [`HandshakePacket`] and requests the server metadata.
+///
+/// The packet can only be sent after the [`HandshakePacket`] and must be written before any status information can be
+/// read, as this is the differentiator between the status and the ping sequence.
+#[derive(Debug)]
+struct StatusRequestPacket;
+
+impl Packet for StatusRequestPacket {
+    fn get_packet_id() -> usize {
+        0x00
+    }
+}
+
+impl InboundPacket for StatusRequestPacket {
+    async fn new_from_buffer(_buffer: Vec<u8>) -> Result<Self, Error> {
+        Ok(Self)
+    }
+}
+
+/// This is the response for a specific [`StatusRequestPacket`] that contains all self-reported metadata.
+///
+/// This packet can be received only after a [`StatusRequestPacket`] and will not close the connection, allowing for a
+/// ping sequence to be exchanged afterward.
+#[derive(Debug)]
+struct StatusResponsePacket {
+    /// The JSON response body that contains all self-reported server metadata.
+    body: String,
+}
+
+impl StatusResponsePacket {
+    /// Creates a new [`StatusResponsePacket`] with the supplied payload.
+    const fn new(body: String) -> Self {
+        Self { body }
+    }
+}
+
+impl Packet for StatusResponsePacket {
+    fn get_packet_id() -> usize {
+        0x00
+    }
+}
+
+impl OutboundPacket for StatusResponsePacket {
+    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
+        let mut buffer = Cursor::new(Vec::<u8>::new());
+
+        buffer.write_string(&self.body).await?;
+
+        Ok(buffer.into_inner())
+    }
+}
+
+/// This is the request for a specific [`PongPacket`] that can be used to measure the server ping.
+///
+/// This packet can be sent after a connection was established or the [`StatusResponsePacket`] was received. Initiating
+/// the ping sequence will consume the connection after the [`PongPacket`] was received.
+#[derive(Debug)]
+struct PingPacket {
+    /// The arbitrary payload that will be returned from the server (to identify the corresponding request).
+    payload: u64,
+}
+
+impl Packet for PingPacket {
+    fn get_packet_id() -> usize {
+        0x01
+    }
+}
+
+impl InboundPacket for PingPacket {
+    async fn new_from_buffer(buffer: Vec<u8>) -> Result<Self, Error> {
+        let mut reader = Cursor::new(buffer);
+
+        let payload = reader.read_u64().await?;
+
+        Ok(Self { payload })
+    }
+}
+
+/// This is the response to a specific [`PingPacket`] that can be used to measure the server ping.
+///
+/// This packet will be sent after a corresponding [`PingPacket`] and will have the same payload as the request. This
+/// also consumes the connection, ending the Server List Ping sequence.
+#[derive(Debug)]
+struct PongPacket {
+    /// The arbitrary payload that was sent from the client (to identify the corresponding response).
+    payload: u64,
+}
+
+impl PongPacket {
+    /// Creates a new [`PongPacket`] with the supplied payload.
+    const fn new(payload: u64) -> Self {
+        Self { payload }
+    }
+}
+
+impl Packet for PongPacket {
+    fn get_packet_id() -> usize {
+        0x01
+    }
+}
+
+impl OutboundPacket for PongPacket {
+    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
+        let mut buffer = Cursor::new(Vec::<u8>::new());
+
+        buffer.write_u64(self.payload).await?;
+
+        Ok(buffer.into_inner())
+    }
+}
+
+#[derive(Debug)]
+struct LoginStartPacket {
+    name: String,
+    user_id: Uuid,
+}
+
+impl Packet for LoginStartPacket {
+    fn get_packet_id() -> usize {
+        0x00
+    }
+}
+
+impl InboundPacket for LoginStartPacket {
+    async fn new_from_buffer(buffer: Vec<u8>) -> Result<Self, Error> {
+        let mut reader = Cursor::new(buffer);
+
+        let name = reader.read_string().await?;
+        let user_id = reader.read_uuid().await?;
+
+        Ok(Self { name, user_id })
+    }
+}
+
+#[derive(Debug)]
+struct EncryptionResponsePacket {
+    shared_secret: Vec<u8>,
+    verify_token: Vec<u8>,
+}
+
+impl Packet for EncryptionResponsePacket {
+    fn get_packet_id() -> usize {
+        0x01
+    }
+}
+
+impl InboundPacket for EncryptionResponsePacket {
+    async fn new_from_buffer(buffer: Vec<u8>) -> Result<Self, Error> {
+        let mut reader = Cursor::new(buffer);
+
+        let shared_secret = reader.read_bytes().await?;
+        let verify_token = reader.read_bytes().await?;
+
+        Ok(Self {
+            shared_secret,
+            verify_token,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct LoginAcknowledgedPacket;
+
+impl Packet for LoginAcknowledgedPacket {
+    fn get_packet_id() -> usize {
+        0x03
+    }
+}
+
+impl InboundPacket for LoginAcknowledgedPacket {
+    async fn new_from_buffer(_buffer: Vec<u8>) -> Result<Self, Error> {
+        Ok(Self)
+    }
+}
+
+#[derive(Debug)]
+struct EncryptionRequestPacket {
+    // server id - is always empty, so we skip it
+    public_key: Vec<u8>,
+    verify_token: VerifyToken,
+    should_authenticate: bool,
+}
+
+impl EncryptionRequestPacket {
+    const fn new(
+        public_key: Vec<u8>,
+        verify_token: VerifyToken,
+        should_authenticate: bool,
+    ) -> Self {
+        Self {
+            public_key,
+            verify_token,
+            should_authenticate,
+        }
+    }
+}
+
+impl Packet for EncryptionRequestPacket {
+    fn get_packet_id() -> usize {
+        0x01
+    }
+}
+
+impl OutboundPacket for EncryptionRequestPacket {
+    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
+        let mut buffer = Cursor::new(Vec::<u8>::new());
+
+        buffer.write_string("").await?;
+        buffer.write_bytes(&self.public_key).await?;
+        buffer.write_bytes(&self.verify_token).await?;
+        buffer.write_u8(self.should_authenticate as u8).await?;
+
+        Ok(buffer.into_inner())
+    }
+}
+
+#[derive(Debug)]
+struct LoginSuccessPacket {
+    user_id: Uuid,
+    user_name: String,
+    // properties - we don't need those
+}
+
+impl LoginSuccessPacket {
+    const fn new(user_id: Uuid, user_name: String) -> Self {
+        Self { user_id, user_name }
+    }
+}
+
+impl Packet for LoginSuccessPacket {
+    fn get_packet_id() -> usize {
+        0x02
+    }
+}
+
+impl OutboundPacket for LoginSuccessPacket {
+    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
+        let mut buffer = Cursor::new(Vec::<u8>::new());
+
+        buffer.write_uuid(&self.user_id).await?;
+        buffer.write_string(&self.user_name).await?;
+        // no properties in array
+        buffer.write_varint(0).await?;
+
+        Ok(buffer.into_inner())
+    }
+}
+
+#[derive(Debug)]
+struct TransferPacket {
+    host: String,
+    port: usize,
+}
+
+impl TransferPacket {
+    const fn new(host: String, port: usize) -> Self {
+        Self { host, port }
+    }
+}
+
+impl Packet for TransferPacket {
+    fn get_packet_id() -> usize {
+        0x0B
+    }
+}
+
+impl OutboundPacket for TransferPacket {
+    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
+        let mut buffer = Cursor::new(Vec::<u8>::new());
+
+        buffer.write_string(&self.host).await?;
+        buffer.write_varint(self.port).await?;
+
+        Ok(buffer.into_inner())
+    }
+}
+
+/// `AsyncWritePacket` allows writing a specific [`OutboundPacket`] to an [`AsyncWrite`].
+///
+/// Only [`OutboundPacket`s](OutboundPacket) can be written as only those packets are sent. There are additional
+/// methods to write the data that is encoded in a Minecraft-specific manner. Their implementation is analogous to the
+/// [read implementation](AsyncReadPacket).
+trait AsyncWritePacket {
+    /// Writes the supplied [`OutboundPacket`] onto this object as described in the official
+    /// [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Packet_format
+    async fn write_packet<T: OutboundPacket + Send + Sync>(
+        &mut self,
+        packet: T,
+    ) -> Result<(), Error>;
+
+    /// Writes the supplied [`OutboundPacket`] encrypted onto this object as described in the official
+    /// [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Packet_format
+    async fn write_encrypted_packet<T: OutboundPacket + Send + Sync>(
+        &mut self,
+        cipher: &mut Aes128Cfb8Enc,
+        packet: T,
+    ) -> Result<(), Error>;
+
+    /// Writes a `VarInt` onto this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
+    async fn write_varint(&mut self, int: usize) -> Result<(), Error>;
+
+    /// Writes a `String` onto this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:String
+    async fn write_string(&mut self, string: &str) -> Result<(), Error>;
+
+    /// Writes a `Uuid` onto this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:UUID
+    async fn write_uuid(&mut self, uuid: &Uuid) -> Result<(), Error>;
+
+    /// Writes a vec of `u8` onto this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Prefixed_Array
+    async fn write_bytes(&mut self, arr: &[u8]) -> Result<(), Error>;
+}
+
+impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
+    async fn write_packet<T: OutboundPacket + Send + Sync>(
+        &mut self,
+        packet: T,
+    ) -> Result<(), Error> {
+        // write the packet into a buffer and box it as a slice (sized)
+        let packet_buffer = packet.to_buffer().await?;
+        let raw_packet = packet_buffer.into_boxed_slice();
+
+        // create a new buffer and write the packet onto it (to get the size)
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+        buffer.write_varint(T::get_packet_id()).await?;
+        buffer.write_all(&raw_packet).await?;
+
+        // write the length of the content (length frame encoder) and then the packet
+        let inner = buffer.into_inner();
+        self.write_varint(inner.len()).await?;
+        self.write_all(&inner).await?;
+
+        Ok(())
+    }
+
+    async fn write_encrypted_packet<T: OutboundPacket + Send + Sync>(
+        &mut self,
+        cipher: &mut Aes128Cfb8Enc,
+        packet: T,
+    ) -> Result<(), Error> {
+        let mut enc_buffer = Cursor::new(Vec::new());
+        enc_buffer.write_packet(packet).await?;
+
+        let mut inner = enc_buffer.into_inner();
+
+        for chunk in inner.chunks_mut(Aes128Cfb8Enc::block_size()) {
+            let gen_arr = GenericArray::from_mut_slice(chunk);
+            cipher.encrypt_block_mut(gen_arr);
+        }
+
+        self.write_all(&inner).await?;
+
+        Ok(())
+    }
+
+    async fn write_varint(&mut self, value: usize) -> Result<(), Error> {
+        let mut int = (value as u64) & 0xFFFF_FFFF;
+        let mut written = 0;
+        let mut buffer = [0; 5];
+        loop {
+            let temp = (int & 0b0111_1111) as u8;
+            int >>= 7;
+            if int != 0 {
+                buffer[written] = temp | 0b1000_0000;
+            } else {
+                buffer[written] = temp;
+            }
+            written += 1;
+            if int == 0 {
+                break;
+            }
+        }
+        self.write_all(&buffer[0..written]).await?;
+
+        Ok(())
+    }
+
+    async fn write_string(&mut self, string: &str) -> Result<(), Error> {
+        self.write_varint(string.len()).await?;
+        self.write_all(string.as_bytes()).await?;
+
+        Ok(())
+    }
+
+    async fn write_uuid(&mut self, id: &Uuid) -> Result<(), Error> {
+        self.write_u128(id.as_u128()).await?;
+
+        Ok(())
+    }
+
+    async fn write_bytes(&mut self, arr: &[u8]) -> Result<(), Error> {
+        self.write_varint(arr.len()).await?;
+        self.write_all(arr).await?;
+
+        Ok(())
+    }
+}
+
+/// `AsyncReadPacket` allows reading a specific [`InboundPacket`] from an [`AsyncWrite`].
+///
+/// Only [`InboundPacket`s](InboundPacket) can be read as only those packets are received. There are additional
+/// methods to read the data that is encoded in a Minecraft-specific manner. Their implementation is analogous to the
+/// [write implementation](AsyncWritePacket).
+trait AsyncReadPacket {
+    /// Reads the supplied [`InboundPacket`] type from this object as described in the official
+    /// [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Packet_format
+    async fn read_packet<T: InboundPacket + Send + Sync>(&mut self) -> Result<T, Error>;
+
+    /// Reads a `VarInt` from this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
+    async fn read_varint(&mut self) -> Result<usize, Error>;
+
+    /// Reads a `String` from this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:String
+    async fn read_string(&mut self) -> Result<String, Error>;
+
+    /// Reads a `Uuid` from this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:UUID
+    async fn read_uuid(&mut self) -> Result<Uuid, Error>;
+
+    /// Reads a vec of `u8` from this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Prefixed_Array
+    async fn read_bytes(&mut self) -> Result<Vec<u8>, Error>;
+}
+
+impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
+    async fn read_packet<T: InboundPacket + Send + Sync>(&mut self) -> Result<T, Error> {
+        // extract the length of the packet and check for any following content
+        let length = self.read_varint().await?;
+        if length == 0 {
+            return Err(Error::IllegalPacketLength);
+        }
+
+        // extract the encoded packet id and validate if it is expected
+        let packet_id = self.read_varint().await?;
+        let expected_packet_id = T::get_packet_id();
+        if packet_id != expected_packet_id {
+            return Err(Error::IllegalPacketId {
+                expected: expected_packet_id,
+                actual: packet_id,
+            });
+        }
+
+        // read the remaining content of the packet into a new buffer
+        let mut buffer = vec![0; length - 1];
+        self.read_exact(&mut buffer).await?;
+
+        // convert the received buffer into our expected packet
+        T::new_from_buffer(buffer).await
+    }
+
+    async fn read_varint(&mut self) -> Result<usize, Error> {
+        let mut read = 0;
+        let mut result = 0;
+        loop {
+            let read_value = self.read_u8().await?;
+            let value = read_value & 0b0111_1111;
+            result |= (value as usize) << (7 * read);
+            read += 1;
+            if read > 5 {
+                return Err(Error::InvalidVarInt);
+            }
+            if (read_value & 0b1000_0000) == 0 {
+                return Ok(result);
+            }
+        }
+    }
+
+    async fn read_string(&mut self) -> Result<String, Error> {
+        let length = self.read_varint().await?;
+
+        let mut buffer = vec![0; length];
+        self.read_exact(&mut buffer).await?;
+
+        String::from_utf8(buffer).map_err(|_| Error::InvalidEncoding)
+    }
+
+    async fn read_uuid(&mut self) -> Result<Uuid, Error> {
+        let value = self.read_u128().await?;
+
+        Ok(Uuid::from_u128(value))
+    }
+
+    async fn read_bytes(&mut self) -> Result<Vec<u8>, Error> {
+        let length = self.read_varint().await?;
+
+        let mut buffer = vec![0; length];
+        self.read_exact(&mut buffer).await?;
+
+        Ok(buffer)
+    }
+}
+
+#[derive(Debug)]
+pub struct HandshakeResult {
+    pub protocol: i64,
+    pub state: State,
+}
+
+/// Performs the status protocol exchange and returns the self-reported server status.
+///
+/// This receives the [`Handshake`](HandshakePacket) and the [`StatusRequest`](StatusRequestPacket) packet and sends the
+/// [`StatusResponse`](StatusResponsePacket) from the server. This response is in JSON and will be supplied as-is. The
+/// connection is not consumed by this operation, and the protocol allows for pings to be exchanged  after the status
+/// has been returned.
+#[instrument(skip(stream))]
+pub async fn serve_handshake<S>(stream: &mut S) -> Result<HandshakeResult, Error>
+where
+    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
+{
+    // await the handshake packet and read it
+    debug!("awaiting and reading handshake packet");
+    let handshake: HandshakePacket = stream.read_packet().await?;
+    debug!(packet = debug(&handshake), "received handshake packet");
+
+    Ok(HandshakeResult {
+        protocol: handshake.protocol_version as i64,
+        state: handshake.next_state,
+    })
+}
+
+/// Performs the status protocol exchange and returns the self-reported server status.
+///
+/// This receives the [`Handshake`](HandshakePacket) and the [`StatusRequest`](StatusRequestPacket) packet and sends the
+/// [`StatusResponse`](StatusResponsePacket) from the server. This response is in JSON and will be supplied as-is. The
+/// connection is not consumed by this operation, and the protocol allows for pings to be exchanged  after the status
+/// has been returned.
+#[instrument(skip(stream))]
+pub async fn serve_status<S>(stream: &mut S, status: &ServerStatus) -> Result<(), Error>
+where
+    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
+{
+    // await the status request and read it
+    debug!("awaiting and reading status request packet");
+    let request: StatusRequestPacket = stream.read_packet().await?;
+    debug!(packet = debug(&request), "received status request packet");
+
+    // create a new status request packet and send it
+    let json_response = serde_json::to_string(&status).unwrap();
+
+    // create a new status response packet and send it
+    let request = StatusResponsePacket::new(json_response.to_owned());
+    debug!(packet = debug(&request), "sending status response packet");
+    stream.write_packet(request).await?;
+
+    Ok(())
+}
+
+/// Performs the ping protocol exchange and records the duration it took.
+///
+/// This sends the [Ping][PingPacket] and awaits the response of the [Pong][PongPacket], while recording the time it
+/// takes to get a response. From this recorded RTT (Round-Trip-Time) the latency is calculated by dividing this value
+/// by two. This is the most accurate way to measure the ping we can use.
+#[instrument(skip(stream))]
+pub async fn serve_ping<S>(stream: &mut S) -> Result<(), Error>
+where
+    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
+{
+    // await the ping packet and read it
+    debug!("awaiting and reading ping packet");
+    let ping_request: PingPacket = stream.read_packet().await?;
+    debug!(packet = debug(&ping_request), "received ping packet");
+
+    // create a new pong packet and send it
+    let pong_response = PongPacket::new(ping_request.payload);
+    debug!(packet = debug(&pong_response), "sending pong packet");
+    stream.write_packet(pong_response).await?;
+
+    Ok(())
+}
+
+#[instrument(skip(stream, keys))]
+pub async fn serve_login<S>(
+    stream: &mut S,
+    keys: &(RsaPrivateKey, RsaPublicKey),
+) -> Result<(), Error>
+where
+    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
+{
+    // await the login start packet and read it
+    debug!("awaiting and reading login start packet");
+    let login_start: LoginStartPacket = stream.read_packet().await?;
+    debug!(packet = debug(&login_start), "received login start packet");
+
+    // encode public key and generate verify token
+    let public_key = authentication::encode_public_key(&keys.1)?;
+    let verify_token = authentication::generate_token()?;
+
+    // create a new encryption request and send it
+    let encryption_request = EncryptionRequestPacket::new(public_key.clone(), verify_token, true);
+    debug!(
+        packet = debug(&encryption_request),
+        "sending encryption request packet"
+    );
+    stream.write_packet(encryption_request).await?;
+
+    // await the encryption response packet and read it
+    debug!("awaiting and reading encryption response packet");
+    let encryption_response: EncryptionResponsePacket = stream.read_packet().await?;
+    debug!(
+        packet = debug(&encryption_response),
+        "received encryption response packet"
+    );
+
+    // decrypt the shared secret and verify token
+    let shared_secret = authentication::decrypt(&keys.0, &encryption_response.shared_secret)?;
+    let decrypted_verify_token =
+        authentication::decrypt(&keys.0, &encryption_response.verify_token)?;
+
+    // verify the token is correct
+    authentication::verify_token(verify_token, &decrypted_verify_token)?;
+
+    // get the data for login success
+    let auth_response = authentication::authenticate_mojang(&login_start.name, &shared_secret, &public_key).await?;
+
+    // get stream ciphers
+    let ciphers = authentication::create_ciphers(&shared_secret)?;
+    let mut encryptor = ciphers.0;
+    let mut decryptor = ciphers.1;
+
+    // create a new login success packet and send it
+    let login_success = LoginSuccessPacket::new(
+        auth_response.id,
+        auth_response.name,
+    );
+    debug!(
+        packet = debug(&login_success),
+        "sending login success packet"
+    );
+    stream.write_encrypted_packet(&mut encryptor, login_success).await?;
+
+
+    let mut halves = tokio::io::split(stream);
+    let str = tokio_util::io::ReaderStream::new(halves.0)
+        .map(move |byte_chunk| {
+            byte_chunk.map(|mut data| {
+                let mut d = data.to_vec();
+                for chunk in d.chunks_mut(Aes128Cfb8Dec::block_size()) {
+                    let gen_arr = GenericArray::from_mut_slice(chunk);
+                    decryptor.decrypt_block_mut(gen_arr);
+                }
+
+                Bytes::from(d)
+            })
+        });
+
+    let mut reader = StreamReader::new(str);
+
+    // await the encryption response packet and read it
+    debug!("awaiting and reading encryption response packet");
+    let login_acknowledged: LoginAcknowledgedPacket = reader.read_packet().await?;
+    debug!(
+        packet = debug(&login_acknowledged),
+        "received login acknowledged packet"
+    );
+
+
+    // create a new transfer packet and send it
+    let transfer = TransferPacket::new(
+        "justchunks.net".to_string(),
+        25565,
+    );
+    debug!(
+        packet = debug(&transfer),
+        "sending transfer packet"
+    );
+    halves.1.write_encrypted_packet(&mut encryptor, transfer).await?;
+
+    Ok(())
+}
