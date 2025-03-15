@@ -110,7 +110,7 @@ trait OutboundPacket: Packet {
 /// `InboundPacket`s are packets that are read and therefore are expected to be of a specific packet ID.
 trait InboundPacket: Packet + Sized {
     /// Creates a new instance of this packet with the data from the buffer.
-    async fn new_from_buffer(buffer: Vec<u8>) -> Result<Self, Error>;
+    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error>;
 }
 
 /// This packet initiates the status request attempt and tells the server the details of the client.
@@ -136,7 +136,7 @@ impl Packet for HandshakePacket {
 }
 
 impl InboundPacket for HandshakePacket {
-    async fn new_from_buffer(buffer: Vec<u8>) -> Result<Self, Error> {
+    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error> {
         let mut reader = Cursor::new(buffer);
 
         let protocol_version = reader.read_varint().await? as isize;
@@ -167,7 +167,7 @@ impl Packet for StatusRequestPacket {
 }
 
 impl InboundPacket for StatusRequestPacket {
-    async fn new_from_buffer(_buffer: Vec<u8>) -> Result<Self, Error> {
+    async fn new_from_buffer(_buffer: &[u8]) -> Result<Self, Error> {
         Ok(Self)
     }
 }
@@ -222,7 +222,7 @@ impl Packet for PingPacket {
 }
 
 impl InboundPacket for PingPacket {
-    async fn new_from_buffer(buffer: Vec<u8>) -> Result<Self, Error> {
+    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error> {
         let mut reader = Cursor::new(buffer);
 
         let payload = reader.read_u64().await?;
@@ -277,7 +277,7 @@ impl Packet for LoginStartPacket {
 }
 
 impl InboundPacket for LoginStartPacket {
-    async fn new_from_buffer(buffer: Vec<u8>) -> Result<Self, Error> {
+    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error> {
         let mut reader = Cursor::new(buffer);
 
         let name = reader.read_string().await?;
@@ -300,7 +300,7 @@ impl Packet for EncryptionResponsePacket {
 }
 
 impl InboundPacket for EncryptionResponsePacket {
-    async fn new_from_buffer(buffer: Vec<u8>) -> Result<Self, Error> {
+    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error> {
         let mut reader = Cursor::new(buffer);
 
         let shared_secret = reader.read_bytes().await?;
@@ -323,7 +323,7 @@ impl Packet for LoginAcknowledgedPacket {
 }
 
 impl InboundPacket for LoginAcknowledgedPacket {
-    async fn new_from_buffer(_buffer: Vec<u8>) -> Result<Self, Error> {
+    async fn new_from_buffer(_buffer: &[u8]) -> Result<Self, Error> {
         Ok(Self)
     }
 }
@@ -617,7 +617,7 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
         self.read_exact(&mut buffer).await?;
 
         // convert the received buffer into our expected packet
-        T::new_from_buffer(buffer).await
+        T::new_from_buffer(&buffer).await
     }
 
     async fn read_varint(&mut self) -> Result<usize, Error> {

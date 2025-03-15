@@ -6,6 +6,7 @@ pub mod config;
 mod protocol;
 mod server;
 mod status;
+mod core;
 
 use crate::config::AppState;
 use std::sync::Arc;
@@ -38,7 +39,7 @@ pub async fn start(state: Arc<AppState>) -> Result<(), Box<dyn std::error::Error
 
     // serve the router service on the bound socket address
     server::serve(listener, keys, state).await?;
-    info!("router server stopped successfully");
+    info!("protocol server stopped successfully");
 
     // exit with success
     Ok(())
