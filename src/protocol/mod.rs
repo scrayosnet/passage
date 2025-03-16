@@ -28,7 +28,7 @@ use std::io::Cursor;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, trace};
 use uuid::Uuid;
 
 mod configuration;
@@ -519,6 +519,8 @@ where
     Ok(())
 }
 
+/// A [`CipherStream`] is used to wrap a [`AsyncRead`] and [`AsyncWrite`] such that any bytes read
+/// or written will be encrypted/decrypted using the provided block encryptor/decryptor.
 struct CipherStream<S, E, D> {
     inner: S,
     encryptor: E,
@@ -554,6 +556,7 @@ where
             let gen_arr = GenericArray::from_mut_slice(chunk);
             self_mut.encryptor.encrypt_block_mut(gen_arr);
         }
+        trace!(buf_len = buf.len(), "encrypted write bytes");
 
         // pass to inner
         Pin::new(&mut self_mut.inner).poll_write(cx, &buf)
@@ -588,16 +591,17 @@ where
 
         // pass to inner
         let cursor = buf.capacity() - buf.remaining();
-        let result = Pin::new(&mut self_mut.inner).poll_read(cx, buf);
+        let poll_result = Pin::new(&mut self_mut.inner).poll_read(cx, buf);
 
         // decrypt newly read buffer slice
-        if result.is_ready() {
+        if poll_result.is_ready() {
             for chunk in buf.filled_mut()[cursor..].chunks_mut(Aes128Cfb8Dec::block_size()) {
                 let gen_arr = GenericArray::from_mut_slice(chunk);
                 self_mut.decryptor.decrypt_block_mut(gen_arr);
             }
+            trace!(buf_len = (cursor - buf.remaining()), "decrypted read bytes");
         }
 
-        result
+        poll_result
     }
 }
