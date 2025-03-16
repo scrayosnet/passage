@@ -11,17 +11,30 @@
 //! [configuration]: https://minecraft.wiki/w/Java_Edition_protocol#Configuration
 
 use crate::authentication;
-use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, VerifyToken};
-use crate::status::ServerStatus;
+use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc};
+use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
 use aes::cipher::generic_array::GenericArray;
 use cfb8::cipher::{BlockDecryptMut, BlockEncryptMut, BlockSizeUser};
+use configuration::TransferPacket;
+use handshaking::HandshakePacket;
+use login::{
+    EncryptionRequestPacket, EncryptionResponsePacket, LoginAcknowledgedPacket, LoginStartPacket,
+    LoginSuccessPacket,
+};
 use rsa::{RsaPrivateKey, RsaPublicKey};
+use serde_json::value::RawValue;
+use status::{PingPacket, PongPacket, StatusRequestPacket, StatusResponsePacket};
 use std::io::Cursor;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tracing::{debug, instrument};
 use uuid::Uuid;
+
+mod configuration;
+mod handshaking;
+mod login;
+mod status;
 
 /// The internal error type for all errors related to the protocol communication.
 ///
@@ -56,6 +69,9 @@ pub enum Error {
     /// The JSON response of a packet is incorrectly encoded (not UTF-8).
     #[error("invalid response body (invalid encoding)")]
     InvalidEncoding,
+    /// The JSON version of a packet content could not be encoded.
+    #[error("invalid struct for JSON (encoding problem)")]
+    EncodingFail(#[from] serde_json::Error),
     #[error("could not encrypt connection: {0}")]
     CryptographyFailed(#[from] authentication::Error),
 }
@@ -110,323 +126,6 @@ trait OutboundPacket: Packet {
 trait InboundPacket: Packet + Sized {
     /// Creates a new instance of this packet with the data from the buffer.
     async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error>;
-}
-
-/// This packet initiates the status request attempt and tells the server the details of the client.
-///
-/// The data in this packet can differ from the actual data that was used but will be considered by the server when
-/// assembling the response. Therefore, this data should mirror what a normal client would send.
-#[derive(Debug)]
-struct HandshakePacket {
-    /// The pretended protocol version.
-    protocol_version: isize,
-    /// The pretended server address.
-    server_address: String,
-    /// The pretended server port.
-    server_port: u16,
-    /// The protocol state to initiate.
-    next_state: State,
-}
-
-impl Packet for HandshakePacket {
-    fn get_packet_id() -> usize {
-        0x00
-    }
-}
-
-impl InboundPacket for HandshakePacket {
-    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error> {
-        let mut reader = Cursor::new(buffer);
-
-        let protocol_version = reader.read_varint().await? as isize;
-        let server_address = reader.read_string().await?;
-        let server_port = reader.read_u16().await?;
-        let next_state = reader.read_varint().await?.try_into()?;
-
-        Ok(Self {
-            protocol_version,
-            server_address,
-            server_port,
-            next_state,
-        })
-    }
-}
-
-/// This packet will be sent after the [`HandshakePacket`] and requests the server metadata.
-///
-/// The packet can only be sent after the [`HandshakePacket`] and must be written before any status information can be
-/// read, as this is the differentiator between the status and the ping sequence.
-#[derive(Debug)]
-struct StatusRequestPacket;
-
-impl Packet for StatusRequestPacket {
-    fn get_packet_id() -> usize {
-        0x00
-    }
-}
-
-impl InboundPacket for StatusRequestPacket {
-    async fn new_from_buffer(_buffer: &[u8]) -> Result<Self, Error> {
-        Ok(Self)
-    }
-}
-
-/// This is the response for a specific [`StatusRequestPacket`] that contains all self-reported metadata.
-///
-/// This packet can be received only after a [`StatusRequestPacket`] and will not close the connection, allowing for a
-/// ping sequence to be exchanged afterward.
-#[derive(Debug)]
-struct StatusResponsePacket {
-    /// The JSON response body that contains all self-reported server metadata.
-    body: String,
-}
-
-impl StatusResponsePacket {
-    /// Creates a new [`StatusResponsePacket`] with the supplied payload.
-    const fn new(body: String) -> Self {
-        Self { body }
-    }
-}
-
-impl Packet for StatusResponsePacket {
-    fn get_packet_id() -> usize {
-        0x00
-    }
-}
-
-impl OutboundPacket for StatusResponsePacket {
-    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
-        let mut buffer = Cursor::new(Vec::<u8>::new());
-
-        buffer.write_string(&self.body).await?;
-
-        Ok(buffer.into_inner())
-    }
-}
-
-/// This is the request for a specific [`PongPacket`] that can be used to measure the server ping.
-///
-/// This packet can be sent after a connection was established or the [`StatusResponsePacket`] was received. Initiating
-/// the ping sequence will consume the connection after the [`PongPacket`] was received.
-#[derive(Debug)]
-struct PingPacket {
-    /// The arbitrary payload that will be returned from the server (to identify the corresponding request).
-    payload: u64,
-}
-
-impl Packet for PingPacket {
-    fn get_packet_id() -> usize {
-        0x01
-    }
-}
-
-impl InboundPacket for PingPacket {
-    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error> {
-        let mut reader = Cursor::new(buffer);
-
-        let payload = reader.read_u64().await?;
-
-        Ok(Self { payload })
-    }
-}
-
-/// This is the response to a specific [`PingPacket`] that can be used to measure the server ping.
-///
-/// This packet will be sent after a corresponding [`PingPacket`] and will have the same payload as the request. This
-/// also consumes the connection, ending the Server List Ping sequence.
-#[derive(Debug)]
-struct PongPacket {
-    /// The arbitrary payload that was sent from the client (to identify the corresponding response).
-    payload: u64,
-}
-
-impl PongPacket {
-    /// Creates a new [`PongPacket`] with the supplied payload.
-    const fn new(payload: u64) -> Self {
-        Self { payload }
-    }
-}
-
-impl Packet for PongPacket {
-    fn get_packet_id() -> usize {
-        0x01
-    }
-}
-
-impl OutboundPacket for PongPacket {
-    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
-        let mut buffer = Cursor::new(Vec::<u8>::new());
-
-        buffer.write_u64(self.payload).await?;
-
-        Ok(buffer.into_inner())
-    }
-}
-
-#[derive(Debug)]
-struct LoginStartPacket {
-    name: String,
-    user_id: Uuid,
-}
-
-impl Packet for LoginStartPacket {
-    fn get_packet_id() -> usize {
-        0x00
-    }
-}
-
-impl InboundPacket for LoginStartPacket {
-    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error> {
-        let mut reader = Cursor::new(buffer);
-
-        let name = reader.read_string().await?;
-        let user_id = reader.read_uuid().await?;
-
-        Ok(Self { name, user_id })
-    }
-}
-
-#[derive(Debug)]
-struct EncryptionResponsePacket {
-    shared_secret: Vec<u8>,
-    verify_token: Vec<u8>,
-}
-
-impl Packet for EncryptionResponsePacket {
-    fn get_packet_id() -> usize {
-        0x01
-    }
-}
-
-impl InboundPacket for EncryptionResponsePacket {
-    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error> {
-        let mut reader = Cursor::new(buffer);
-
-        let shared_secret = reader.read_bytes().await?;
-        let verify_token = reader.read_bytes().await?;
-
-        Ok(Self {
-            shared_secret,
-            verify_token,
-        })
-    }
-}
-
-#[derive(Debug)]
-struct LoginAcknowledgedPacket;
-
-impl Packet for LoginAcknowledgedPacket {
-    fn get_packet_id() -> usize {
-        0x03
-    }
-}
-
-impl InboundPacket for LoginAcknowledgedPacket {
-    async fn new_from_buffer(_buffer: &[u8]) -> Result<Self, Error> {
-        Ok(Self)
-    }
-}
-
-#[derive(Debug)]
-struct EncryptionRequestPacket {
-    // server id - is always empty, so we skip it
-    public_key: Vec<u8>,
-    verify_token: VerifyToken,
-    should_authenticate: bool,
-}
-
-impl EncryptionRequestPacket {
-    const fn new(
-        public_key: Vec<u8>,
-        verify_token: VerifyToken,
-        should_authenticate: bool,
-    ) -> Self {
-        Self {
-            public_key,
-            verify_token,
-            should_authenticate,
-        }
-    }
-}
-
-impl Packet for EncryptionRequestPacket {
-    fn get_packet_id() -> usize {
-        0x01
-    }
-}
-
-impl OutboundPacket for EncryptionRequestPacket {
-    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
-        let mut buffer = Cursor::new(Vec::<u8>::new());
-
-        buffer.write_string("").await?;
-        buffer.write_bytes(&self.public_key).await?;
-        buffer.write_bytes(&self.verify_token).await?;
-        buffer.write_u8(self.should_authenticate as u8).await?;
-
-        Ok(buffer.into_inner())
-    }
-}
-
-#[derive(Debug)]
-struct LoginSuccessPacket {
-    user_id: Uuid,
-    user_name: String,
-    // properties - we don't need those
-}
-
-impl LoginSuccessPacket {
-    const fn new(user_id: Uuid, user_name: String) -> Self {
-        Self { user_id, user_name }
-    }
-}
-
-impl Packet for LoginSuccessPacket {
-    fn get_packet_id() -> usize {
-        0x02
-    }
-}
-
-impl OutboundPacket for LoginSuccessPacket {
-    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
-        let mut buffer = Cursor::new(Vec::<u8>::new());
-
-        buffer.write_uuid(&self.user_id).await?;
-        buffer.write_string(&self.user_name).await?;
-        // no properties in array
-        buffer.write_varint(0).await?;
-
-        Ok(buffer.into_inner())
-    }
-}
-
-#[derive(Debug)]
-struct TransferPacket {
-    host: String,
-    port: usize,
-}
-
-impl TransferPacket {
-    const fn new(host: String, port: usize) -> Self {
-        Self { host, port }
-    }
-}
-
-impl Packet for TransferPacket {
-    fn get_packet_id() -> usize {
-        0x0B
-    }
-}
-
-impl OutboundPacket for TransferPacket {
-    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
-        let mut buffer = Cursor::new(Vec::<u8>::new());
-
-        buffer.write_string(&self.host).await?;
-        buffer.write_varint(self.port).await?;
-
-        Ok(buffer.into_inner())
-    }
 }
 
 /// `AsyncWritePacket` allows writing a specific [`OutboundPacket`] to an [`AsyncWrite`].
@@ -630,6 +329,45 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
     }
 }
 
+#[instrument(skip(stream, keys))]
+pub async fn handle_client<S>(
+    stream: &mut S,
+    keys: &(RsaPrivateKey, RsaPublicKey),
+) -> Result<(), Error>
+where
+    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
+{
+    let shake = serve_handshake(stream).await?;
+
+    match shake.state {
+        State::Status => {
+            let status = ServerStatus {
+                version: ServerVersion {
+                    name: "JustChunks 2025".to_owned(),
+                    protocol: shake.protocol,
+                },
+                players: Some(ServerPlayers {
+                    online: 5,
+                    max: 10,
+                    sample: None,
+                }),
+                description: Some(RawValue::from_string(
+                    r#"{"text":"PASSAGE IS RUNNING","color":"gold"}"#.to_string(),
+                )?),
+                favicon: None,
+                enforces_secure_chat: Some(true),
+            };
+            serve_status(stream, &status).await?;
+            serve_ping(stream).await?;
+        }
+        State::Login | State::Transfer => {
+            serve_login(stream, keys).await?;
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct HandshakeResult {
     pub protocol: i64,
@@ -640,7 +378,7 @@ pub struct HandshakeResult {
 ///
 /// This receives the [`Handshake`](HandshakePacket) and the [`StatusRequest`](StatusRequestPacket) packet and sends the
 /// [`StatusResponse`](StatusResponsePacket) from the server. This response is in JSON and will be supplied as-is. The
-/// connection is not consumed by this operation, and the protocol allows for pings to be exchanged  after the status
+/// connection is not consumed by this operation, and the protocol allows for pings to be exchanged after the status
 /// has been returned.
 #[instrument(skip(stream))]
 pub async fn serve_handshake<S>(stream: &mut S) -> Result<HandshakeResult, Error>
@@ -662,7 +400,7 @@ where
 ///
 /// This receives the [`Handshake`](HandshakePacket) and the [`StatusRequest`](StatusRequestPacket) packet and sends the
 /// [`StatusResponse`](StatusResponsePacket) from the server. This response is in JSON and will be supplied as-is. The
-/// connection is not consumed by this operation, and the protocol allows for pings to be exchanged  after the status
+/// connection is not consumed by this operation, and the protocol allows for pings to be exchanged after the status
 /// has been returned.
 #[instrument(skip(stream))]
 pub async fn serve_status<S>(stream: &mut S, status: &ServerStatus) -> Result<(), Error>
@@ -675,10 +413,10 @@ where
     debug!(packet = debug(&request), "received status request packet");
 
     // create a new status request packet and send it
-    let json_response = serde_json::to_string(&status).unwrap();
+    let json_response = serde_json::to_string(&status)?;
 
     // create a new status response packet and send it
-    let request = StatusResponsePacket::new(json_response.to_owned());
+    let request = StatusResponsePacket::new(json_response);
     debug!(packet = debug(&request), "sending status response packet");
     stream.write_packet(request).await?;
 

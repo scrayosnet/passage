@@ -1,4 +1,4 @@
-FROM rust:alpine@sha256:9ab8f4eab808b1383c7e60a15fbf291e949fec85c3f98c34fb145b16c4ced0a1 AS builder
+FROM rust:alpine@sha256:bea885d2711087e67a9f7a7cd1a164976f4c35389478512af170730014d2452a AS builder
 
 # specify our build directory
 WORKDIR /usr/src/passage

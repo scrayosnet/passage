@@ -1,13 +1,11 @@
-use crate::protocol::{State, serve_handshake, serve_login, serve_ping, serve_status};
-use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
+use crate::protocol::handle_client;
 use rsa::RsaPrivateKey;
 use rsa::RsaPublicKey;
-use serde_json::value::RawValue;
 use std::any::Any;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 pub async fn serve<S>(
     listener: TcpListener,
@@ -17,39 +15,25 @@ pub async fn serve<S>(
 where
     S: Any,
 {
+    let keys = Arc::new(keys);
+
     loop {
+        // accept the next incoming connection
         let (mut socket, addr) = listener.accept().await?;
-        let shake = serve_handshake(&mut socket).await?;
+        let keys = Arc::clone(&keys);
 
-        match shake.state {
-            State::Status => {
-                let status = ServerStatus {
-                    version: ServerVersion {
-                        name: "JustChunks 2025".to_owned(),
-                        protocol: shake.protocol,
-                    },
-                    players: Some(ServerPlayers {
-                        online: 5,
-                        max: 10,
-                        sample: None,
-                    }),
-                    description: Some(RawValue::from_string(
-                        r#"{"text":"PASSAGE IS RUNNING","color":"gold"}"#.to_string(),
-                    )?),
-                    favicon: None,
-                    enforces_secure_chat: Some(true),
-                };
-                serve_status(&mut socket, &status).await?;
-                serve_ping(&mut socket).await?;
+        tokio::spawn(async move {
+            // handle the client connection
+            if let Err(e) = handle_client(&mut socket, &keys).await {
+                info!(addr = &addr.to_string(), "failure communicating with client");
             }
-            State::Login => {
-                serve_login(&mut socket, &keys).await?;
-            }
-            _ => {}
-        }
 
-        // flush connection and shutdown
-        socket.shutdown().await?;
-        debug!("connection closed: {}", addr);
+            // flush connection and shutdown
+            if let Err(e) = socket.shutdown().await {
+                debug!(addr = &addr.to_string(), "failed to close client connection");
+            }
+
+            debug!(addr = &addr.to_string(), "closed connection with client");
+        });
     }
 }
