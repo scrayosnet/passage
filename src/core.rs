@@ -46,12 +46,19 @@ impl SimpleStatusSupplier {
     }
 
     fn from_status(status: impl Into<ServerStatus>) -> Self {
-        Self { status: Some(status.into()) }
+        Self {
+            status: Some(status.into()),
+        }
     }
 }
 
 impl StatusSupplier for SimpleStatusSupplier {
-    async fn get_status(&self, _client_addr: SocketAddr, _server_addr: SocketAddr, _protocol: Protocol) -> Result<Option<ServerStatus>, Error> {
+    async fn get_status(
+        &self,
+        _client_addr: SocketAddr,
+        _server_addr: SocketAddr,
+        _protocol: Protocol,
+    ) -> Result<Option<ServerStatus>, Error> {
         Ok(self.status.clone())
     }
 }
@@ -66,7 +73,9 @@ impl SimpleTargetDiscoverer {
     }
 
     fn from_targets(targets: impl Into<Vec<Target>>) -> Self {
-        Self { targets: targets.into() }
+        Self {
+            targets: targets.into(),
+        }
     }
 }
 
@@ -86,12 +95,22 @@ impl SimpleTargetSelector {
     }
 
     fn from_target(target: impl Into<SocketAddr>) -> Self {
-        Self { target: Some(target.into()) }
+        Self {
+            target: Some(target.into()),
+        }
     }
 }
 
 impl TargetSelector for SimpleTargetSelector {
-    async fn select(&self, _client_addr: SocketAddr, _server_addr: SocketAddr, _protocol: Protocol, _username: &str, _user_id: &Uuid, _targets: &[Target]) -> Result<Option<SocketAddr>, Error> {
+    async fn select(
+        &self,
+        _client_addr: SocketAddr,
+        _server_addr: SocketAddr,
+        _protocol: Protocol,
+        _username: &str,
+        _user_id: &Uuid,
+        _targets: &[Target],
+    ) -> Result<Option<SocketAddr>, Error> {
         Ok(self.target)
     }
 }
