@@ -11,7 +11,7 @@
 //! [configuration]: https://minecraft.wiki/w/Java_Edition_protocol#Configuration
 
 use crate::authentication;
-use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc};
+use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
 use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
 use aes::cipher::generic_array::GenericArray;
 use cfb8::cipher::{BlockDecryptMut, BlockEncryptMut, BlockSizeUser};
@@ -519,89 +519,3 @@ where
     Ok(())
 }
 
-/// A [`CipherStream`] is used to wrap a [`AsyncRead`] and [`AsyncWrite`] such that any bytes read
-/// or written will be encrypted/decrypted using the provided block encryptor/decryptor.
-struct CipherStream<S, E, D> {
-    inner: S,
-    encryptor: E,
-    decryptor: D,
-}
-
-impl<S, E, D> CipherStream<S, E, D> {
-    fn new(inner: S, encryptor: E, decryptor: D) -> Self {
-        Self {
-            inner,
-            encryptor,
-            decryptor,
-        }
-    }
-}
-
-impl<S, E, D> AsyncWrite for CipherStream<S, E, D>
-where
-    S: AsyncWrite + Unpin,
-    E: BlockEncryptMut + Unpin,
-    D: BlockDecryptMut + Unpin,
-{
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<Result<usize, std::io::Error>> {
-        let self_mut = self.get_mut();
-
-        // encrypt buffer
-        let mut buf = buf.to_vec();
-        for chunk in buf.chunks_mut(Aes128Cfb8Enc::block_size()) {
-            let gen_arr = GenericArray::from_mut_slice(chunk);
-            self_mut.encryptor.encrypt_block_mut(gen_arr);
-        }
-        trace!(buf_len = buf.len(), "encrypted write bytes");
-
-        // pass to inner
-        Pin::new(&mut self_mut.inner).poll_write(cx, &buf)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
-        // pass to inner
-        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
-    }
-
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
-        // pass to inner
-        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
-    }
-}
-
-impl<S, E, D> AsyncRead for CipherStream<S, E, D>
-where
-    S: AsyncRead + Unpin,
-    E: BlockEncryptMut + Unpin,
-    D: BlockDecryptMut + Unpin,
-{
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        let self_mut = self.get_mut();
-
-        // pass to inner
-        let cursor = buf.capacity() - buf.remaining();
-        let poll_result = Pin::new(&mut self_mut.inner).poll_read(cx, buf);
-
-        // decrypt newly read buffer slice
-        if poll_result.is_ready() {
-            for chunk in buf.filled_mut()[cursor..].chunks_mut(Aes128Cfb8Dec::block_size()) {
-                let gen_arr = GenericArray::from_mut_slice(chunk);
-                self_mut.decryptor.decrypt_block_mut(gen_arr);
-            }
-            trace!(buf_len = (cursor - buf.remaining()), "decrypted read bytes");
-        }
-
-        poll_result
-    }
-}

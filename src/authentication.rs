@@ -1,5 +1,9 @@
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use aes::cipher::{BlockDecryptMut, BlockEncryptMut};
+use aes::cipher::generic_array::GenericArray;
 use crate::authentication::Error::InvalidVerifyToken;
-use cfb8::cipher::KeyIvInit;
+use cfb8::cipher::{BlockSizeUser, KeyIvInit};
 use num_bigint::BigInt;
 use rand::RngCore;
 use rand::rngs::OsRng;
@@ -7,6 +11,8 @@ use rsa::pkcs8::EncodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tracing::trace;
 use uuid::Uuid;
 
 /// The internal error type for all errors related to the authentication and cryptography.
@@ -131,4 +137,91 @@ pub fn create_ciphers(shared_secret: &[u8]) -> Result<(Aes128Cfb8Enc, Aes128Cfb8
     let decoder = Aes128Cfb8Dec::new_from_slices(shared_secret, shared_secret)?;
 
     Ok((encoder, decoder))
+}
+
+/// A [`CipherStream`] is used to wrap a [`AsyncRead`] and [`AsyncWrite`] such that any bytes read
+/// or written will be encrypted/decrypted using the provided block encryptor/decryptor.
+pub struct CipherStream<S, E, D> {
+    inner: S,
+    encryptor: E,
+    decryptor: D,
+}
+
+impl<S, E, D> CipherStream<S, E, D> {
+    pub fn new(inner: S, encryptor: E, decryptor: D) -> Self {
+        Self {
+            inner,
+            encryptor,
+            decryptor,
+        }
+    }
+}
+
+impl<S, E, D> AsyncWrite for CipherStream<S, E, D>
+where
+    S: AsyncWrite + Unpin,
+    E: BlockEncryptMut + Unpin,
+    D: BlockDecryptMut + Unpin,
+{
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        let self_mut = self.get_mut();
+
+        // encrypt buffer
+        let mut buf = buf.to_vec();
+        for chunk in buf.chunks_mut(Aes128Cfb8Enc::block_size()) {
+            let gen_arr = GenericArray::from_mut_slice(chunk);
+            self_mut.encryptor.encrypt_block_mut(gen_arr);
+        }
+        trace!(buf_len = buf.len(), "encrypted write bytes");
+
+        // pass to inner
+        Pin::new(&mut self_mut.inner).poll_write(cx, &buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+        // pass to inner
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        // pass to inner
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
+}
+
+impl<S, E, D> AsyncRead for CipherStream<S, E, D>
+where
+    S: AsyncRead + Unpin,
+    E: BlockEncryptMut + Unpin,
+    D: BlockDecryptMut + Unpin,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let self_mut = self.get_mut();
+
+        // pass to inner
+        let cursor = buf.capacity() - buf.remaining();
+        let poll_result = Pin::new(&mut self_mut.inner).poll_read(cx, buf);
+
+        // decrypt newly read buffer slice
+        if poll_result.is_ready() {
+            for chunk in buf.filled_mut()[cursor..].chunks_mut(Aes128Cfb8Dec::block_size()) {
+                let gen_arr = GenericArray::from_mut_slice(chunk);
+                self_mut.decryptor.decrypt_block_mut(gen_arr);
+            }
+            trace!(buf_len = (cursor - buf.remaining()), "decrypted read bytes");
+        }
+
+        poll_result
+    }
 }
