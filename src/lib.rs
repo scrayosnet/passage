@@ -3,10 +3,10 @@
 
 pub mod authentication;
 pub mod config;
+mod core;
 mod protocol;
 mod server;
 mod status;
-mod core;
 
 use crate::config::AppState;
 use std::sync::Arc;

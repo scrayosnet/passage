@@ -1,11 +1,13 @@
-use crate::protocol::{serve_handshake, serve_login, serve_ping, serve_status, State};
+use crate::protocol::{State, serve_handshake, serve_login, serve_ping, serve_status};
 use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
 use rsa::RsaPrivateKey;
 use rsa::RsaPublicKey;
 use serde_json::value::RawValue;
 use std::any::Any;
 use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+use tracing::debug;
 
 pub async fn serve<S>(
     listener: TcpListener,
@@ -45,5 +47,9 @@ where
             }
             _ => {}
         }
+
+        // flush connection and shutdown
+        socket.shutdown().await?;
+        debug!("connection closed: {}", addr);
     }
 }

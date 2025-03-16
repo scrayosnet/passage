@@ -17,10 +17,9 @@ use aes::cipher::generic_array::GenericArray;
 use cfb8::cipher::{BlockDecryptMut, BlockEncryptMut, BlockSizeUser};
 use rsa::{RsaPrivateKey, RsaPublicKey};
 use std::io::Cursor;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio_stream::StreamExt;
-use tokio_util::bytes::Bytes;
-use tokio_util::io::StreamReader;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tracing::{debug, instrument};
 use uuid::Uuid;
 
@@ -445,16 +444,6 @@ trait AsyncWritePacket {
         packet: T,
     ) -> Result<(), Error>;
 
-    /// Writes the supplied [`OutboundPacket`] encrypted onto this object as described in the official
-    /// [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Packet_format
-    async fn write_encrypted_packet<T: OutboundPacket + Send + Sync>(
-        &mut self,
-        cipher: &mut Aes128Cfb8Enc,
-        packet: T,
-    ) -> Result<(), Error>;
-
     /// Writes a `VarInt` onto this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
@@ -483,36 +472,15 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
     ) -> Result<(), Error> {
         // write the packet into a buffer and box it as a slice (sized)
         let packet_buffer = packet.to_buffer().await?;
-        let raw_packet = packet_buffer.into_boxed_slice();
 
         // create a new buffer and write the packet onto it (to get the size)
         let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
         buffer.write_varint(T::get_packet_id()).await?;
-        buffer.write_all(&raw_packet).await?;
+        buffer.write_all(&packet_buffer).await?;
 
         // write the length of the content (length frame encoder) and then the packet
         let inner = buffer.into_inner();
         self.write_varint(inner.len()).await?;
-        self.write_all(&inner).await?;
-
-        Ok(())
-    }
-
-    async fn write_encrypted_packet<T: OutboundPacket + Send + Sync>(
-        &mut self,
-        cipher: &mut Aes128Cfb8Enc,
-        packet: T,
-    ) -> Result<(), Error> {
-        let mut enc_buffer = Cursor::new(Vec::new());
-        enc_buffer.write_packet(packet).await?;
-
-        let mut inner = enc_buffer.into_inner();
-
-        for chunk in inner.chunks_mut(Aes128Cfb8Enc::block_size()) {
-            let gen_arr = GenericArray::from_mut_slice(chunk);
-            cipher.encrypt_block_mut(gen_arr);
-        }
-
         self.write_all(&inner).await?;
 
         Ok(())
@@ -785,10 +753,9 @@ where
     let auth_response =
         authentication::authenticate_mojang(&login_start.name, &shared_secret, &public_key).await?;
 
-    // get stream ciphers
-    let ciphers = authentication::create_ciphers(&shared_secret)?;
-    let mut encryptor = ciphers.0;
-    let mut decryptor = ciphers.1;
+    // get stream ciphers and wrap stream with cipher
+    let (encryptor, decryptor) = authentication::create_ciphers(&shared_secret)?;
+    let mut stream = CipherStream::new(stream, encryptor, decryptor);
 
     // create a new login success packet and send it
     let login_success = LoginSuccessPacket::new(auth_response.id, auth_response.name);
@@ -796,40 +763,103 @@ where
         packet = debug(&login_success),
         "sending login success packet"
     );
-    stream
-        .write_encrypted_packet(&mut encryptor, login_success)
-        .await?;
-
-    let mut halves = tokio::io::split(stream);
-    let str = tokio_util::io::ReaderStream::new(halves.0).map(move |byte_chunk| {
-        byte_chunk.map(|data| {
-            let mut d = data.to_vec();
-            for chunk in d.chunks_mut(Aes128Cfb8Dec::block_size()) {
-                let gen_arr = GenericArray::from_mut_slice(chunk);
-                decryptor.decrypt_block_mut(gen_arr);
-            }
-
-            Bytes::from(d)
-        })
-    });
-
-    let mut reader = StreamReader::new(str);
+    stream.write_packet(login_success).await?;
 
     // await the login acknowledged packet and read it
     debug!("awaiting and reading login acknowledged packet");
-    let login_acknowledged: LoginAcknowledgedPacket = reader.read_packet().await?;
+    let login_acknowledged: LoginAcknowledgedPacket = stream.read_packet().await?;
     debug!(
         packet = debug(&login_acknowledged),
         "received login acknowledged packet"
     );
 
     // create a new transfer packet and send it
-    let transfer = TransferPacket::new("justchunks.net".to_string(), 25565);
+    let transfer = TransferPacket::new("wynncraft.com".to_string(), 25565);
     debug!(packet = debug(&transfer), "sending transfer packet");
-    halves
-        .1
-        .write_encrypted_packet(&mut encryptor, transfer)
-        .await?;
+    stream.write_packet(transfer).await?;
 
     Ok(())
+}
+
+struct CipherStream<S, E, D> {
+    inner: S,
+    encryptor: E,
+    decryptor: D,
+}
+
+impl<S, E, D> CipherStream<S, E, D> {
+    fn new(inner: S, encryptor: E, decryptor: D) -> Self {
+        Self {
+            inner,
+            encryptor,
+            decryptor,
+        }
+    }
+}
+
+impl<S, E, D> AsyncWrite for CipherStream<S, E, D>
+where
+    S: AsyncWrite + Unpin,
+    E: BlockEncryptMut + Unpin,
+    D: BlockDecryptMut + Unpin,
+{
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        let self_mut = self.get_mut();
+
+        // encrypt buffer
+        let mut buf = buf.to_vec();
+        for chunk in buf.chunks_mut(Aes128Cfb8Enc::block_size()) {
+            let gen_arr = GenericArray::from_mut_slice(chunk);
+            self_mut.encryptor.encrypt_block_mut(gen_arr);
+        }
+
+        // pass to inner
+        Pin::new(&mut self_mut.inner).poll_write(cx, &buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+        // pass to inner
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        // pass to inner
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
+}
+
+impl<S, E, D> AsyncRead for CipherStream<S, E, D>
+where
+    S: AsyncRead + Unpin,
+    E: BlockEncryptMut + Unpin,
+    D: BlockDecryptMut + Unpin,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let self_mut = self.get_mut();
+
+        // pass to inner
+        let cursor = buf.capacity() - buf.remaining();
+        let result = Pin::new(&mut self_mut.inner).poll_read(cx, buf);
+
+        // decrypt newly read buffer slice
+        if result.is_ready() {
+            for chunk in buf.filled_mut()[cursor..].chunks_mut(Aes128Cfb8Dec::block_size()) {
+                let gen_arr = GenericArray::from_mut_slice(chunk);
+                self_mut.decryptor.decrypt_block_mut(gen_arr);
+            }
+        }
+
+        result
+    }
 }

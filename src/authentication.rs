@@ -1,8 +1,8 @@
 use crate::authentication::Error::InvalidVerifyToken;
 use cfb8::cipher::KeyIvInit;
 use num_bigint::BigInt;
-use rand::rngs::OsRng;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use rsa::pkcs8::EncodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use serde::{Deserialize, Serialize};
