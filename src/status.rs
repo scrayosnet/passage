@@ -1,17 +1,19 @@
 use serde::Serialize;
 use serde_json::value::RawValue;
 
+pub type Protocol = i64;
+
 /// The information on the protocol version of a server.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct ServerVersion {
     /// The textual protocol version to display this version visually.
     pub name: String,
     /// The numeric protocol version (for compatibility checking).
-    pub protocol: i64,
+    pub protocol: Protocol,
 }
 
 /// The information on a single, sampled player entry.
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 pub struct ServerPlayer {
     /// The visual name to display this player.
     pub name: String,
@@ -20,7 +22,7 @@ pub struct ServerPlayer {
 }
 
 /// The information on the current, maximum and sampled players.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct ServerPlayers {
     /// The current number of players that are online at this moment.
     pub online: u32,
@@ -31,7 +33,7 @@ pub struct ServerPlayers {
 }
 
 /// The self-reported status of a pinged server with all public metadata.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct ServerStatus {
     /// The version and protocol information of the server.
     pub version: ServerVersion,
