@@ -8,17 +8,14 @@ COPY . .
 
 # install dev dependencies and perform build process
 RUN set -eux \
- && apk add --no-cache musl-dev \
+ && apk add --no-cache libressl-dev musl-dev protobuf-dev protoc \
  && cargo build --release
 
 
 FROM scratch
 
-# declare our metrics port
-EXPOSE 8080
-
-# declare our minecraft port
-EXPOSE 25565
+# declare our minecraft and metrics ports
+EXPOSE 25565, 8080
 
 # copy the raw binary into the new image
 COPY --from=builder "/usr/src/passage/target/release/passage" "/passage"
