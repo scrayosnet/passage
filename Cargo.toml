@@ -28,6 +28,6 @@ rsa = "0.9.8"
 rand = "0.8"
 num-bigint = "0.4.6"
 sha1 = { version = "0.10.6", features = [] }
-reqwest = { version = "0.12.14", features = ["json"] }
+reqwest = { version = "0.12.14", features = ["json", "rustls-tls"] }
 cfb8 = "0.8.1"
 aes = "0.8.4"
