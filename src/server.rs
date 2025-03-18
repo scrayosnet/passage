@@ -5,7 +5,7 @@ use std::any::Any;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 pub async fn serve<S>(
     listener: TcpListener,
@@ -26,20 +26,22 @@ where
             // handle the client connection
             if let Err(e) = handle_client(&mut socket, &keys).await {
                 info!(
+                    cause = e.to_string(),
                     addr = &addr.to_string(),
-                    "failure communicating with client"
+                    "failure communicating with a client"
                 );
             }
 
             // flush connection and shutdown
             if let Err(e) = socket.shutdown().await {
-                debug!(
+                info!(
+                    cause = e.to_string(),
                     addr = &addr.to_string(),
-                    "failed to close client connection"
+                    "failed to close a client connection"
                 );
             }
 
-            debug!(addr = &addr.to_string(), "closed connection with client");
+            debug!(addr = &addr.to_string(), "closed connection with a client");
         });
     }
 }

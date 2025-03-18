@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct LoginStartPacket {
-    pub name: String,
+    pub user_name: String,
     pub user_id: Uuid,
 }
 
@@ -25,7 +25,10 @@ impl InboundPacket for LoginStartPacket {
         let name = reader.read_string().await?;
         let user_id = reader.read_uuid().await?;
 
-        Ok(Self { name, user_id })
+        Ok(Self {
+            user_name: name,
+            user_id,
+        })
     }
 }
 
@@ -140,5 +143,137 @@ impl OutboundPacket for LoginSuccessPacket {
         buffer.write_varint(0).await?;
 
         Ok(buffer.into_inner())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::RngCore;
+    use tokio::io::AsyncReadExt;
+    use uuid::uuid;
+
+    #[tokio::test]
+    async fn packet_ids_valid() {
+        assert_eq!(LoginStartPacket::get_packet_id(), 0x00);
+        assert_eq!(EncryptionResponsePacket::get_packet_id(), 0x01);
+        assert_eq!(LoginAcknowledgedPacket::get_packet_id(), 0x03);
+        assert_eq!(EncryptionRequestPacket::get_packet_id(), 0x01);
+        assert_eq!(LoginSuccessPacket::get_packet_id(), 0x02);
+    }
+
+    #[tokio::test]
+    async fn decode_login_start() {
+        let user_name = "Scrayos";
+        let user_id = uuid!("9c09eef4-f68d-4387-9751-72bbff53d5a0");
+
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+        buffer.write_string(user_name).await.unwrap();
+        buffer.write_uuid(&user_id).await.unwrap();
+
+        let packet = LoginStartPacket::new_from_buffer(&buffer.get_ref().clone())
+            .await
+            .unwrap();
+        assert_eq!(packet.user_name, user_name);
+        assert_eq!(packet.user_id, user_id);
+
+        assert_eq!(
+            buffer.position() as usize,
+            buffer.get_ref().len(),
+            "There are remaining bytes in the buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn decode_encryption_response() {
+        let mut rng = rand::thread_rng();
+        let mut shared_secret = [0u8; 32];
+        rng.try_fill_bytes(&mut shared_secret).unwrap();
+        let mut verify_token = [0u8; 32];
+        rng.try_fill_bytes(&mut verify_token).unwrap();
+
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+        buffer.write_bytes(&shared_secret).await.unwrap();
+        buffer.write_bytes(&verify_token).await.unwrap();
+
+        let packet = EncryptionResponsePacket::new_from_buffer(&buffer.get_ref().clone())
+            .await
+            .unwrap();
+        assert_eq!(packet.shared_secret, shared_secret);
+        assert_eq!(packet.verify_token, verify_token);
+
+        assert_eq!(
+            buffer.position() as usize,
+            buffer.get_ref().len(),
+            "There are remaining bytes in the buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn decode_login_acknowledged() {
+        let buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+
+        let _packet = LoginAcknowledgedPacket::new_from_buffer(&buffer.get_ref().clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            buffer.position() as usize,
+            buffer.get_ref().len(),
+            "There are remaining bytes in the buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn encode_encryption_request() {
+        let mut rng = rand::thread_rng();
+        let mut public_key_write = [0u8; 32];
+        rng.try_fill_bytes(&mut public_key_write).unwrap();
+        let mut verify_token_write = [0u8; 32];
+        rng.try_fill_bytes(&mut verify_token_write).unwrap();
+
+        // write the packet into a buffer and box it as a slice (sized)
+        let packet =
+            EncryptionRequestPacket::new(public_key_write.to_vec(), verify_token_write, true);
+        let packet_buffer = packet.to_buffer().await.unwrap();
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer);
+
+        let server_id = buffer.read_string().await.unwrap();
+        let public_key = buffer.read_bytes().await.unwrap();
+        let verify_token = buffer.read_bytes().await.unwrap();
+        let should_authenticate = buffer.read_u8().await.unwrap();
+        assert_eq!(server_id, "");
+        assert_eq!(public_key, packet.public_key);
+        assert_eq!(verify_token, packet.verify_token);
+        assert_eq!(should_authenticate != 0, packet.should_authenticate);
+
+        assert_eq!(
+            buffer.position() as usize,
+            buffer.get_ref().len(),
+            "There are remaining bytes in the buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn encode_login_success() {
+        // write the packet into a buffer and box it as a slice (sized)
+        let packet = LoginSuccessPacket::new(
+            uuid!("9c09eef4-f68d-4387-9751-72bbff53d5a0"),
+            "Scrayos".to_string(),
+        );
+        let packet_buffer = packet.to_buffer().await.unwrap();
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer);
+
+        let user_id = buffer.read_uuid().await.unwrap();
+        let user_name = buffer.read_string().await.unwrap();
+        let property_count = buffer.read_varint().await.unwrap();
+        assert_eq!(user_id, packet.user_id);
+        assert_eq!(user_name, packet.user_name);
+        assert_eq!(property_count, 0);
+
+        assert_eq!(
+            buffer.position() as usize,
+            buffer.get_ref().len(),
+            "There are remaining bytes in the buffer"
+        );
     }
 }

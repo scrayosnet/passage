@@ -9,9 +9,19 @@
 passage is a Minecraft network [transfer][transfer-packet] router to send connecting players to their corresponding
 servers and act as an entrypoint to the network. While traditional Minecraft networks relied on proxies like
 [BungeeCord][bungeecord-docs], [Waterfall][waterfall-docs] or [Velocity][velocity-docs], passage is only an entrypoint
-and initial router and drops the connection to the player right after the routing.
+and initial router and drops the connection to the player right after the routing, improving performance and reliability
+in the process.
+
+This is possible through the [transfer packet][transfer-packet] of the official Minecraft: Java Edition
+[protocol]. passage validates connecting players, handles authentication, resource pack installation and status pings
+and then redirects the players to any dynamic backend server. Since the [transfer packet][transfer-packet] was only
+added in Minecraft [1.20.5][minecraft-1-20-5], passage can only handle Minecraft clients starting from this version.
 
 ## Motivation
+
+Despite the universal success and reliability of conventional proxies like [Velocity][velocity-docs],
+[Waterfall][waterfall-docs] and [BungeeCord][bungeecord-docs], the general concept of a proxy that transcribes all
+packages brings a lot of problems with it.
 
 * fast
 * reliable
@@ -19,13 +29,20 @@ and initial router and drops the connection to the player right after the routin
 * improved througput
 * service discovery (kubernetes)
 * shielding (ddos, etc) -> backend servers are more anonymous
-*
+* supports Mojang Chat Signing
 
 pending
 
 ## Feature Highlights
 
-* pending
+* fast and reliable
+* stay online (ha)
+* unlimited scalability
+* partial ddos protection
+* joining with everything prepared
+* performance (rust + no packet rewrite)
+* supports Mojang Chat Signing
+* Stateless
 
 ## Getting Started
 
@@ -66,7 +83,9 @@ new contributions!
 This project is developed and distributed under the MIT License. See [this explanation][mit-license-doc] for a rundown
 on what that means.
 
-[ping-protocol-docs]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Server_List_Ping
+[protocol-docs]: https://minecraft.wiki/w/Java_Edition_protocol
+
+[minecraft-1-20-5]: http://minecraft.wiki/w/1.20.5
 
 [rust-docs]: https://www.rust-lang.org/
 

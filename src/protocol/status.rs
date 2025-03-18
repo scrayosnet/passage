@@ -2,10 +2,10 @@ use crate::protocol::{AsyncWritePacket, Error, InboundPacket, OutboundPacket, Pa
 use std::io::Cursor;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-/// This packet will be sent after the [`HandshakePacket`] and requests the server metadata.
+/// This packet requests the server metadata for display in the multiplayer menu.
 ///
-/// The packet can only be sent after the [`HandshakePacket`] and must be written before any status information can be
-/// read, as this is the differentiator between the status and the ping sequence.
+/// The status can be hidden by closing the connection instead. After the status was exchanged, a ping sequence may
+/// be performed afterward.
 #[derive(Debug)]
 pub struct StatusRequestPacket;
 
@@ -110,5 +110,86 @@ impl OutboundPacket for PongPacket {
         buffer.write_u64(self.payload).await?;
 
         Ok(buffer.into_inner())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::AsyncReadPacket;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn packet_ids_valid() {
+        assert_eq!(StatusRequestPacket::get_packet_id(), 0x00);
+        assert_eq!(PingPacket::get_packet_id(), 0x01);
+        assert_eq!(StatusResponsePacket::get_packet_id(), 0x00);
+        assert_eq!(PongPacket::get_packet_id(), 0x01);
+    }
+
+    #[tokio::test]
+    async fn decode_status_request() {
+        let buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+
+        let _packet = StatusRequestPacket::new_from_buffer(&buffer.get_ref().clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            buffer.position() as usize,
+            buffer.get_ref().len(),
+            "There are remaining bytes in the buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn decode_ping() {
+        let payload = 11u64;
+
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+        buffer.write_u64(payload).await.unwrap();
+        let packet = PingPacket::new_from_buffer(&buffer.get_ref().clone())
+            .await
+            .unwrap();
+        assert_eq!(packet.payload, payload);
+
+        assert_eq!(
+            buffer.position() as usize,
+            buffer.get_ref().len(),
+            "There are remaining bytes in the buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn encode_status_response() {
+        // write the packet into a buffer and box it as a slice (sized)
+        let packet = StatusResponsePacket::new("{\"some\": \"values\"}".to_string());
+        let packet_buffer = packet.to_buffer().await.unwrap();
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer);
+
+        let body = buffer.read_string().await.unwrap();
+        assert_eq!(body, packet.body);
+
+        assert_eq!(
+            buffer.position() as usize,
+            buffer.get_ref().len(),
+            "There are remaining bytes in the buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn encode_pong() {
+        // write the packet into a buffer and box it as a slice (sized)
+        let packet = PongPacket::new(17);
+        let packet_buffer = packet.to_buffer().await.unwrap();
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer);
+
+        let payload = buffer.read_u64().await.unwrap();
+        assert_eq!(payload, packet.payload);
+
+        assert_eq!(
+            buffer.position() as usize,
+            buffer.get_ref().len(),
+            "There are remaining bytes in the buffer"
+        );
     }
 }

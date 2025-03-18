@@ -11,10 +11,8 @@
 //! [configuration]: https://minecraft.wiki/w/Java_Edition_protocol#Configuration
 
 use crate::authentication;
-use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
+use crate::authentication::CipherStream;
 use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
-use aes::cipher::generic_array::GenericArray;
-use cfb8::cipher::{BlockDecryptMut, BlockEncryptMut, BlockSizeUser};
 use configuration::TransferPacket;
 use handshaking::HandshakePacket;
 use login::{
@@ -25,10 +23,8 @@ use rsa::{RsaPrivateKey, RsaPublicKey};
 use serde_json::value::RawValue;
 use status::{PingPacket, PongPacket, StatusRequestPacket, StatusResponsePacket};
 use std::io::Cursor;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
-use tracing::{debug, instrument, trace};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tracing::{debug, instrument};
 use uuid::Uuid;
 
 mod configuration;
@@ -77,7 +73,7 @@ pub enum Error {
 }
 
 /// State is the desired state that the connection should be in after the initial handshake.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum State {
     /// Query the server information without connecting.
     Status,
@@ -489,7 +485,8 @@ where
 
     // get the data for login success
     let auth_response =
-        authentication::authenticate_mojang(&login_start.name, &shared_secret, &public_key).await?;
+        authentication::authenticate_mojang(&login_start.user_name, &shared_secret, &public_key)
+            .await?;
 
     // get stream ciphers and wrap stream with cipher
     let (encryptor, decryptor) = authentication::create_ciphers(&shared_secret)?;
