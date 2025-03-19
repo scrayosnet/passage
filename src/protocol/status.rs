@@ -1,6 +1,5 @@
 use crate::protocol::{AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet};
-use std::io::Cursor;
-use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// This packet requests the server metadata for display in the multiplayer menu.
 ///
@@ -16,7 +15,10 @@ impl Packet for StatusRequestPacket {
 }
 
 impl InboundPacket for StatusRequestPacket {
-    async fn new_from_buffer(_buffer: &[u8]) -> Result<Self, Error> {
+    async fn new_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
+    where
+        S: AsyncRead + Unpin + Send + Sync,
+    {
         Ok(Self)
     }
 }
@@ -38,10 +40,11 @@ impl Packet for PingPacket {
 }
 
 impl InboundPacket for PingPacket {
-    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error> {
-        let mut reader = Cursor::new(buffer);
-
-        let payload = reader.read_u64().await?;
+    async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+    where
+        S: AsyncRead + Unpin + Send + Sync,
+    {
+        let payload = buffer.read_u64().await?;
 
         Ok(Self { payload })
     }
@@ -119,6 +122,7 @@ impl OutboundPacket for PongPacket {
 mod tests {
     use super::*;
     use crate::protocol::AsyncReadPacket;
+    use std::io::Cursor;
     use tokio::io::AsyncWriteExt;
 
     #[tokio::test]
@@ -131,9 +135,8 @@ mod tests {
 
     #[tokio::test]
     async fn decode_status_request() {
-        let buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
-
-        let _packet = StatusRequestPacket::new_from_buffer(&buffer.get_ref().clone())
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+        let _packet = StatusRequestPacket::new_from_buffer(&mut buffer)
             .await
             .unwrap();
         assert_eq!(
@@ -149,9 +152,7 @@ mod tests {
 
         let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
         buffer.write_u64(payload).await.unwrap();
-        let packet = PingPacket::new_from_buffer(&buffer.get_ref().clone())
-            .await
-            .unwrap();
+        let packet = PingPacket::new_from_buffer(&mut buffer).await.unwrap();
         assert_eq!(packet.payload, payload);
 
         assert_eq!(

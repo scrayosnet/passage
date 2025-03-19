@@ -2,8 +2,7 @@ use crate::authentication::VerifyToken;
 use crate::protocol::{
     AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet,
 };
-use std::io::Cursor;
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -19,11 +18,12 @@ impl Packet for LoginStartPacket {
 }
 
 impl InboundPacket for LoginStartPacket {
-    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error> {
-        let mut reader = Cursor::new(buffer);
-
-        let name = reader.read_string().await?;
-        let user_id = reader.read_uuid().await?;
+    async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+    where
+        S: AsyncRead + Unpin + Send + Sync,
+    {
+        let name = buffer.read_string().await?;
+        let user_id = buffer.read_uuid().await?;
 
         Ok(Self {
             user_name: name,
@@ -45,9 +45,10 @@ impl Packet for EncryptionResponsePacket {
 }
 
 impl InboundPacket for EncryptionResponsePacket {
-    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error> {
-        let mut reader = Cursor::new(buffer);
-
+    async fn new_from_buffer<S>(reader: &mut S) -> Result<Self, Error>
+    where
+        S: AsyncRead + Unpin + Send + Sync,
+    {
         let shared_secret = reader.read_bytes().await?;
         let verify_token = reader.read_bytes().await?;
 
@@ -68,7 +69,10 @@ impl Packet for LoginAcknowledgedPacket {
 }
 
 impl InboundPacket for LoginAcknowledgedPacket {
-    async fn new_from_buffer(_buffer: &[u8]) -> Result<Self, Error> {
+    async fn new_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
+    where
+        S: AsyncRead + Unpin + Send + Sync,
+    {
         Ok(Self)
     }
 }
@@ -152,6 +156,7 @@ impl OutboundPacket for LoginSuccessPacket {
 mod tests {
     use super::*;
     use rand::RngCore;
+    use std::io::Cursor;
     use tokio::io::AsyncReadExt;
     use uuid::uuid;
 
@@ -173,7 +178,7 @@ mod tests {
         buffer.write_string(user_name).await.unwrap();
         buffer.write_uuid(&user_id).await.unwrap();
 
-        let packet = LoginStartPacket::new_from_buffer(&buffer.get_ref().clone())
+        let packet = LoginStartPacket::new_from_buffer(&mut buffer)
             .await
             .unwrap();
         assert_eq!(packet.user_name, user_name);
@@ -198,7 +203,7 @@ mod tests {
         buffer.write_bytes(&shared_secret).await.unwrap();
         buffer.write_bytes(&verify_token).await.unwrap();
 
-        let packet = EncryptionResponsePacket::new_from_buffer(&buffer.get_ref().clone())
+        let packet = EncryptionResponsePacket::new_from_buffer(&mut buffer)
             .await
             .unwrap();
         assert_eq!(packet.shared_secret, shared_secret);
@@ -213,9 +218,9 @@ mod tests {
 
     #[tokio::test]
     async fn decode_login_acknowledged() {
-        let buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
 
-        let _packet = LoginAcknowledgedPacket::new_from_buffer(&buffer.get_ref().clone())
+        let _packet = LoginAcknowledgedPacket::new_from_buffer(&mut buffer)
             .await
             .unwrap();
         assert_eq!(

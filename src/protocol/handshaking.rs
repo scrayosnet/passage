@@ -1,6 +1,5 @@
 use crate::protocol::{AsyncReadPacket, Error, InboundPacket, Packet, State};
-use std::io::Cursor;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 /// This packet initiates the connection and tells the server the details of the client and intent.
 ///
@@ -25,13 +24,14 @@ impl Packet for HandshakePacket {
 }
 
 impl InboundPacket for HandshakePacket {
-    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error> {
-        let mut reader = Cursor::new(buffer);
-
-        let protocol_version = reader.read_varint().await? as isize;
-        let server_address = reader.read_string().await?;
-        let server_port = reader.read_u16().await?;
-        let next_state = reader.read_varint().await?.try_into()?;
+    async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+    where
+        S: AsyncRead + Unpin + Send + Sync,
+    {
+        let protocol_version = buffer.read_varint().await? as isize;
+        let server_address = buffer.read_string().await?;
+        let server_port = buffer.read_u16().await?;
+        let next_state = buffer.read_varint().await?.try_into()?;
 
         Ok(Self {
             protocol_version,
@@ -46,6 +46,7 @@ impl InboundPacket for HandshakePacket {
 mod tests {
     use super::*;
     use crate::protocol::AsyncWritePacket;
+    use std::io::Cursor;
     use tokio::io::AsyncWriteExt;
 
     #[tokio::test]
@@ -66,9 +67,7 @@ mod tests {
         buffer.write_u16(server_port).await.unwrap();
         buffer.write_varint(next_state.into()).await.unwrap();
 
-        let packet = HandshakePacket::new_from_buffer(&buffer.get_ref().clone())
-            .await
-            .unwrap();
+        let packet = HandshakePacket::new_from_buffer(&mut buffer).await.unwrap();
         assert_eq!(packet.protocol_version, protocol_version as isize);
         assert_eq!(packet.server_address, server_address);
         assert_eq!(packet.server_port, server_port);

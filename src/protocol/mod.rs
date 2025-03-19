@@ -123,7 +123,9 @@ trait OutboundPacket: Packet {
 /// `InboundPacket`s are packets that are read and therefore are received from the serverside.
 trait InboundPacket: Packet + Sized {
     /// Creates a new instance of this packet with the data from the buffer.
-    async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error>;
+    async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+    where
+        S: AsyncRead + Unpin + Send + Sync;
 }
 
 /// `AsyncWritePacket` allows writing a specific [`OutboundPacket`] to an [`AsyncWrite`].
@@ -274,12 +276,11 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
             });
         }
 
-        // read the remaining content of the packet into a new buffer
-        let mut buffer = vec![0; length - 1];
-        self.read_exact(&mut buffer).await?;
+        // split a separate reader from stream
+        let mut take = self.take(length as u64);
 
         // convert the received buffer into our expected packet
-        T::new_from_buffer(&buffer).await
+        T::new_from_buffer(&mut take).await
     }
 
     async fn read_varint(&mut self) -> Result<usize, Error> {
