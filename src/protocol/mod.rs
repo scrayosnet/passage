@@ -112,13 +112,15 @@ trait Packet {
     fn get_packet_id() -> usize;
 }
 
-/// `OutboundPacket`s are packets that are written and therefore have a fixed, specific packet ID.
+/// `OutboundPacket`s are packets that are written from the serverside.
 trait OutboundPacket: Packet {
-    /// Creates a new buffer with the data from this packet.
-    async fn to_buffer(&self) -> Result<Vec<u8>, Error>;
+    /// Writes the data from this packet into the supplied [`S`].
+    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+    where
+        S: AsyncWrite + Unpin + Send + Sync;
 }
 
-/// `InboundPacket`s are packets that are read and therefore are expected to be of a specific packet ID.
+/// `InboundPacket`s are packets that are read and therefore are received from the serverside.
 trait InboundPacket: Packet + Sized {
     /// Creates a new instance of this packet with the data from the buffer.
     async fn new_from_buffer(buffer: &[u8]) -> Result<Self, Error>;
@@ -165,13 +167,10 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
         &mut self,
         packet: T,
     ) -> Result<(), Error> {
-        // write the packet into a buffer and box it as a slice (sized)
-        let packet_buffer = packet.to_buffer().await?;
-
         // create a new buffer and write the packet onto it (to get the size)
         let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
         buffer.write_varint(T::get_packet_id()).await?;
-        buffer.write_all(&packet_buffer).await?;
+        packet.write_to_buffer(&mut buffer).await?;
 
         // write the length of the content (length frame encoder) and then the packet
         let inner = buffer.into_inner();

@@ -3,7 +3,7 @@ use crate::protocol::{
     AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet,
 };
 use std::io::Cursor;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -102,15 +102,16 @@ impl Packet for EncryptionRequestPacket {
 }
 
 impl OutboundPacket for EncryptionRequestPacket {
-    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
-        let mut buffer = Cursor::new(Vec::<u8>::new());
-
+    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+    where
+        S: AsyncWrite + Unpin + Send + Sync,
+    {
         buffer.write_string("").await?;
         buffer.write_bytes(&self.public_key).await?;
         buffer.write_bytes(&self.verify_token).await?;
         buffer.write_u8(self.should_authenticate as u8).await?;
 
-        Ok(buffer.into_inner())
+        Ok(())
     }
 }
 
@@ -134,15 +135,16 @@ impl Packet for LoginSuccessPacket {
 }
 
 impl OutboundPacket for LoginSuccessPacket {
-    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
-        let mut buffer = Cursor::new(Vec::<u8>::new());
-
+    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+    where
+        S: AsyncWrite + Unpin + Send + Sync,
+    {
         buffer.write_uuid(&self.user_id).await?;
         buffer.write_string(&self.user_name).await?;
         // no properties in array
         buffer.write_varint(0).await?;
 
-        Ok(buffer.into_inner())
+        Ok(())
     }
 }
 
@@ -234,8 +236,9 @@ mod tests {
         // write the packet into a buffer and box it as a slice (sized)
         let packet =
             EncryptionRequestPacket::new(public_key_write.to_vec(), verify_token_write, true);
-        let packet_buffer = packet.to_buffer().await.unwrap();
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer);
+        let mut packet_buffer = Cursor::new(Vec::<u8>::new());
+        packet.write_to_buffer(&mut packet_buffer).await.unwrap();
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer.into_inner());
 
         let server_id = buffer.read_string().await.unwrap();
         let public_key = buffer.read_bytes().await.unwrap();
@@ -260,8 +263,9 @@ mod tests {
             uuid!("9c09eef4-f68d-4387-9751-72bbff53d5a0"),
             "Scrayos".to_string(),
         );
-        let packet_buffer = packet.to_buffer().await.unwrap();
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer);
+        let mut packet_buffer = Cursor::new(Vec::<u8>::new());
+        packet.write_to_buffer(&mut packet_buffer).await.unwrap();
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer.into_inner());
 
         let user_id = buffer.read_uuid().await.unwrap();
         let user_name = buffer.read_string().await.unwrap();

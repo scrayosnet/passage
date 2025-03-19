@@ -1,6 +1,6 @@
 use crate::protocol::{AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet};
 use std::io::Cursor;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// This packet requests the server metadata for display in the multiplayer menu.
 ///
@@ -71,12 +71,13 @@ impl Packet for StatusResponsePacket {
 }
 
 impl OutboundPacket for StatusResponsePacket {
-    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
-        let mut buffer = Cursor::new(Vec::<u8>::new());
-
+    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+    where
+        S: AsyncWrite + Unpin + Send + Sync,
+    {
         buffer.write_string(&self.body).await?;
 
-        Ok(buffer.into_inner())
+        Ok(())
     }
 }
 
@@ -104,12 +105,13 @@ impl Packet for PongPacket {
 }
 
 impl OutboundPacket for PongPacket {
-    async fn to_buffer(&self) -> Result<Vec<u8>, Error> {
-        let mut buffer = Cursor::new(Vec::<u8>::new());
-
+    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+    where
+        S: AsyncWrite + Unpin + Send + Sync,
+    {
         buffer.write_u64(self.payload).await?;
 
-        Ok(buffer.into_inner())
+        Ok(())
     }
 }
 
@@ -163,8 +165,9 @@ mod tests {
     async fn encode_status_response() {
         // write the packet into a buffer and box it as a slice (sized)
         let packet = StatusResponsePacket::new("{\"some\": \"values\"}".to_string());
-        let packet_buffer = packet.to_buffer().await.unwrap();
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer);
+        let mut packet_buffer = Cursor::new(Vec::<u8>::new());
+        packet.write_to_buffer(&mut packet_buffer).await.unwrap();
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer.into_inner());
 
         let body = buffer.read_string().await.unwrap();
         assert_eq!(body, packet.body);
@@ -180,8 +183,9 @@ mod tests {
     async fn encode_pong() {
         // write the packet into a buffer and box it as a slice (sized)
         let packet = PongPacket::new(17);
-        let packet_buffer = packet.to_buffer().await.unwrap();
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer);
+        let mut packet_buffer = Cursor::new(Vec::<u8>::new());
+        packet.write_to_buffer(&mut packet_buffer).await.unwrap();
+        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer.into_inner());
 
         let payload = buffer.read_u64().await.unwrap();
         assert_eq!(payload, packet.payload);
