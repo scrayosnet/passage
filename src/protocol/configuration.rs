@@ -1,5 +1,6 @@
 use crate::protocol::{AsyncWritePacket, Error, OutboundPacket, Packet};
 use tokio::io::AsyncWrite;
+use std::net::SocketAddr;
 
 #[derive(Debug)]
 pub struct TransferPacket {
@@ -10,6 +11,14 @@ pub struct TransferPacket {
 impl TransferPacket {
     pub const fn new(host: String, port: usize) -> Self {
         Self { host, port }
+    }
+
+    pub fn from_addr(addr: impl Into<SocketAddr>) -> Self {
+        let addr = addr.into();
+        Self {
+            host: addr.ip().to_string(),
+            port: addr.port() as usize,
+        }
     }
 }
 

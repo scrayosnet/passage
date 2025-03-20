@@ -9,6 +9,11 @@ mod server;
 mod status;
 
 use crate::config::AppState;
+use crate::core::{SimpleStatusSupplier, SimpleTargetSelector};
+use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
+use serde_json::value::RawValue;
+use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::info;
@@ -37,8 +42,28 @@ pub async fn start(state: Arc<AppState>) -> Result<(), Box<dyn std::error::Error
     let listener = TcpListener::bind(addr).await?;
     info!(addr = addr.to_string(), "successfully bound server socket");
 
+    // initialize services
+    let status_supplier = SimpleStatusSupplier::from_status(ServerStatus {
+        version: ServerVersion {
+            name: "JustChunks 2025".to_owned(),
+            protocol: 0,
+        },
+        players: Some(ServerPlayers {
+            online: 5,
+            max: 10,
+            sample: None,
+        }),
+        description: Some(RawValue::from_string(
+            r#"{"text":"PASSAGE IS RUNNING","color":"gold"}"#.to_string(),
+        )?),
+        favicon: None,
+        enforces_secure_chat: Some(true),
+    });
+    let target_selector =
+        SimpleTargetSelector::from_target(SocketAddr::from_str("142.132.245.251:25565")?);
+
     // serve the router service on the bound socket address
-    server::serve(listener, keys, state).await?;
+    server::serve(listener, keys, state, status_supplier, target_selector).await?;
     info!("protocol server stopped successfully");
 
     // exit with success

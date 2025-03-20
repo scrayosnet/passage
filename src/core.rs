@@ -4,24 +4,34 @@ use std::iter::Map;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-pub trait StatusSupplier {
+#[trait_variant::make(StatusSupplier: Send)]
+pub trait LocalStatusSupplier {
     async fn get_status(
         &self,
-        client_addr: SocketAddr,
-        server_addr: SocketAddr,
+        client_addr: &SocketAddr,
+        server_addr: &(String, u16),
         protocol: Protocol,
     ) -> Result<Option<ServerStatus>, Error>;
 }
 
-pub trait TargetDiscoverer {
-    async fn discover(&self) -> Result<Vec<Target>, Error>;
-}
-
-pub trait TargetSelector {
+#[trait_variant::make(TargetSelector: Send)]
+pub trait LocalTargetSelector {
     async fn select(
         &self,
-        client_addr: SocketAddr,
-        server_addr: SocketAddr,
+        client_addr: &SocketAddr,
+        server_addr: &(String, u16),
+        protocol: Protocol,
+        user_id: &Uuid,
+        username: &str,
+    ) -> Result<Option<SocketAddr>, Error>;
+}
+
+#[trait_variant::make(TargetSelectorStrategie: Send)]
+pub trait LocalTargetSelectorStrategie {
+    async fn select(
+        &self,
+        client_addr: &SocketAddr,
+        server_addr: &(String, u16),
         protocol: Protocol,
         username: &str,
         user_id: &Uuid,
@@ -36,16 +46,16 @@ pub struct Target {
     pub meta: Map<String, String>,
 }
 
-struct SimpleStatusSupplier {
+pub struct SimpleStatusSupplier {
     status: Option<ServerStatus>,
 }
 
 impl SimpleStatusSupplier {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self { status: None }
     }
 
-    fn from_status(status: impl Into<ServerStatus>) -> Self {
+    pub fn from_status(status: impl Into<ServerStatus>) -> Self {
         Self {
             status: Some(status.into()),
         }
@@ -55,46 +65,29 @@ impl SimpleStatusSupplier {
 impl StatusSupplier for SimpleStatusSupplier {
     async fn get_status(
         &self,
-        _client_addr: SocketAddr,
-        _server_addr: SocketAddr,
-        _protocol: Protocol,
+        _client_addr: &SocketAddr,
+        _server_addr: &(String, u16),
+        protocol: Protocol,
     ) -> Result<Option<ServerStatus>, Error> {
-        Ok(self.status.clone())
+        let mut stat = self.status.clone();
+        let Some(mut stat) = stat else {
+            return Ok(None);
+        };
+        stat.version.protocol = protocol;
+        Ok(Some(stat))
     }
 }
 
-struct SimpleTargetDiscoverer {
-    targets: Vec<Target>,
-}
-
-impl SimpleTargetDiscoverer {
-    fn new() -> Self {
-        Self { targets: vec![] }
-    }
-
-    fn from_targets(targets: impl Into<Vec<Target>>) -> Self {
-        Self {
-            targets: targets.into(),
-        }
-    }
-}
-
-impl TargetDiscoverer for SimpleTargetDiscoverer {
-    async fn discover(&self) -> Result<Vec<Target>, Error> {
-        Ok(self.targets.clone())
-    }
-}
-
-struct SimpleTargetSelector {
+pub struct SimpleTargetSelector {
     target: Option<SocketAddr>,
 }
 
 impl SimpleTargetSelector {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self { target: None }
     }
 
-    fn from_target(target: impl Into<SocketAddr>) -> Self {
+    pub fn from_target(target: impl Into<SocketAddr>) -> Self {
         Self {
             target: Some(target.into()),
         }
@@ -104,12 +97,11 @@ impl SimpleTargetSelector {
 impl TargetSelector for SimpleTargetSelector {
     async fn select(
         &self,
-        _client_addr: SocketAddr,
-        _server_addr: SocketAddr,
+        _client_addr: &SocketAddr,
+        _server_addr: &(String, u16),
         _protocol: Protocol,
-        _username: &str,
         _user_id: &Uuid,
-        _targets: &[Target],
+        _username: &str,
     ) -> Result<Option<SocketAddr>, Error> {
         Ok(self.target)
     }

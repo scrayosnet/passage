@@ -12,7 +12,7 @@
 
 use crate::authentication;
 use crate::authentication::CipherStream;
-use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
+use crate::core::{StatusSupplier, TargetSelector};
 use configuration::TransferPacket;
 use handshaking::HandshakePacket;
 use login::{
@@ -20,9 +20,10 @@ use login::{
     LoginSuccessPacket,
 };
 use rsa::{RsaPrivateKey, RsaPublicKey};
-use serde_json::value::RawValue;
 use status::{PingPacket, PongPacket, StatusRequestPacket, StatusResponsePacket};
 use std::io::Cursor;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, instrument};
 use uuid::Uuid;
@@ -325,39 +326,28 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
     }
 }
 
-#[instrument(skip(stream, keys))]
-pub async fn handle_client<S>(
+#[instrument(skip_all)]
+pub async fn handle_client<S, SS, TS>(
     stream: &mut S,
+    addr: &SocketAddr,
     keys: &(RsaPrivateKey, RsaPublicKey),
+    status_supplier: Arc<SS>,
+    target_selector: Arc<TS>,
 ) -> Result<(), Error>
 where
     S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
+    SS: StatusSupplier,
+    TS: TargetSelector,
 {
-    let shake = serve_handshake(stream).await?;
+    let shake = serve_handshake(stream, addr).await?;
 
-    match shake.state {
+    match &shake.state {
         State::Status => {
-            let status = ServerStatus {
-                version: ServerVersion {
-                    name: "JustChunks 2025".to_owned(),
-                    protocol: shake.protocol,
-                },
-                players: Some(ServerPlayers {
-                    online: 5,
-                    max: 10,
-                    sample: None,
-                }),
-                description: Some(RawValue::from_string(
-                    r#"{"text":"PASSAGE IS RUNNING","color":"gold"}"#.to_string(),
-                )?),
-                favicon: None,
-                enforces_secure_chat: Some(true),
-            };
-            serve_status(stream, &status).await?;
+            serve_status(stream, &shake, status_supplier).await?;
             serve_ping(stream).await?;
         }
         State::Login | State::Transfer => {
-            serve_login(stream, keys).await?;
+            serve_login(stream, keys, &shake, target_selector).await?;
         }
     }
 
@@ -368,6 +358,8 @@ where
 pub struct HandshakeResult {
     pub protocol: i64,
     pub state: State,
+    pub client_addr: SocketAddr,
+    pub server_addr: (String, u16),
 }
 
 /// Performs the status protocol exchange and returns the self-reported server status.
@@ -376,8 +368,8 @@ pub struct HandshakeResult {
 /// [`StatusResponse`](StatusResponsePacket) from the server. This response is in JSON and will be supplied as-is. The
 /// connection is not consumed by this operation, and the protocol allows for pings to be exchanged after the status
 /// has been returned.
-#[instrument(skip(stream))]
-pub async fn serve_handshake<S>(stream: &mut S) -> Result<HandshakeResult, Error>
+#[instrument(skip_all)]
+pub async fn serve_handshake<S>(stream: &mut S, addr: &SocketAddr) -> Result<HandshakeResult, Error>
 where
     S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
 {
@@ -389,6 +381,8 @@ where
     Ok(HandshakeResult {
         protocol: handshake.protocol_version as i64,
         state: handshake.next_state,
+        client_addr: *addr,
+        server_addr: (handshake.server_address, handshake.server_port),
     })
 }
 
@@ -398,15 +392,29 @@ where
 /// [`StatusResponse`](StatusResponsePacket) from the server. This response is in JSON and will be supplied as-is. The
 /// connection is not consumed by this operation, and the protocol allows for pings to be exchanged after the status
 /// has been returned.
-#[instrument(skip(stream))]
-pub async fn serve_status<S>(stream: &mut S, status: &ServerStatus) -> Result<(), Error>
+#[instrument(skip_all)]
+pub async fn serve_status<S, SS>(
+    stream: &mut S,
+    handshake: &HandshakeResult,
+    status_supplier: Arc<SS>,
+) -> Result<(), Error>
 where
     S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
+    SS: StatusSupplier,
 {
     // await the status request and read it
     debug!("awaiting and reading status request packet");
     let request: StatusRequestPacket = stream.read_packet().await?;
     debug!(packet = debug(&request), "received status request packet");
+
+    // get status
+    let status = status_supplier
+        .get_status(
+            &handshake.client_addr,
+            &handshake.server_addr,
+            handshake.protocol,
+        )
+        .await?;
 
     // create a new status request packet and send it
     let json_response = serde_json::to_string(&status)?;
@@ -424,7 +432,7 @@ where
 /// This sends the [Ping][PingPacket] and awaits the response of the [Pong][PongPacket], while recording the time it
 /// takes to get a response. From this recorded RTT (Round-Trip-Time) the latency is calculated by dividing this value
 /// by two. This is the most accurate way to measure the ping we can use.
-#[instrument(skip(stream))]
+#[instrument(skip_all)]
 pub async fn serve_ping<S>(stream: &mut S) -> Result<(), Error>
 where
     S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
@@ -442,13 +450,16 @@ where
     Ok(())
 }
 
-#[instrument(skip(stream, keys))]
-pub async fn serve_login<S>(
+#[instrument(skip_all)]
+pub async fn serve_login<S, TS>(
     stream: &mut S,
     keys: &(RsaPrivateKey, RsaPublicKey),
+    handshake: &HandshakeResult,
+    target_selector: Arc<TS>,
 ) -> Result<(), Error>
 where
     S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
+    TS: TargetSelector,
 {
     // await the login start packet and read it
     debug!("awaiting and reading login start packet");
@@ -492,6 +503,17 @@ where
     let (encryptor, decryptor) = authentication::create_ciphers(&shared_secret)?;
     let mut stream = CipherStream::new(stream, encryptor, decryptor);
 
+    // select target
+    let target = target_selector
+        .select(
+            &handshake.client_addr,
+            &handshake.server_addr,
+            handshake.protocol,
+            &auth_response.id,
+            &auth_response.name,
+        )
+        .await?;
+
     // create a new login success packet and send it
     let login_success = LoginSuccessPacket::new(auth_response.id, auth_response.name);
     debug!(
@@ -508,8 +530,12 @@ where
         "received login acknowledged packet"
     );
 
+    // TODO move configuration in own method (with target selection)
+    // disconnect if not target found
+    let Some(target) = target else { return Ok(()) };
+
     // create a new transfer packet and send it
-    let transfer = TransferPacket::new("wynncraft.com".to_string(), 25565);
+    let transfer = TransferPacket::from_addr(target);
     debug!(packet = debug(&transfer), "sending transfer packet");
     stream.write_packet(transfer).await?;
 

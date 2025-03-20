@@ -31,3 +31,4 @@ sha1 = "0.10.6"
 reqwest = { version = "0.12.14", default-features = false, features = ["json", "rustls-tls"] }
 cfb8 = "0.8.1"
 aes = "0.8.4"
+trait-variant = "0.1.2"
