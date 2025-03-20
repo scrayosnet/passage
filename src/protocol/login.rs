@@ -178,15 +178,16 @@ mod tests {
         buffer.write_string(user_name).await.unwrap();
         buffer.write_uuid(&user_id).await.unwrap();
 
-        let packet = LoginStartPacket::new_from_buffer(&mut buffer)
+        let mut read_buffer: Cursor<Vec<u8>> = Cursor::new(buffer.into_inner());
+        let packet = LoginStartPacket::new_from_buffer(&mut read_buffer)
             .await
             .unwrap();
         assert_eq!(packet.user_name, user_name);
         assert_eq!(packet.user_id, user_id);
 
         assert_eq!(
-            buffer.position() as usize,
-            buffer.get_ref().len(),
+            read_buffer.position() as usize,
+            read_buffer.get_ref().len(),
             "There are remaining bytes in the buffer"
         );
     }
@@ -203,15 +204,16 @@ mod tests {
         buffer.write_bytes(&shared_secret).await.unwrap();
         buffer.write_bytes(&verify_token).await.unwrap();
 
-        let packet = EncryptionResponsePacket::new_from_buffer(&mut buffer)
+        let mut read_buffer: Cursor<Vec<u8>> = Cursor::new(buffer.into_inner());
+        let packet = EncryptionResponsePacket::new_from_buffer(&mut read_buffer)
             .await
             .unwrap();
         assert_eq!(packet.shared_secret, shared_secret);
         assert_eq!(packet.verify_token, verify_token);
 
         assert_eq!(
-            buffer.position() as usize,
-            buffer.get_ref().len(),
+            read_buffer.position() as usize,
+            read_buffer.get_ref().len(),
             "There are remaining bytes in the buffer"
         );
     }

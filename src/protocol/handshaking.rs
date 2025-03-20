@@ -67,15 +67,18 @@ mod tests {
         buffer.write_u16(server_port).await.unwrap();
         buffer.write_varint(next_state.into()).await.unwrap();
 
-        let packet = HandshakePacket::new_from_buffer(&mut buffer).await.unwrap();
+        let mut read_buffer: Cursor<Vec<u8>> = Cursor::new(buffer.into_inner());
+        let packet = HandshakePacket::new_from_buffer(&mut read_buffer)
+            .await
+            .unwrap();
         assert_eq!(packet.protocol_version, protocol_version as isize);
         assert_eq!(packet.server_address, server_address);
         assert_eq!(packet.server_port, server_port);
         assert_eq!(packet.next_state, next_state);
 
         assert_eq!(
-            buffer.position() as usize,
-            buffer.get_ref().len(),
+            read_buffer.position() as usize,
+            read_buffer.get_ref().len(),
             "There are remaining bytes in the buffer"
         );
     }

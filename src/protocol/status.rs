@@ -152,12 +152,14 @@ mod tests {
 
         let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
         buffer.write_u64(payload).await.unwrap();
-        let packet = PingPacket::new_from_buffer(&mut buffer).await.unwrap();
+
+        let mut read_buffer: Cursor<Vec<u8>> = Cursor::new(buffer.into_inner());
+        let packet = PingPacket::new_from_buffer(&mut read_buffer).await.unwrap();
         assert_eq!(packet.payload, payload);
 
         assert_eq!(
-            buffer.position() as usize,
-            buffer.get_ref().len(),
+            read_buffer.position() as usize,
+            read_buffer.get_ref().len(),
             "There are remaining bytes in the buffer"
         );
     }
