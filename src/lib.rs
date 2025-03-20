@@ -60,7 +60,7 @@ pub async fn start(state: Arc<AppState>) -> Result<(), Box<dyn std::error::Error
         enforces_secure_chat: Some(true),
     });
     let target_selector =
-        SimpleTargetSelector::from_target(SocketAddr::from_str("142.132.245.251:25565")?);
+        SimpleTargetSelector::from_target(SocketAddr::from_str("149.248.195.184:25565")?);
 
     // serve the router service on the bound socket address
     server::serve(listener, keys, state, status_supplier, target_selector).await?;
