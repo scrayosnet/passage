@@ -1,0 +1,30 @@
+:root {
+    --vp-c-brand-1: #d24300;
+    --vp-c-brand-2: #ff006a;
+    --vp-c-brand-3: #c06100;
+}
+
+:root {
+    --vp-home-hero-name-color: transparent;
+    --vp-home-hero-name-background: -webkit-linear-gradient(
+        120deg,
+        var(--vp-c-brand-2) 20%,
+        var(--vp-c-brand-1)
+    );
+}
+
+@media (min-width: 960px) {
+
+    .VPHero .container {
+        padding: 0% 3%;
+    }
+
+    .VPHero .image-container {
+        transform: translate(0px, -32px);
+    }
+
+    .VPHero .image-bg,
+    .VPHero .image-src {
+        height: 90%;
+    }
+}

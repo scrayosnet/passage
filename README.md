@@ -6,22 +6,26 @@
 ![A visual badge for the Docker image size](https://ghcr-badge.egpl.dev/scrayosnet/passage/size "Image Size")
 ![A visual badge for the license](https://img.shields.io/github/license/scrayosnet/passage "License")
 
-passage is a Minecraft network [transfer][transfer-packet] router to send connecting players to their corresponding
+Passage is a Minecraft network [transfer][transfer-packet] router to send connecting players to their corresponding
 servers and act as an entrypoint to the network. While traditional Minecraft networks relied on proxies like
-[BungeeCord][bungeecord-docs], [Waterfall][waterfall-docs] or [Velocity][velocity-docs], passage is only an entrypoint
+[BungeeCord][bungeecord-docs], [Waterfall][waterfall-docs] or [Velocity][velocity-docs], Passage is only an entrypoint
 and initial router and drops the connection to the player right after the routing, improving performance and reliability
 in the process.
 
 This is possible through the [transfer packet][transfer-packet] of the official Minecraft: Java Edition
-[protocol]. passage validates connecting players, handles authentication, resource pack installation and status pings
+[protocol]. Passage validates connecting players, handles authentication, resource pack installation and status pings
 and then redirects the players to any dynamic backend server. Since the [transfer packet][transfer-packet] was only
-added in Minecraft [1.20.5][minecraft-1-20-5], passage can only handle Minecraft clients starting from this version.
+added in Minecraft [1.20.5][minecraft-1-20-5], Passage can only handle Minecraft clients starting from this version.
 
 ## Motivation
 
 Despite the universal success and reliability of conventional proxies like [Velocity][velocity-docs],
 [Waterfall][waterfall-docs] and [BungeeCord][bungeecord-docs], the general concept of a proxy that transcribes all
-packages brings a lot of problems with it.
+packages brings a lot of problems with it. Since those problems are inherent to the concept itself, this cannot be
+solved by patching the existing proxies, but instead a new kind of network has to be created.
+
+Traditional proxies need to transcode all Minecraft packets and adjust the contents to be consistent for the player's
+connection. Switching servers is simulated by switching worlds. This means that proxies need to
 
 * fast
 * reliable
@@ -41,28 +45,20 @@ pending
 * partial ddos protection
 * joining with everything prepared
 * performance (rust + no packet rewrite)
-* supports Mojang Chat Signing
+* supports Mojang Chat Signing + secure negotiation
+* no packet rewriting -> instant version compatibility
 * Stateless
+
+Read more about the features of Passage on [our website][passage-website].
 
 ## Getting Started
 
 > [!WARNING]
-> passage is under active development and may experience breaking changes until the first version is released. After
+> Passage is under active development and may experience breaking changes until the first version is released. After
 > that version, breaking changes will be performed in adherence to [Semantic Versioning][semver-docs].
 
-Once this project is ready, information about how to run passage will be published here. Stay tuned!
-
-### Configuration Tweaking
-
-To modify the behavior and global values of passage, CLI flags and environment variables may be used. To get an
-overview of the available settings and their respective keys, run the following command:
-
-```shell
-passage --help
-```
-
-All settings have sensible defaults that are suitable for production deployments of passage. Still, tweaking those
-settings can be beneficial for debugging or specific runtime models.
+Install your own instance of Passage within seconds with our [Getting Started Guide][passage-guide] on our website. You
+can also find more information on how to configure, optimize and embed Passage in your network there.
 
 ## Reporting Security Issues
 
@@ -82,6 +78,10 @@ new contributions!
 
 This project is developed and distributed under the MIT License. See [this explanation][mit-license-doc] for a rundown
 on what that means.
+
+[passage-website]: https://passage.scrayos.net
+
+[passage-guide]: https://passage.scrayos.net/docs/getting-started
 
 [protocol-docs]: https://minecraft.wiki/w/Java_Edition_protocol
 
