@@ -8,7 +8,7 @@ mod protocol;
 mod server;
 mod status;
 
-use crate::config::AppState;
+use crate::config::Config;
 use crate::core::{SimpleStatusSupplier, SimpleTargetSelector};
 use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
 use serde_json::value::RawValue;
@@ -28,7 +28,7 @@ use tracing::info;
 ///
 /// Will return an appropriate error if the socket cannot be bound to the supplied address, or the TCP server cannot be
 /// properly initialized.
-pub async fn start(state: Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start(state: Arc<Config>) -> Result<(), Box<dyn std::error::Error>> {
     // generate a new key pair
     info!(
         bits = state.key_length,
@@ -63,7 +63,7 @@ pub async fn start(state: Arc<AppState>) -> Result<(), Box<dyn std::error::Error
         SimpleTargetSelector::from_target(SocketAddr::from_str("149.248.195.184:25565")?);
 
     // serve the router service on the bound socket address
-    server::serve(listener, keys, state, status_supplier, target_selector).await?;
+    server::serve(listener, keys, status_supplier, target_selector).await?;
     info!("protocol server stopped successfully");
 
     // exit with success

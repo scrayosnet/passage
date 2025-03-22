@@ -1,4 +1,3 @@
-use crate::config::AppState;
 use crate::core::{StatusSupplier, TargetSelector};
 use crate::protocol::handle_client;
 use rsa::RsaPrivateKey;
@@ -11,7 +10,6 @@ use tracing::{debug, info};
 pub async fn serve<SS, TS>(
     listener: TcpListener,
     keys: (RsaPrivateKey, RsaPublicKey),
-    state: Arc<AppState>,
     status_supplier: SS,
     target_selector: TS,
 ) -> Result<(), Box<dyn std::error::Error>>

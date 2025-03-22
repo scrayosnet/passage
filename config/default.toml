@@ -1,0 +1,20 @@
+# See settings documantation at src/settings.rs.
+
+address = "0.0.0.0:25565"
+timeout = 120.0
+key_length = 1024
+
+[sentry]
+enabled = false
+debug = false
+address = "https://key@sentry.io/42" # update if enabled
+environment = "staging"
+
+[metrics]
+enabled = false
+auth_enabled = false
+username = "username" # update if (auth) enabled
+password = "password" # update if (auth) enabled
+
+[logging]
+level = "info"
