@@ -46,7 +46,7 @@ You can find a [detailed comparison][passage-comparison] with more aspects on ou
 
 ## Feature Highlights
 
-* Connect your Minecraft network without any proxy or ongoing connection with excellent reliability and performance.
+* Connect your Minecraft network without any proxy or permanent connection with excellent reliability and performance, ready within seconds.
 * Route your players to dynamic servers using Service discovery and an algorithm of your preference.
 * Stay always online and drop no player connections during your maintenance or partial outages.
 * Authenticate and validate your players with custom logic, to prevent any load from your backend servers.
@@ -54,7 +54,7 @@ You can find a [detailed comparison][passage-comparison] with more aspects on ou
 * Be ready for the next Minecraft version, without any necessity to update Passage beforehand.
 * Support Mojang chat signing for a better protection of your players and advanced chat features.
 
-Read more about the features of Passage on [our website][passage-website].
+Visit [our website][passage-website] to get a full overview over Passage's features.
 
 ## Getting Started
 
