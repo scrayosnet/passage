@@ -4,6 +4,7 @@
 pub mod authentication;
 pub mod config;
 mod protocol;
+mod resourcepack_supplier;
 mod server;
 mod status;
 mod status_supplier;
