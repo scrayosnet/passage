@@ -12,7 +12,8 @@
 
 use crate::authentication;
 use crate::authentication::CipherStream;
-use crate::core::{StatusSupplier, TargetSelector};
+use crate::status_supplier::StatusSupplier;
+use crate::target_selector::TargetSelector;
 use configuration::TransferPacket;
 use handshaking::HandshakePacket;
 use login::{

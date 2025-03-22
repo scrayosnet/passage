@@ -1,5 +1,6 @@
-use crate::core::{StatusSupplier, TargetSelector};
 use crate::protocol::handle_client;
+use crate::status_supplier::StatusSupplier;
+use crate::target_selector::TargetSelector;
 use rsa::RsaPrivateKey;
 use rsa::RsaPublicKey;
 use std::sync::Arc;

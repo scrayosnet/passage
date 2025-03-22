@@ -3,14 +3,17 @@
 
 pub mod authentication;
 pub mod config;
-mod core;
 mod protocol;
 mod server;
 mod status;
+mod status_supplier;
+mod target_selector;
+mod target_selector_strategie;
 
 use crate::config::Config;
-use crate::core::{SimpleStatusSupplier, SimpleTargetSelector};
 use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
+use crate::status_supplier::simple::SimpleStatusSupplier;
+use crate::target_selector::simple::SimpleTargetSelector;
 use serde_json::value::RawValue;
 use std::net::SocketAddr;
 use std::str::FromStr;
