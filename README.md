@@ -25,24 +25,34 @@ packages brings a lot of problems with it. Since those problems are inherent to 
 solved by patching the existing proxies, but instead a new kind of network has to be created.
 
 Traditional proxies need to transcode all Minecraft packets and adjust the contents to be consistent for the player's
-connection. Switching servers is simulated by switching worlds. This means that proxies need to
+connection. Switching servers is simulated by switching worlds. This means that proxies need to be updated for each
+iteration of the Minecraft protocol and new versions are only supported after said update. Additionally, this
+transcribing limits the possible throughput and requires additional computing resources as well as a slightly increased
+latency.
 
-* fast
-* reliable
-* no single point of failure
-* improved througput
-* service discovery (kubernetes)
-* shielding (ddos, etc) -> backend servers are more anonymous
-* supports Mojang Chat Signing
+Another problem with proxies is the scalability. Running a single instance is easy and will suffice for most networks,
+but once a network has enough players, the territory of multi-proxy setups needs to be explored. This comes with its own
+set of problems and complexity. But even if one proxy is able to host enough players, there are still risks of using
+only a single proxy. Having no replication creates a single point of failure and all connections need to be dropped, if
+the proxy is restarted, disconnecting all players in the process.
 
-pending
+Finally, conventional proxies have problems to preserve the Mojang chat signature chain because they need to transcode
+all messages and inject their own messages into the chat. While there are a few rumors around chat signing, there are
+[many good reasons][chat-signing-explanation] to support chat signing. While it is not entirely impossible to use chat
+signing with proxies, there is just a lot of inherent complexity and lots of things that can go wrong. With a transfer
+based approach, chat signing is supported out-of-the-box.
+
+You can find a [detailed comparison][passage-comparison] with more aspects on our website.
 
 ## Feature Highlights
 
-* fast and reliable
+* fast (optimized, native code)
+* reliable (clean error handling, monitoring, replicas)
 * stay online (ha)
 * unlimited scalability
-* partial ddos protection
+* partial ddos protection -> backend servers are more anonymous
+* maximum throughput
+* native service discovery (kubernetes/etc)
 * joining with everything prepared
 * performance (rust + no packet rewrite)
 * supports Mojang Chat Signing + secure negotiation
@@ -54,8 +64,8 @@ Read more about the features of Passage on [our website][passage-website].
 ## Getting Started
 
 > [!WARNING]
-> Passage is under active development and may experience breaking changes until the first version is released. After
-> that version, breaking changes will be performed in adherence to [Semantic Versioning][semver-docs].
+> Passage is under active development and may experience breaking changes until the stable version 1.0.0 is released.
+> After that version, breaking changes will be performed in adherence to [Semantic Versioning][semver-docs].
 
 Install your own instance of Passage within seconds with our [Getting Started Guide][passage-guide] on our website. You
 can also find more information on how to configure, optimize and embed Passage in your network there.
@@ -82,6 +92,10 @@ on what that means.
 [passage-website]: https://passage.scrayos.net
 
 [passage-guide]: https://passage.scrayos.net/docs/getting-started
+
+[passage-comparison]: https://passage.scrayos.net/docs/comparison
+
+[chat-signing-explanation]:https://gist.github.com/kennytv/ed783dd244ca0321bbd882c347892874
 
 [protocol-docs]: https://minecraft.wiki/w/Java_Edition_protocol
 

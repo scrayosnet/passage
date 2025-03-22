@@ -36,6 +36,29 @@ fraction of the memory. On top of that
 
 ## Summary
 
+Advantages of Passage:
+
+* fast (optimized, native code)
+* reliable (clean error handling, monitoring, replicas)
+* stay online (ha)
+* unlimited scalability
+* partial ddos protection -> backend servers are more anonymous
+* maximum throughput
+* native service discovery (kubernetes/etc)
+* joining with everything prepared
+* performance (rust + no packet rewrite)
+* supports Mojang Chat Signing + secure negotiation
+* no packet rewriting -> instant version compatibility
+* Stateless
+
+Problems with proxies:
+
+* only support versions after update
+* introduces transcoding overhead for all packets
+* scalability
+* single point of failure/connection drop
+* mojang chat signing
+
 [rust-docs]: https://www.rust-lang.org/
 
 [bungeecord-docs]: https://github.com/SpigotMC/BungeeCord
