@@ -1,5 +1,5 @@
-use serde::de::{Error, Unexpected, Visitor};
 use serde::Deserializer;
+use serde::de::{Error, Unexpected, Visitor};
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 use tracing_subscriber::EnvFilter;

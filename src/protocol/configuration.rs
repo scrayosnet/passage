@@ -1,6 +1,6 @@
 use crate::protocol::{AsyncWritePacket, Error, OutboundPacket, Packet};
-use tokio::io::AsyncWrite;
 use std::net::SocketAddr;
+use tokio::io::AsyncWrite;
 
 #[derive(Debug)]
 pub struct TransferPacket {

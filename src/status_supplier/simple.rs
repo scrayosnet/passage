@@ -26,7 +26,7 @@ impl StatusSupplier for SimpleStatusSupplier {
         _server_addr: &(String, u16),
         protocol: Protocol,
     ) -> Result<Option<ServerStatus>, Error> {
-        let mut stat = self.status.clone();
+        let stat = self.status.clone();
         let Some(mut stat) = stat else {
             return Ok(None);
         };
