@@ -17,7 +17,6 @@ use crate::target_selector::simple::SimpleTargetSelector;
 use serde_json::value::RawValue;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -31,7 +30,7 @@ use tracing::info;
 ///
 /// Will return an appropriate error if the socket cannot be bound to the supplied address, or the TCP server cannot be
 /// properly initialized.
-pub async fn start(state: Arc<Config>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start(state: Config) -> Result<(), Box<dyn std::error::Error>> {
     // generate a new key pair
     info!(
         bits = state.key_length,

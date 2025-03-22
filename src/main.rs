@@ -1,6 +1,5 @@
 use passage::config::Config;
 use std::borrow::Cow::Owned;
-use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber::prelude::*;
 
@@ -37,13 +36,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("sentry is enabled");
     }
 
-    // initialize the application state
-    let state = Arc::new(settings);
-
     // run passage blocking
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap()
-        .block_on(async { passage::start(state).await })
+        .block_on(async { passage::start(settings).await })
 }
