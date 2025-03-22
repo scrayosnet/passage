@@ -4,8 +4,8 @@ use crate::target_selector::Target;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-#[trait_variant::make(TargetSelectorStrategie: Send)]
-pub trait LocalTargetSelectorStrategie {
+#[trait_variant::make(TargetSelectorStrategy: Send)]
+pub trait LocalTargetSelectorStrategy {
     async fn select(
         &self,
         client_addr: &SocketAddr,

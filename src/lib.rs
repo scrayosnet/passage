@@ -8,7 +8,7 @@ mod server;
 mod status;
 mod status_supplier;
 mod target_selector;
-mod target_selector_strategie;
+mod target_selector_strategy;
 
 use crate::config::Config;
 use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
