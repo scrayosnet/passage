@@ -27,31 +27,30 @@ features:
         title: Stateless and proxy-less
         details: Passage holds no connection and can therefore be restarted and replicated at will.
         linkText: Explore the architecture
-        link: /architecture
+        link: /docs/architecture
     -   icon: '🚀'
         title: Fast and reliable
         details: Passage is faster and more reliable than any proxy software and needs less than 1MB.
         linkText: Compare with other proxies
-        link: /comparison
+        link: /docs/comparison
     -   icon: '🔐'
         title: Secure
         details: Passage uses modern cryptography and makes sure that only valid players are let through.
         linkText: Read about the details
-        link: /authentication-and-encryption
+        link: /docs/authentication-and-encryption
     -   icon: '🔋'
         title: Fast to set up
         details: Passage is ready to connect your network with your players in seconds. Batteries included!
         linkText: Install it
-        link: /installation
+        link: /docs/installation
     -   icon: '🖌️'
         title: Customizable
         details: All algorithms, messages and adapters can be customized and tailored to your needs.
         linkText: Configure and customize your setup
-        link: /customization
+        link: /docs/customization
     -   icon: '📊'
         title: Scales infinitely
         details: Passage can handle an unlimited number of players without any additional effort.
         linkText: Scale your network
-        link: /scaling
+        link: /docs/scaling
 ---
-

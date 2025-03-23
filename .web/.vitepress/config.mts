@@ -53,15 +53,32 @@ export default defineConfig({
 
         nav: [
             {text: 'Home', link: '/'},
+            {text: 'Documentation', link: '/docs'},
             {text: 'Blog', link: 'https://scrayos.net'},
         ],
 
         sidebar: [
             {
-                text: 'Examples',
+                text: 'Overview',
                 items: [
-                    {text: 'Markdown Examples', link: '/markdown-examples'},
-                    {text: 'Runtime API Examples', link: '/api-examples'}
+                    {text: 'Introduction', link: '/docs/index'},
+                    {text: 'Architecture', link: '/docs/architecture'},
+                    {text: 'Scaling', link: '/docs/scaling'},
+                    {text: 'Authentication', link: '/docs/authentication-and-encryption'},
+                    {text: 'Comparison', link: '/docs/comparison'},
+                ]
+            },
+            {
+                text: 'Setup',
+                items: [
+                    {text: 'Getting Started', link: '/docs/getting-started'},
+                    {text: 'Installation', link: '/docs/installation'}
+                ]
+            },
+            {
+                text: 'Customization',
+                items: [
+                    {text: 'Overview', link: '/docs/customization'},
                 ]
             }
         ],
