@@ -1,4 +1,5 @@
 pub mod simple;
+pub mod hidden;
 
 use crate::protocol::Error;
 use crate::status::{Protocol, ServerStatus};

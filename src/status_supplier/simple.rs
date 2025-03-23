@@ -3,15 +3,12 @@ use crate::status::{Protocol, ServerStatus};
 use crate::status_supplier::StatusSupplier;
 use std::net::SocketAddr;
 
+#[derive(Default)]
 pub struct SimpleStatusSupplier {
     status: Option<ServerStatus>,
 }
 
 impl SimpleStatusSupplier {
-    pub fn new() -> Self {
-        Self { status: None }
-    }
-
     pub fn from_status(status: impl Into<ServerStatus>) -> Self {
         Self {
             status: Some(status.into()),

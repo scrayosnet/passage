@@ -1,3 +1,5 @@
+pub mod simple;
+
 use crate::protocol::Error;
 use crate::status::Protocol;
 use crate::target_selector::Target;
