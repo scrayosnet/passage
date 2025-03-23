@@ -7,7 +7,7 @@ hero:
     text: "Minecraft Server Transfer Router"
     tagline: "Connect your Minecraft network to the world without any limits to scaling, security or infrastructure in a few seconds!"
     image:
-        src: 'logo.png'
+        src: '/logo.png'
         alt: 'Passage'
     actions:
         -   theme: brand

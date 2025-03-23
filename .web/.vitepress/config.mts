@@ -49,7 +49,7 @@ export default defineConfig({
     cleanUrls: true,
 
     themeConfig: {
-        logo: 'logo.png',
+        logo: '/logo.png',
 
         nav: [
             {text: 'Home', link: '/'},
