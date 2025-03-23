@@ -55,9 +55,9 @@ Problems with proxies:
 
 * only support versions after update
 * introduces transcoding overhead for all packets
-* scalability
-* single point of failure/connection drop
-* mojang chat signing
+* scalability (does not scale well beyond a single instance)
+* single point of failure/connection drop on shutdown
+* mojang chat signing is complicated/does not work
 
 [rust-docs]: https://www.rust-lang.org/
 

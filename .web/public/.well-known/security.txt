@@ -1,0 +1,6 @@
+Contact: mailto:security@scrayos.net
+Contact: https://discord.gg/xZ4wbuuKZf
+Expires: 2026-03-01T00:00:00.000Z
+Encryption: https://scrayos.net/pgp-key/
+Preferred-Languages: de, en
+Canonical: https://passage.scrayos.net/.well-known/security.txt
