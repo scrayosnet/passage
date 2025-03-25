@@ -1,46 +1,35 @@
-use crate::protocol::handle_client;
+use crate::connection::Connection;
 use crate::status_supplier::StatusSupplier;
 use crate::target_selector::TargetSelector;
-use rsa::RsaPrivateKey;
-use rsa::RsaPublicKey;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tracing::{debug, info};
 
-pub async fn serve<SS, TS>(
+pub async fn serve(
     listener: TcpListener,
-    keys: (RsaPrivateKey, RsaPublicKey),
-    status_supplier: SS,
-    target_selector: TS,
-) -> Result<(), Box<dyn std::error::Error>>
-where
-    SS: StatusSupplier + Send + Sync + 'static,
-    TS: TargetSelector + Send + Sync + 'static,
-{
-    let keys = Arc::new(keys);
-    let status_supplier = Arc::new(status_supplier);
-    let target_selector = Arc::new(target_selector);
-
+    status_supplier: Arc<dyn StatusSupplier>,
+    target_selector: Arc<dyn TargetSelector>,
+) -> Result<(), Box<dyn std::error::Error>> {
     loop {
         // accept the next incoming connection
-        let (mut socket, addr) = listener.accept().await?;
+        let (mut stream, addr) = listener.accept().await?;
 
-        let keys = Arc::clone(&keys);
+        // clone values to be moved
         let status_supplier = Arc::clone(&status_supplier);
         let target_selector = Arc::clone(&target_selector);
 
         tokio::spawn(async move {
+            // build connection wrapper for stream
+            let mut con = Connection::new(
+                &mut stream,
+                addr,
+                Arc::clone(&status_supplier),
+                Arc::clone(&target_selector),
+            );
+
             // handle the client connection
-            if let Err(e) = handle_client(
-                &mut socket,
-                &addr,
-                keys.as_ref(),
-                status_supplier,
-                target_selector,
-            )
-            .await
-            {
+            if let Err(e) = con.listen().await {
                 info!(
                     cause = e.to_string(),
                     addr = &addr.to_string(),
@@ -49,7 +38,7 @@ where
             }
 
             // flush connection and shutdown
-            if let Err(e) = socket.shutdown().await {
+            if let Err(e) = stream.shutdown().await {
                 info!(
                     cause = e.to_string(),
                     addr = &addr.to_string(),

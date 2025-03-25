@@ -1,6 +1,7 @@
-use crate::protocol::{AsyncWritePacket, Error, OutboundPacket, Packet};
+use crate::connection::Connection;
+use crate::protocol::{AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet, Phase};
 use std::net::SocketAddr;
-use tokio::io::AsyncWrite;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
 #[derive(Debug)]
 pub struct TransferPacket {
@@ -26,6 +27,10 @@ impl Packet for TransferPacket {
     fn get_packet_id() -> usize {
         0x0B
     }
+
+    fn get_phase() -> Phase {
+        Phase::Configuration
+    }
 }
 
 impl OutboundPacket for TransferPacket {
@@ -36,6 +41,50 @@ impl OutboundPacket for TransferPacket {
         buffer.write_string(&self.host).await?;
         buffer.write_varint(self.port).await?;
 
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct KeepAlivePacket {
+    id: u64,
+}
+
+impl KeepAlivePacket {
+    pub const fn new(id: u64) -> Self {
+        Self { id }
+    }
+}
+
+impl Packet for KeepAlivePacket {
+    fn get_packet_id() -> usize {
+        0x04
+    }
+
+    fn get_phase() -> Phase {
+        Phase::Configuration
+    }
+}
+
+impl InboundPacket for KeepAlivePacket {
+    async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+    where
+        S: AsyncRead + Unpin + Send + Sync,
+    {
+        let id = buffer.read_u64().await?;
+        Ok(Self { id })
+    }
+
+    async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    {
+        // TODO implement me!
+        //for (_time, id) in &mut con.last_keep_alive {
+        //    if id == &self.id {
+        //        todo!()
+        //    }
+        //}
         Ok(())
     }
 }

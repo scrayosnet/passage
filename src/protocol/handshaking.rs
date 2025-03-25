@@ -1,5 +1,7 @@
-use crate::protocol::{AsyncReadPacket, Error, InboundPacket, Packet, State};
-use tokio::io::{AsyncRead, AsyncReadExt};
+use crate::connection::{Connection, Handshake};
+use crate::protocol::{AsyncReadPacket, Error, InboundPacket, Packet, Phase, State};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
+use tracing::debug;
 
 /// This packet initiates the connection and tells the server the details of the client and intent.
 ///
@@ -21,6 +23,10 @@ impl Packet for HandshakePacket {
     fn get_packet_id() -> usize {
         0x00
     }
+
+    fn get_phase() -> Phase {
+        Phase::Handshake
+    }
 }
 
 impl InboundPacket for HandshakePacket {
@@ -39,6 +45,30 @@ impl InboundPacket for HandshakePacket {
             server_port,
             next_state,
         })
+    }
+
+    async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    {
+        debug!(packet = debug(&self), "received handshake packet");
+
+        // update internal connection data
+        con.handshake = Some(Handshake {
+            protocol_version: self.protocol_version,
+            server_address: self.server_address.to_string(),
+            server_port: self.server_port,
+            state: self.next_state,
+        });
+
+        // switch to next phase based on state
+        con.phase = match &self.next_state {
+            State::Status => Phase::Status,
+            State::Login => Phase::Login,
+            State::Transfer => Phase::Login,
+        };
+
+        Ok(())
     }
 }
 

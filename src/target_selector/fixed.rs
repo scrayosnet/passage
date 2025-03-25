@@ -1,14 +1,15 @@
 use crate::protocol::Error;
 use crate::status::Protocol;
 use crate::target_selector::TargetSelector;
+use async_trait::async_trait;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-pub struct SimpleTargetSelector {
+pub struct FixedTargetSelector {
     target: Option<SocketAddr>,
 }
 
-impl SimpleTargetSelector {
+impl FixedTargetSelector {
     pub fn new() -> Self {
         Self { target: None }
     }
@@ -20,11 +21,12 @@ impl SimpleTargetSelector {
     }
 }
 
-impl TargetSelector for SimpleTargetSelector {
+#[async_trait]
+impl TargetSelector for FixedTargetSelector {
     async fn select(
         &self,
         _client_addr: &SocketAddr,
-        _server_addr: &(String, u16),
+        _server_addr: (&str, u16),
         _protocol: Protocol,
         _user_id: &Uuid,
         _username: &str,

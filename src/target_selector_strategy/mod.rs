@@ -13,5 +13,5 @@ pub trait TargetSelectorStrategy: Send {
         username: &str,
         user_id: &Uuid,
         targets: &[Target],
-    ) -> impl Future<Output=Result<Option<SocketAddr>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<SocketAddr>, Error>> + Send;
 }

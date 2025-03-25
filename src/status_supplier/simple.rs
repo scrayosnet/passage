@@ -1,6 +1,7 @@
 use crate::protocol::Error;
 use crate::status::{Protocol, ServerStatus};
 use crate::status_supplier::StatusSupplier;
+use async_trait::async_trait;
 use std::net::SocketAddr;
 
 #[derive(Default)]
@@ -16,11 +17,12 @@ impl SimpleStatusSupplier {
     }
 }
 
+#[async_trait]
 impl StatusSupplier for SimpleStatusSupplier {
     async fn get_status(
         &self,
         _client_addr: &SocketAddr,
-        _server_addr: &(String, u16),
+        _server_addr: (&str, u16),
         protocol: Protocol,
     ) -> Result<Option<ServerStatus>, Error> {
         let stat = self.status.clone();

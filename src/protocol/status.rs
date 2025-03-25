@@ -1,5 +1,8 @@
-use crate::protocol::{AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet};
+use crate::connection::Connection;
+use crate::protocol::{AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet, Phase};
+use crate::status::Protocol;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tracing::debug;
 
 /// This packet requests the server metadata for display in the multiplayer menu.
 ///
@@ -12,6 +15,10 @@ impl Packet for StatusRequestPacket {
     fn get_packet_id() -> usize {
         0x00
     }
+
+    fn get_phase() -> Phase {
+        Phase::Status
+    }
 }
 
 impl InboundPacket for StatusRequestPacket {
@@ -20,6 +27,38 @@ impl InboundPacket for StatusRequestPacket {
         S: AsyncRead + Unpin + Send + Sync,
     {
         Ok(Self)
+    }
+
+    async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    {
+        debug!(packet = debug(&self), "received status request packet");
+
+        // get handshake and login state from connection
+        let Some(handshake) = &con.handshake else {
+            return Err(Error::Generic("invalid state".to_string()));
+        };
+
+        // get status from status supplier
+        let status = con
+            .status_supplier
+            .get_status(
+                &con.client_address,
+                (&handshake.server_address, handshake.server_port),
+                handshake.protocol_version as Protocol,
+            )
+            .await?;
+
+        // create a new status request packet and send it
+        let json_response = serde_json::to_string(&status)?;
+
+        // create a new status response packet and send it
+        let request = StatusResponsePacket::new(json_response);
+        debug!(packet = debug(&request), "sending status response packet");
+        con.write_packet(request).await?;
+
+        Ok(())
     }
 }
 
@@ -37,6 +76,10 @@ impl Packet for PingPacket {
     fn get_packet_id() -> usize {
         0x01
     }
+
+    fn get_phase() -> Phase {
+        Phase::Status
+    }
 }
 
 impl InboundPacket for PingPacket {
@@ -47,6 +90,20 @@ impl InboundPacket for PingPacket {
         let payload = buffer.read_u64().await?;
 
         Ok(Self { payload })
+    }
+
+    async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    {
+        debug!(packet = debug(&self), "received ping packet");
+
+        // create a new pong packet and send it
+        let pong_response = PongPacket::new(self.payload);
+        debug!(packet = debug(&pong_response), "sending pong packet");
+        con.write_packet(pong_response).await?;
+
+        Ok(())
     }
 }
 
@@ -70,6 +127,10 @@ impl StatusResponsePacket {
 impl Packet for StatusResponsePacket {
     fn get_packet_id() -> usize {
         0x00
+    }
+
+    fn get_phase() -> Phase {
+        Phase::Status
     }
 }
 
@@ -104,6 +165,10 @@ impl PongPacket {
 impl Packet for PongPacket {
     fn get_packet_id() -> usize {
         0x01
+    }
+
+    fn get_phase() -> Phase {
+        Phase::Status
     }
 }
 

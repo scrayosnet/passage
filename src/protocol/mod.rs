@@ -11,28 +11,14 @@
 //! [configuration]: https://minecraft.wiki/w/Java_Edition_protocol#Configuration
 
 use crate::authentication;
-use crate::authentication::CipherStream;
-use crate::status_supplier::StatusSupplier;
-use crate::target_selector::TargetSelector;
-use configuration::TransferPacket;
-use handshaking::HandshakePacket;
-use login::{
-    EncryptionRequestPacket, EncryptionResponsePacket, LoginAcknowledgedPacket, LoginStartPacket,
-    LoginSuccessPacket,
-};
-use rsa::{RsaPrivateKey, RsaPublicKey};
-use status::{PingPacket, PongPacket, StatusRequestPacket, StatusResponsePacket};
-use std::io::Cursor;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use crate::connection::Connection;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, instrument};
 use uuid::Uuid;
 
 mod configuration;
-mod handshaking;
-mod login;
-mod status;
+pub(crate) mod handshaking;
+pub(crate) mod login;
+pub(crate) mod status;
 
 /// The internal error type for all errors related to the protocol communication.
 ///
@@ -72,6 +58,8 @@ pub enum Error {
     EncodingFail(#[from] serde_json::Error),
     #[error("could not encrypt connection: {0}")]
     CryptographyFailed(#[from] authentication::Error),
+    #[error("some generic error (placeholder)")]
+    Generic(String),
 }
 
 /// State is the desired state that the connection should be in after the initial handshake.
@@ -83,6 +71,21 @@ pub enum State {
     Login,
     /// The status s
     Transfer,
+}
+
+/// Phase is the phase the connection is currently in. This dictates how packet are identified.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Phase {
+    /// The handshaking phase (initial state).
+    Handshake,
+    /// The status phase.
+    Status,
+    /// The login phase.
+    Login,
+    /// The configuration phase.
+    Configuration,
+    /// The play phase (unsupported).
+    Play,
 }
 
 impl From<State> for usize {
@@ -109,13 +112,16 @@ impl TryFrom<usize> for State {
 }
 
 /// Packets are network packets that are part of the protocol definition and identified by a context and ID.
-trait Packet {
+pub trait Packet {
     /// Returns the defined ID of this network packet.
     fn get_packet_id() -> usize;
+
+    /// Returns the defined phase of this network packet.
+    fn get_phase() -> Phase;
 }
 
 /// `OutboundPacket`s are packets that are written from the serverside.
-trait OutboundPacket: Packet {
+pub trait OutboundPacket: Packet {
     /// Writes the data from this packet into the supplied [`S`].
     async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
     where
@@ -123,11 +129,15 @@ trait OutboundPacket: Packet {
 }
 
 /// `InboundPacket`s are packets that are read and therefore are received from the serverside.
-trait InboundPacket: Packet + Sized {
+pub trait InboundPacket: Packet + Sized {
     /// Creates a new instance of this packet with the data from the buffer.
     async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
     where
         S: AsyncRead + Unpin + Send + Sync;
+
+    async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + Sync;
 }
 
 /// `AsyncWritePacket` allows writing a specific [`OutboundPacket`] to an [`AsyncWrite`].
@@ -135,7 +145,7 @@ trait InboundPacket: Packet + Sized {
 /// Only [`OutboundPacket`s](OutboundPacket) can be written as only those packets are sent. There are additional
 /// methods to write the data that is encoded in a Minecraft-specific manner. Their implementation is analogous to the
 /// [read implementation](AsyncReadPacket).
-trait AsyncWritePacket {
+pub trait AsyncWritePacket {
     /// Writes the supplied [`OutboundPacket`] onto this object as described in the official
     /// [protocol documentation][protocol-doc].
     ///
@@ -238,7 +248,7 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
 /// Only [`InboundPacket`s](InboundPacket) can be read as only those packets are received. There are additional
 /// methods to read the data that is encoded in a Minecraft-specific manner. Their implementation is analogous to the
 /// [write implementation](AsyncWritePacket).
-trait AsyncReadPacket {
+pub(crate) trait AsyncReadPacket {
     /// Reads the supplied [`InboundPacket`] type from this object as described in the official
     /// [protocol documentation][protocol-doc].
     ///
@@ -331,220 +341,4 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
 
         Ok(buffer)
     }
-}
-
-#[instrument(skip_all)]
-pub async fn handle_client<S, SS, TS>(
-    stream: &mut S,
-    addr: &SocketAddr,
-    keys: &(RsaPrivateKey, RsaPublicKey),
-    status_supplier: Arc<SS>,
-    target_selector: Arc<TS>,
-) -> Result<(), Error>
-where
-    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
-    SS: StatusSupplier,
-    TS: TargetSelector,
-{
-    let shake = serve_handshake(stream, addr).await?;
-
-    match &shake.state {
-        State::Status => {
-            serve_status(stream, &shake, status_supplier).await?;
-            serve_ping(stream).await?;
-        }
-        State::Login | State::Transfer => {
-            serve_login(stream, keys, &shake, target_selector).await?;
-        }
-    }
-
-    Ok(())
-}
-
-#[derive(Debug)]
-pub struct HandshakeResult {
-    pub protocol: i64,
-    pub state: State,
-    pub client_addr: SocketAddr,
-    pub server_addr: (String, u16),
-}
-
-/// Performs the status protocol exchange and returns the self-reported server status.
-///
-/// This receives the [`Handshake`](HandshakePacket) and the [`StatusRequest`](StatusRequestPacket) packet and sends the
-/// [`StatusResponse`](StatusResponsePacket) from the server. This response is in JSON and will be supplied as-is. The
-/// connection is not consumed by this operation, and the protocol allows for pings to be exchanged after the status
-/// has been returned.
-#[instrument(skip_all)]
-pub async fn serve_handshake<S>(stream: &mut S, addr: &SocketAddr) -> Result<HandshakeResult, Error>
-where
-    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
-{
-    // await the handshake packet and read it
-    debug!("awaiting and reading handshake packet");
-    let handshake: HandshakePacket = stream.read_packet().await?;
-    debug!(packet = debug(&handshake), "received handshake packet");
-
-    Ok(HandshakeResult {
-        protocol: handshake.protocol_version as i64,
-        state: handshake.next_state,
-        client_addr: *addr,
-        server_addr: (handshake.server_address, handshake.server_port),
-    })
-}
-
-/// Performs the status protocol exchange and returns the self-reported server status.
-///
-/// This receives the [`Handshake`](HandshakePacket) and the [`StatusRequest`](StatusRequestPacket) packet and sends the
-/// [`StatusResponse`](StatusResponsePacket) from the server. This response is in JSON and will be supplied as-is. The
-/// connection is not consumed by this operation, and the protocol allows for pings to be exchanged after the status
-/// has been returned.
-#[instrument(skip_all)]
-pub async fn serve_status<S, SS>(
-    stream: &mut S,
-    handshake: &HandshakeResult,
-    status_supplier: Arc<SS>,
-) -> Result<(), Error>
-where
-    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
-    SS: StatusSupplier,
-{
-    // await the status request and read it
-    debug!("awaiting and reading status request packet");
-    let request: StatusRequestPacket = stream.read_packet().await?;
-    debug!(packet = debug(&request), "received status request packet");
-
-    // get status
-    let status = status_supplier
-        .get_status(
-            &handshake.client_addr,
-            &handshake.server_addr,
-            handshake.protocol,
-        )
-        .await?;
-
-    // create a new status request packet and send it
-    let json_response = serde_json::to_string(&status)?;
-
-    // create a new status response packet and send it
-    let request = StatusResponsePacket::new(json_response);
-    debug!(packet = debug(&request), "sending status response packet");
-    stream.write_packet(request).await?;
-
-    Ok(())
-}
-
-/// Performs the ping protocol exchange and records the duration it took.
-///
-/// This sends the [Ping][PingPacket] and awaits the response of the [Pong][PongPacket], while recording the time it
-/// takes to get a response. From this recorded RTT (Round-Trip-Time) the latency is calculated by dividing this value
-/// by two. This is the most accurate way to measure the ping we can use.
-#[instrument(skip_all)]
-pub async fn serve_ping<S>(stream: &mut S) -> Result<(), Error>
-where
-    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
-{
-    // await the ping packet and read it
-    debug!("awaiting and reading ping packet");
-    let ping_request: PingPacket = stream.read_packet().await?;
-    debug!(packet = debug(&ping_request), "received ping packet");
-
-    // create a new pong packet and send it
-    let pong_response = PongPacket::new(ping_request.payload);
-    debug!(packet = debug(&pong_response), "sending pong packet");
-    stream.write_packet(pong_response).await?;
-
-    Ok(())
-}
-
-#[instrument(skip_all)]
-pub async fn serve_login<S, TS>(
-    stream: &mut S,
-    keys: &(RsaPrivateKey, RsaPublicKey),
-    handshake: &HandshakeResult,
-    target_selector: Arc<TS>,
-) -> Result<(), Error>
-where
-    S: AsyncWrite + AsyncRead + Unpin + Send + Sync,
-    TS: TargetSelector,
-{
-    // await the login start packet and read it
-    debug!("awaiting and reading login start packet");
-    let login_start: LoginStartPacket = stream.read_packet().await?;
-    debug!(packet = debug(&login_start), "received login start packet");
-
-    // encode public key and generate verify token
-    let public_key = authentication::encode_public_key(&keys.1)?;
-    let verify_token = authentication::generate_token()?;
-
-    // create a new encryption request and send it
-    let encryption_request = EncryptionRequestPacket::new(public_key.clone(), verify_token, true);
-    debug!(
-        packet = debug(&encryption_request),
-        "sending encryption request packet"
-    );
-    stream.write_packet(encryption_request).await?;
-
-    // await the encryption response packet and read it
-    debug!("awaiting and reading encryption response packet");
-    let encryption_response: EncryptionResponsePacket = stream.read_packet().await?;
-    debug!(
-        packet = debug(&encryption_response),
-        "received encryption response packet"
-    );
-
-    // decrypt the shared secret and verify token
-    let shared_secret = authentication::decrypt(&keys.0, &encryption_response.shared_secret)?;
-    let decrypted_verify_token =
-        authentication::decrypt(&keys.0, &encryption_response.verify_token)?;
-
-    // verify the token is correct
-    authentication::verify_token(verify_token, &decrypted_verify_token)?;
-
-    // get the data for login success
-    let auth_response =
-        authentication::authenticate_mojang(&login_start.user_name, &shared_secret, &public_key)
-            .await?;
-
-    // get stream ciphers and wrap stream with cipher
-    let (encryptor, decryptor) = authentication::create_ciphers(&shared_secret)?;
-    let mut stream = CipherStream::new(stream, encryptor, decryptor);
-
-    // select target
-    let target = target_selector
-        .select(
-            &handshake.client_addr,
-            &handshake.server_addr,
-            handshake.protocol,
-            &auth_response.id,
-            &auth_response.name,
-        )
-        .await?;
-
-    // create a new login success packet and send it
-    let login_success = LoginSuccessPacket::new(auth_response.id, auth_response.name);
-    debug!(
-        packet = debug(&login_success),
-        "sending login success packet"
-    );
-    stream.write_packet(login_success).await?;
-
-    // await the login acknowledged packet and read it
-    debug!("awaiting and reading login acknowledged packet");
-    let login_acknowledged: LoginAcknowledgedPacket = stream.read_packet().await?;
-    debug!(
-        packet = debug(&login_acknowledged),
-        "received login acknowledged packet"
-    );
-
-    // TODO move configuration in own method (with target selection)
-    // disconnect if not target found
-    let Some(target) = target else { return Ok(()) };
-
-    // create a new transfer packet and send it
-    let transfer = TransferPacket::from_addr(target);
-    debug!(packet = debug(&transfer), "sending transfer packet");
-    stream.write_packet(transfer).await?;
-
-    Ok(())
 }

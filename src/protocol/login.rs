@@ -1,8 +1,13 @@
+use crate::authentication;
 use crate::authentication::VerifyToken;
+use crate::connection::{Connection, Login};
+use crate::protocol::configuration::TransferPacket;
 use crate::protocol::{
-    AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet,
+    AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet, Phase,
 };
+use crate::status::Protocol;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tracing::debug;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -14,6 +19,10 @@ pub struct LoginStartPacket {
 impl Packet for LoginStartPacket {
     fn get_packet_id() -> usize {
         0x00
+    }
+
+    fn get_phase() -> Phase {
+        Phase::Login
     }
 }
 
@@ -30,6 +39,35 @@ impl InboundPacket for LoginStartPacket {
             user_id,
         })
     }
+
+    async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    {
+        debug!(packet = debug(&self), "received login start packet");
+
+        // encode public key and generate verify token
+        let verify_token = authentication::generate_token()?;
+
+        // save packet information to connection
+        con.login = Some(Login {
+            verify_token: verify_token.clone(),
+            user_name: self.user_name.clone(),
+            user_id: self.user_id.clone(),
+            success: false,
+        });
+
+        // create a new encryption request and send it
+        let encryption_request =
+            EncryptionRequestPacket::new(authentication::ENCODED_PUB.clone(), verify_token, true);
+        debug!(
+            packet = debug(&encryption_request),
+            "sending encryption request packet"
+        );
+        con.write_packet(encryption_request).await?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -41,6 +79,10 @@ pub struct EncryptionResponsePacket {
 impl Packet for EncryptionResponsePacket {
     fn get_packet_id() -> usize {
         0x01
+    }
+
+    fn get_phase() -> Phase {
+        Phase::Login
     }
 }
 
@@ -57,6 +99,51 @@ impl InboundPacket for EncryptionResponsePacket {
             verify_token,
         })
     }
+
+    async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    {
+        debug!(packet = debug(&self), "received encryption response packet");
+
+        // get login state from connection
+        let Some(login) = &mut con.login else {
+            return Err(Error::Generic("invalid state".to_string()));
+        };
+
+        // decrypt the shared secret and verify token
+        let shared_secret =
+            authentication::decrypt(&authentication::KEY_PAIR.0, &self.shared_secret)?;
+        let decrypted_verify_token =
+            authentication::decrypt(&authentication::KEY_PAIR.0, &self.verify_token)?;
+
+        // verify the token is correct
+        authentication::verify_token(login.verify_token.clone(), &decrypted_verify_token)?;
+
+        // get the data for login success
+        let auth_response = authentication::authenticate_mojang(
+            &login.user_name,
+            &shared_secret,
+            &authentication::ENCODED_PUB,
+        )
+        .await?;
+
+        // set success state
+        login.success = true;
+
+        // enable encryption for the connection using the shared secret
+        con.enable_encryption(&shared_secret)?;
+
+        // create a new login success packet and send it
+        let login_success = LoginSuccessPacket::new(auth_response.id, auth_response.name);
+        debug!(
+            packet = debug(&login_success),
+            "sending login success packet"
+        );
+        con.write_packet(login_success).await?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -66,6 +153,10 @@ impl Packet for LoginAcknowledgedPacket {
     fn get_packet_id() -> usize {
         0x03
     }
+
+    fn get_phase() -> Phase {
+        Phase::Login
+    }
 }
 
 impl InboundPacket for LoginAcknowledgedPacket {
@@ -74,6 +165,52 @@ impl InboundPacket for LoginAcknowledgedPacket {
         S: AsyncRead + Unpin + Send + Sync,
     {
         Ok(Self)
+    }
+
+    async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    {
+        debug!(packet = debug(&self), "received login acknowledged packet");
+
+        // get handshake and login state from connection
+        let Some(handshake) = &con.handshake else {
+            return Err(Error::Generic("invalid state".to_string()));
+        };
+        let Some(login) = &con.login else {
+            return Err(Error::Generic("invalid state".to_string()));
+        };
+
+        // verify that the login was a success
+        if !login.success {
+            return Err(Error::Generic("invalid state".to_string()));
+        }
+
+        // switch to configuration phase
+        con.phase = Phase::Configuration;
+
+        // select target
+        let target = con
+            .target_selector
+            .select(
+                &con.client_address,
+                (&handshake.server_address, handshake.server_port),
+                handshake.protocol_version as Protocol,
+                &login.user_id,
+                &login.user_name,
+            )
+            .await?;
+
+        // TODO move configuration in own method (with target selection)
+        // disconnect if not target found
+        let Some(target) = target else { return Ok(()) };
+
+        // create a new transfer packet and send it
+        let transfer = TransferPacket::from_addr(target);
+        debug!(packet = debug(&transfer), "sending transfer packet");
+        con.write_packet(transfer).await?;
+
+        Ok(())
     }
 }
 
@@ -102,6 +239,10 @@ impl EncryptionRequestPacket {
 impl Packet for EncryptionRequestPacket {
     fn get_packet_id() -> usize {
         0x01
+    }
+
+    fn get_phase() -> Phase {
+        Phase::Login
     }
 }
 
@@ -135,6 +276,10 @@ impl LoginSuccessPacket {
 impl Packet for LoginSuccessPacket {
     fn get_packet_id() -> usize {
         0x02
+    }
+
+    fn get_phase() -> Phase {
+        Phase::Login
     }
 }
 

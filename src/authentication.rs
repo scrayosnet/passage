@@ -2,6 +2,7 @@ use crate::authentication::Error::InvalidVerifyToken;
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut};
 use cfb8::cipher::{BlockSizeUser, KeyIvInit};
+use lazy_static::lazy_static;
 use num_bigint::BigInt;
 use rand::RngCore;
 use rand::rngs::OsRng;
@@ -14,6 +15,13 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tracing::trace;
 use uuid::Uuid;
+
+lazy_static! {
+    pub(crate) static ref KEY_PAIR: (RsaPrivateKey, RsaPublicKey) = generate_keypair().expect("");
+    pub(crate) static ref ENCODED_PUB: Vec<u8> = encode_public_key(&KEY_PAIR.1).expect("");
+}
+
+// TODo lazy static keys and encoded
 
 /// The internal error type for all errors related to the authentication and cryptography.
 ///
@@ -143,17 +151,26 @@ pub fn create_ciphers(shared_secret: &[u8]) -> Result<(Aes128Cfb8Enc, Aes128Cfb8
 /// or written will be encrypted/decrypted using the provided block encryptor/decryptor.
 pub struct CipherStream<S, E, D> {
     inner: S,
-    encryptor: E,
-    decryptor: D,
+    encryptor: Option<E>,
+    decryptor: Option<D>,
 }
 
 impl<S, E, D> CipherStream<S, E, D> {
-    pub fn new(inner: S, encryptor: E, decryptor: D) -> Self {
+    pub fn new(inner: S, encryptor: Option<E>, decryptor: Option<D>) -> Self {
         Self {
             inner,
             encryptor,
             decryptor,
         }
+    }
+
+    pub fn set_encryption(&mut self, encryptor: Option<E>, decryptor: Option<D>) {
+        self.encryptor = encryptor;
+        self.decryptor = decryptor;
+    }
+
+    pub fn is_encrypted(&self) -> bool {
+        self.encryptor.is_some()
     }
 }
 
@@ -170,11 +187,16 @@ where
     ) -> Poll<Result<usize, std::io::Error>> {
         let self_mut = self.get_mut();
 
+        // if no encryptor present, use direct
+        let Some(enc) = &mut self_mut.encryptor else {
+            return Pin::new(&mut self_mut.inner).poll_write(cx, buf);
+        };
+
         // encrypt buffer
         let mut buf = buf.to_vec();
         for chunk in buf.chunks_mut(Aes128Cfb8Enc::block_size()) {
             let gen_arr = GenericArray::from_mut_slice(chunk);
-            self_mut.encryptor.encrypt_block_mut(gen_arr);
+            enc.encrypt_block_mut(gen_arr);
         }
         trace!(buf_len = buf.len(), "encrypted write bytes");
 
@@ -209,6 +231,10 @@ where
     ) -> Poll<std::io::Result<()>> {
         let self_mut = self.get_mut();
 
+        let Some(dec) = &mut self_mut.decryptor else {
+            return Pin::new(&mut self_mut.inner).poll_read(cx, buf);
+        };
+
         // pass to inner
         let cursor = buf.capacity() - buf.remaining();
         let poll_result = Pin::new(&mut self_mut.inner).poll_read(cx, buf);
@@ -217,7 +243,7 @@ where
         if poll_result.is_ready() {
             for chunk in buf.filled_mut()[cursor..].chunks_mut(Aes128Cfb8Dec::block_size()) {
                 let gen_arr = GenericArray::from_mut_slice(chunk);
-                self_mut.decryptor.decrypt_block_mut(gen_arr);
+                dec.decrypt_block_mut(gen_arr);
             }
             trace!(buf_len = (cursor - buf.remaining()), "decrypted read bytes");
         }

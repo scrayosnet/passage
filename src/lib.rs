@@ -3,6 +3,7 @@
 
 pub mod authentication;
 pub mod config;
+mod connection;
 mod protocol;
 mod resource_pack_supplier;
 mod server;
@@ -14,10 +15,11 @@ mod target_selector_strategy;
 use crate::config::Config;
 use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
 use crate::status_supplier::simple::SimpleStatusSupplier;
-use crate::target_selector::fixed::SimpleTargetSelector;
+use crate::target_selector::first::SimpleTargetSelector;
 use serde_json::value::RawValue;
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -32,13 +34,6 @@ use tracing::info;
 /// Will return an appropriate error if the socket cannot be bound to the supplied address, or the TCP server cannot be
 /// properly initialized.
 pub async fn start(state: Config) -> Result<(), Box<dyn std::error::Error>> {
-    // generate a new key pair
-    info!(
-        bits = state.key_length,
-        "generating a new cryptographic keypair"
-    );
-    let keys = authentication::generate_keypair()?;
-
     // bind the socket address on all interfaces
     let addr = state.address;
     info!(addr = addr.to_string(), "binding socket address");
@@ -66,7 +61,12 @@ pub async fn start(state: Config) -> Result<(), Box<dyn std::error::Error>> {
         SimpleTargetSelector::from_target(SocketAddr::from_str("149.248.195.184:25565")?);
 
     // serve the router service on the bound socket address
-    server::serve(listener, keys, status_supplier, target_selector).await?;
+    server::serve(
+        listener,
+        Arc::new(status_supplier),
+        Arc::new(target_selector),
+    )
+    .await?;
     info!("protocol server stopped successfully");
 
     // exit with success

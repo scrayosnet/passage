@@ -2,19 +2,21 @@ mod none;
 
 use crate::protocol::Error;
 use crate::status::Protocol;
+use async_trait::async_trait;
 use serde::Serialize;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-pub trait ResourcePackSupplier: Send {
+#[async_trait]
+pub trait ResourcePackSupplier: Send + Sync {
     fn get_resource_packs(
         &self,
         client_addr: &SocketAddr,
-        server_addr: &(String, u16),
+        server_addr: (&str, u16),
         protocol: Protocol,
         username: &str,
         user_id: &Uuid,
-    ) -> impl Future<Output=Result<Vec<ResourcePack>, Error>> + Send;
+    ) -> Result<Vec<ResourcePack>, Error>;
 }
 
 #[derive(Debug, Serialize, Clone)]

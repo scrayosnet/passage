@@ -3,13 +3,15 @@ pub mod simple;
 
 use crate::protocol::Error;
 use crate::status::{Protocol, ServerStatus};
+use async_trait::async_trait;
 use std::net::SocketAddr;
 
-pub trait StatusSupplier: Send {
-    fn get_status(
+#[async_trait]
+pub trait StatusSupplier: Send + Sync {
+    async fn get_status(
         &self,
         client_addr: &SocketAddr,
-        server_addr: &(String, u16),
+        server_addr: (&str, u16),
         protocol: Protocol,
-    ) -> impl Future<Output=Result<Option<ServerStatus>, Error>> + Send;
+    ) -> Result<Option<ServerStatus>, Error>;
 }
