@@ -1,9 +1,11 @@
 use crate::authentication;
 use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
+use crate::protocol::Error::Generic;
+use crate::protocol::configuration::KeepAlivePacket;
 use crate::protocol::handshaking::HandshakePacket;
 use crate::protocol::login::{EncryptionResponsePacket, LoginAcknowledgedPacket, LoginStartPacket};
 use crate::protocol::status::{PingPacket, StatusRequestPacket};
-use crate::protocol::{AsyncReadPacket, Error, InboundPacket, Phase, State};
+use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, Phase, State};
 use crate::status_supplier::StatusSupplier;
 use crate::target_selector::TargetSelector;
 use std::net::SocketAddr;
@@ -56,6 +58,22 @@ pub struct Login {
     pub success: bool,
 }
 
+pub struct KeepAlive([u64; 2]);
+
+impl KeepAlive {
+    pub fn replace(&mut self, from: u64, to: u64) -> bool {
+        if self.0[0] == from {
+            self.0[0] = to;
+            true
+        } else if self.0[1] == from {
+            self.0[1] = to;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// ...
 pub struct Connection<S> {
     /// The connection reader
@@ -72,8 +90,8 @@ pub struct Connection<S> {
     pub handshake: Option<Handshake>,
     /// All login data...
     pub login: Option<Login>,
-    /// The time that the last three keep alive packets (time and id)
-    pub last_keep_alive: [(u64, u64); 3],
+    /// The time that the last three keep alive packet ids
+    pub last_keep_alive: KeepAlive,
 }
 
 impl<S> Connection<S>
@@ -94,7 +112,7 @@ where
             phase: Phase::Handshake,
             handshake: None,
             login: None,
-            last_keep_alive: [(0, 0); 3],
+            last_keep_alive: KeepAlive([0; 2]),
         }
     }
 }
@@ -115,25 +133,25 @@ where
                 // await next timer tick for keep-alive
                 _ = interval.tick() => self.handle_tick().await?,
                 // await next packet in, reading the packet size (expect fast execution)
-                maybe_length = self.read_varint() => {
-                    match maybe_length {
-                        Ok(length) => {
-                            info!(length = length, "Read new packet with length");
-                            self.handle_packet(length).await?
-                        }
-                        Err(_) => {
-                            // TODO connection closed?
-                        }
-                    }
-                },
+                maybe_length = self.read_varint() => self.handle_packet(maybe_length?).await?,
             }
         }
     }
 
     async fn handle_tick(&mut self) -> Result<(), Error> {
-        // TODO implement me!
-        // check if any expired // send keep alive
-        // only if in configuration phase
+        if self.phase != Phase::Handshake {
+            return Ok(());
+        }
+
+        let id = authentication::generate_keep_alive();
+
+        if !self.last_keep_alive.replace(0, id) {
+            return Err(Generic("keep alive not empty".to_string()));
+        }
+
+        let packet = KeepAlivePacket::new(id);
+        self.write_packet(packet).await?;
+
         Ok(())
     }
 
@@ -166,6 +184,7 @@ where
             (0x01, Phase::Login) => EncryptionResponsePacket,
             (0x03, Phase::Login) => LoginAcknowledgedPacket,
             // configuration phase
+            (0x04, Phase::Configuration) => KeepAlivePacket,
             // ...
             // play phase
             // (unsupported)

@@ -4,8 +4,8 @@ use aes::cipher::{BlockDecryptMut, BlockEncryptMut};
 use cfb8::cipher::{BlockSizeUser, KeyIvInit};
 use lazy_static::lazy_static;
 use num_bigint::BigInt;
-use rand::RngCore;
 use rand::rngs::OsRng;
+use rand::{Rng, RngCore};
 use rsa::pkcs8::EncodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,14 @@ pub enum Error {
         expected: VerifyToken,
         actual: Vec<u8>,
     },
+}
+
+pub fn generate_keep_alive() -> u64 {
+    // retrieve a new mutable instance of an OS RNG
+    let mut rng = OsRng;
+
+    // generate random number
+    rng.r#gen()
 }
 
 pub fn generate_keypair() -> Result<(RsaPrivateKey, RsaPublicKey), Error> {

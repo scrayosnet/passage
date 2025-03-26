@@ -1,7 +1,8 @@
 use crate::connection::Connection;
+use crate::protocol::Error::Generic;
 use crate::protocol::{AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet, Phase};
 use std::net::SocketAddr;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 #[derive(Debug)]
 pub struct TransferPacket {
@@ -75,16 +76,25 @@ impl InboundPacket for KeepAlivePacket {
         Ok(Self { id })
     }
 
-    async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
+    async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
     {
-        // TODO implement me!
-        //for (_time, id) in &mut con.last_keep_alive {
-        //    if id == &self.id {
-        //        todo!()
-        //    }
-        //}
+        if !con.last_keep_alive.replace(self.id, 0) {
+            return Err(Generic("keep alive packet already received".to_string()));
+        }
+
+        Ok(())
+    }
+}
+
+impl OutboundPacket for KeepAlivePacket {
+    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+    where
+        S: AsyncWrite + Unpin + Send + Sync,
+    {
+        buffer.write_u64(self.id).await?;
+
         Ok(())
     }
 }

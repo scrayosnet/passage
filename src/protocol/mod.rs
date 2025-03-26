@@ -15,7 +15,7 @@ use crate::connection::Connection;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
 
-mod configuration;
+pub(crate) mod configuration;
 pub(crate) mod handshaking;
 pub(crate) mod login;
 pub(crate) mod status;
