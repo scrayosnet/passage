@@ -171,15 +171,21 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
         &mut self,
         packet: T,
     ) -> Result<(), Error> {
-        // create a new buffer and write the packet onto it (to get the size)
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+        // create a new buffer (our packets are very small)
+        let mut buffer = Vec::with_capacity(48);
+
+        // write the packet id and the respective packet content
         buffer.write_varint(T::get_packet_id()).await?;
         packet.write_to_buffer(&mut buffer).await?;
 
-        // write the length of the content (length frame encoder) and then the packet
-        let inner = buffer.into_inner();
-        self.write_varint(inner.len()).await?;
-        self.write_all(&inner).await?;
+        // prepare a final buffer (leaving max 2 bytes for varint (packets never get that big))
+        let packet_len = buffer.len();
+        let mut final_buffer = Vec::with_capacity(packet_len + 2);
+        final_buffer.write_varint(packet_len).await?;
+        final_buffer.extend_from_slice(&buffer);
+
+        // send the final buffer into the stream
+        self.write_all(&final_buffer).await?;
 
         Ok(())
     }

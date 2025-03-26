@@ -30,7 +30,6 @@ sha1 = "0.10.6"
 reqwest = { version = "0.12.14", default-features = false, features = ["json", "rustls-tls"] }
 cfb8 = "0.8.1"
 aes = "0.8.4"
-trait-variant = "0.1.2"
 config = "0.15.11"
 sentry = { version = "0.35", default-features = false, features = ["backtrace", "contexts", "panic", "debug-images", "reqwest", "rustls", "tower"] }
 sentry-tracing = "0.35"

@@ -14,7 +14,7 @@ mod target_selector_strategy;
 use crate::config::Config;
 use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
 use crate::status_supplier::simple::SimpleStatusSupplier;
-use crate::target_selector::simple::SimpleTargetSelector;
+use crate::target_selector::fixed::SimpleTargetSelector;
 use serde_json::value::RawValue;
 use std::net::SocketAddr;
 use std::str::FromStr;

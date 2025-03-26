@@ -1,4 +1,5 @@
-pub mod simple;
+pub mod first;
+pub mod fixed;
 
 use crate::protocol::Error;
 use crate::status::Protocol;
@@ -6,16 +7,15 @@ use std::iter::Map;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-#[trait_variant::make(TargetSelector: Send)]
-pub trait LocalTargetSelector {
-    async fn select(
+pub trait TargetSelector: Send {
+    fn select(
         &self,
         client_addr: &SocketAddr,
         server_addr: &(String, u16),
         protocol: Protocol,
         user_id: &Uuid,
         username: &str,
-    ) -> Result<Option<SocketAddr>, Error>;
+    ) -> impl Future<Output=Result<Option<SocketAddr>, Error>> + Send;
 }
 
 #[derive(Debug, Clone)]

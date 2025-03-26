@@ -16,5 +16,20 @@ auth_enabled = false
 username = "username" # update if (auth) enabled
 password = "password" # update if (auth) enabled
 
+[resource_pack]
+adapter = "none"
+
+[status]
+adapter = "none"
+
+[target_selector]
+adapter = "none"
+
+[target_selector.fixed]
+target = "justchunks.net"
+
+[target_discoverer]
+adapter = "none"
+
 [logging]
 level = "info"

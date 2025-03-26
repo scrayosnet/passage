@@ -4,9 +4,9 @@ use crate::status_supplier::StatusSupplier;
 use std::net::SocketAddr;
 
 #[derive(Default)]
-pub struct HiddenStatusSupplier;
+pub struct NoneStatusSupplier;
 
-impl StatusSupplier for HiddenStatusSupplier {
+impl StatusSupplier for NoneStatusSupplier {
     async fn get_status(
         &self,
         _client_addr: &SocketAddr,
