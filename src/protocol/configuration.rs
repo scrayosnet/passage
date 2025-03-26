@@ -47,6 +47,32 @@ impl OutboundPacket for TransferPacket {
 }
 
 #[derive(Debug)]
+pub struct DisconnectPacket {
+    /// The JSON response reason that contains all self-reported server metadata.
+    reason: String,
+}
+
+impl Packet for DisconnectPacket {
+    fn get_packet_id() -> usize {
+        0x02
+    }
+
+    fn get_phase() -> Phase {
+        Phase::Configuration
+    }
+}
+
+impl OutboundPacket for DisconnectPacket {
+    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+    where
+        S: AsyncWrite + Unpin + Send + Sync,
+    {
+        buffer.write_string(&self.reason).await?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub struct KeepAlivePacket {
     id: u64,
 }
