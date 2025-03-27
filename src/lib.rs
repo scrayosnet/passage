@@ -1,3 +1,4 @@
+#![feature(let_chains)]
 #![deny(clippy::all)]
 #![forbid(unsafe_code)]
 
@@ -13,6 +14,8 @@ mod target_selector;
 mod target_selector_strategy;
 
 use crate::config::Config;
+use crate::resource_pack_supplier::none::NoneResourcePackSupplier;
+use crate::resource_pack_supplier::test::TestResourcePackSupplier;
 use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
 use crate::status_supplier::simple::SimpleStatusSupplier;
 use crate::target_selector::first::SimpleTargetSelector;
@@ -60,11 +63,14 @@ pub async fn start(state: Config) -> Result<(), Box<dyn std::error::Error>> {
     let target_selector =
         SimpleTargetSelector::from_target(SocketAddr::from_str("149.248.195.184:25565")?);
 
+    let resource_pack_supplier = TestResourcePackSupplier;
+
     // serve the router service on the bound socket address
     server::serve(
         listener,
         Arc::new(status_supplier),
         Arc::new(target_selector),
+        Arc::new(resource_pack_supplier),
     )
     .await?;
     info!("protocol server stopped successfully");

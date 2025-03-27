@@ -1,12 +1,10 @@
 use crate::authentication;
 use crate::authentication::VerifyToken;
 use crate::connection::{Connection, Login};
-use crate::protocol::configuration::TransferPacket;
 use crate::protocol::{
     AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet, Phase,
 };
-use crate::status::Protocol;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -173,44 +171,8 @@ impl InboundPacket for LoginAcknowledgedPacket {
     {
         debug!(packet = debug(&self), "received login acknowledged packet");
 
-        // get handshake and login state from connection
-        let Some(handshake) = &con.handshake else {
-            return Err(Error::Generic("invalid state".to_string()));
-        };
-        let Some(login) = &con.login else {
-            return Err(Error::Generic("invalid state".to_string()));
-        };
-
-        // verify that the login was a success
-        if !login.success {
-            return Err(Error::Generic("invalid state".to_string()));
-        }
-
         // switch to configuration phase
-        con.phase = Phase::Configuration;
-
-        // select target
-        let target = con
-            .target_selector
-            .select(
-                &con.client_address,
-                (&handshake.server_address, handshake.server_port),
-                handshake.protocol_version as Protocol,
-                &login.user_id,
-                &login.user_name,
-            )
-            .await?;
-
-        // TODO move configuration in own method (with target selection)
-        // disconnect if not target found
-        let Some(target) = target else { return Ok(()) };
-
-        // create a new transfer packet and send it
-        let transfer = TransferPacket::from_addr(target);
-        debug!(packet = debug(&transfer), "sending transfer packet");
-        con.write_packet(transfer).await?;
-
-        Ok(())
+        con.configure().await
     }
 }
 
@@ -254,7 +216,7 @@ impl OutboundPacket for EncryptionRequestPacket {
         buffer.write_string("").await?;
         buffer.write_bytes(&self.public_key).await?;
         buffer.write_bytes(&self.verify_token).await?;
-        buffer.write_u8(self.should_authenticate as u8).await?;
+        buffer.write_bool(self.should_authenticate).await?;
 
         Ok(())
     }

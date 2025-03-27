@@ -1,4 +1,5 @@
 use crate::connection::Connection;
+use crate::resource_pack_supplier::ResourcePackSupplier;
 use crate::status_supplier::StatusSupplier;
 use crate::target_selector::TargetSelector;
 use std::sync::Arc;
@@ -10,6 +11,7 @@ pub async fn serve(
     listener: TcpListener,
     status_supplier: Arc<dyn StatusSupplier>,
     target_selector: Arc<dyn TargetSelector>,
+    resource_pack_supplier: Arc<dyn ResourcePackSupplier>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     loop {
         // accept the next incoming connection
@@ -18,6 +20,7 @@ pub async fn serve(
         // clone values to be moved
         let status_supplier = Arc::clone(&status_supplier);
         let target_selector = Arc::clone(&target_selector);
+        let resource_pack_supplier = Arc::clone(&resource_pack_supplier);
 
         tokio::spawn(async move {
             // build connection wrapper for stream
@@ -26,6 +29,7 @@ pub async fn serve(
                 addr,
                 Arc::clone(&status_supplier),
                 Arc::clone(&target_selector),
+                Arc::clone(&resource_pack_supplier),
             );
 
             // handle the client connection

@@ -10,7 +10,7 @@ pub struct NoneResourcePackSupplier;
 
 #[async_trait]
 impl ResourcePackSupplier for NoneResourcePackSupplier {
-    fn get_resource_packs(
+    async fn get_resource_packs(
         &self,
         _client_addr: &SocketAddr,
         _server_addr: (&str, u16),

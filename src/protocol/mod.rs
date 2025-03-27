@@ -39,6 +39,12 @@ pub enum Error {
         /// The state index that was received.
         state: usize,
     },
+    /// The received value index cannot be mapped to an existing enum.
+    #[error("illegal enum value index: {value}")]
+    IllegalEnumValue {
+        /// The value that was received.
+        value: usize,
+    },
     /// The received `VarInt` cannot be correctly decoded (was formed incorrectly).
     #[error("invalid VarInt data")]
     InvalidVarInt,
@@ -170,6 +176,11 @@ pub trait AsyncWritePacket {
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:UUID
     async fn write_uuid(&mut self, uuid: &Uuid) -> Result<(), Error>;
 
+    /// Writes a `Uuid` onto this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Boolean
+    async fn write_bool(&mut self, bool: bool) -> Result<(), Error>;
+
     /// Writes a vec of `u8` onto this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Prefixed_Array
@@ -231,6 +242,12 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
 
     async fn write_uuid(&mut self, id: &Uuid) -> Result<(), Error> {
         self.write_u128(id.as_u128()).await?;
+
+        Ok(())
+    }
+
+    async fn write_bool(&mut self, bool: bool) -> Result<(), Error> {
+        self.write_u8(bool as u8).await?;
 
         Ok(())
     }

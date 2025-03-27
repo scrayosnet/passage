@@ -1,11 +1,15 @@
 use crate::authentication;
 use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
 use crate::protocol::Error::Generic;
-use crate::protocol::configuration::KeepAlivePacket;
+use crate::protocol::configuration::{
+    AddResourcePackPacket, KeepAlivePacket, ResourcePackResponsePacket, TransferPacket,
+};
 use crate::protocol::handshaking::HandshakePacket;
 use crate::protocol::login::{EncryptionResponsePacket, LoginAcknowledgedPacket, LoginStartPacket};
 use crate::protocol::status::{PingPacket, StatusRequestPacket};
 use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, Phase, State};
+use crate::resource_pack_supplier::ResourcePackSupplier;
+use crate::status::Protocol;
 use crate::status_supplier::StatusSupplier;
 use crate::target_selector::TargetSelector;
 use std::net::SocketAddr;
@@ -15,7 +19,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, ReadBuf};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// [`packets!`] macro expands to match statement matching a packet id and phase pair.
@@ -58,6 +62,11 @@ pub struct Login {
     pub success: bool,
 }
 
+/// ...
+pub struct Configuration {
+    pub transit_packs: Vec<(Uuid, bool)>,
+}
+
 pub struct KeepAlive([u64; 2]);
 
 impl KeepAlive {
@@ -82,6 +91,8 @@ pub struct Connection<S> {
     pub status_supplier: Arc<dyn StatusSupplier>,
     /// ...
     pub target_selector: Arc<dyn TargetSelector>,
+    /// ...
+    pub resource_pack_supplier: Arc<dyn ResourcePackSupplier>,
     /// The client address.
     pub client_address: SocketAddr,
     /// The current phase of the connection.
@@ -90,6 +101,8 @@ pub struct Connection<S> {
     pub handshake: Option<Handshake>,
     /// All login data...
     pub login: Option<Login>,
+    /// All configuration data...
+    pub configuration: Option<Configuration>,
     /// The time that the last three keep alive packet ids
     pub last_keep_alive: KeepAlive,
 }
@@ -103,15 +116,18 @@ where
         client_address: SocketAddr,
         status_supplier: Arc<dyn StatusSupplier>,
         target_selector: Arc<dyn TargetSelector>,
+        resource_pack_supplier: Arc<dyn ResourcePackSupplier>,
     ) -> Connection<S> {
         Self {
             stream: CipherStream::new(stream, None, None),
             status_supplier,
             target_selector,
+            resource_pack_supplier,
             client_address,
             phase: Phase::Handshake,
             handshake: None,
             login: None,
+            configuration: None,
             last_keep_alive: KeepAlive([0; 2]),
         }
     }
@@ -185,6 +201,7 @@ where
             (0x03, Phase::Login) => LoginAcknowledgedPacket,
             // configuration phase
             (0x04, Phase::Configuration) => KeepAlivePacket,
+            (0x06, Phase::Configuration) => ResourcePackResponsePacket,
             // ...
             // play phase
             // (unsupported)
@@ -202,11 +219,101 @@ where
 
         Ok(())
     }
+
+    // utilities
+
+    pub async fn configure(&mut self) -> Result<(), Error> {
+        // get and check internal state
+        let Some(handshake) = &self.handshake else {
+            return Err(Error::Generic("invalid state".to_string()));
+        };
+        let Some(login) = &self.login else {
+            return Err(Error::Generic("invalid state".to_string()));
+        };
+        if !login.success {
+            return Err(Error::Generic("invalid state".to_string()));
+        }
+
+        // switch to configuration phase
+        self.phase = Phase::Configuration;
+
+        // get resource packs to load
+        let packs = self
+            .resource_pack_supplier
+            .get_resource_packs(
+                &self.client_address,
+                (&handshake.server_address, handshake.server_port),
+                handshake.protocol_version as Protocol,
+                &login.user_name,
+                &login.user_id,
+            )
+            .await?;
+
+        // register resource packs to await
+        let pack_ids = packs.iter().map(|pack| (pack.uuid, pack.forced)).collect();
+        self.configuration = Some(Configuration {
+            transit_packs: pack_ids,
+        });
+
+        // handle no resource packs to send
+        if packs.is_empty() {
+            return self.transfer().await;
+        }
+
+        // send resource packs
+        for pack in packs {
+            self.write_packet(AddResourcePackPacket {
+                uuid: pack.uuid,
+                url: pack.url,
+                hash: pack.hash,
+                forced: pack.forced,
+                prompt_message: pack.prompt_message,
+            })
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn transfer(&mut self) -> Result<(), Error> {
+        // get and check internal state
+        let Some(handshake) = &self.handshake else {
+            return Err(Error::Generic("invalid state".to_string()));
+        };
+        let Some(login) = &self.login else {
+            return Err(Error::Generic("invalid state".to_string()));
+        };
+        if !login.success {
+            return Err(Error::Generic("invalid state".to_string()));
+        }
+
+        // select target
+        let target = self
+            .target_selector
+            .select(
+                &self.client_address,
+                (&handshake.server_address, handshake.server_port),
+                handshake.protocol_version as Protocol,
+                &login.user_id,
+                &login.user_name,
+            )
+            .await?;
+
+        // disconnect if not target found
+        let Some(target) = target else { return Ok(()) };
+
+        // create a new transfer packet and send it
+        let transfer = TransferPacket::from_addr(target);
+        debug!(packet = debug(&transfer), "sending transfer packet");
+        self.write_packet(transfer).await?;
+
+        Ok(())
+    }
 }
 
 impl<S> AsyncWrite for Connection<S>
 where
-    S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    S: AsyncWrite + Unpin + Send + Sync,
 {
     fn poll_write(
         self: Pin<&mut Self>,
@@ -230,7 +337,7 @@ where
 
 impl<S> AsyncRead for Connection<S>
 where
-    S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    S: AsyncRead + Unpin + Send + Sync,
 {
     fn poll_read(
         self: Pin<&mut Self>,

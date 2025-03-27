@@ -1,5 +1,5 @@
-mod none;
-mod test;
+pub(crate) mod none;
+pub(crate) mod test;
 
 use crate::protocol::Error;
 use crate::status::Protocol;
@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 #[async_trait]
 pub trait ResourcePackSupplier: Send + Sync {
-    fn get_resource_packs(
+    async fn get_resource_packs(
         &self,
         client_addr: &SocketAddr,
         server_addr: (&str, u16),
