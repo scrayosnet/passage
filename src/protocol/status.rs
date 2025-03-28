@@ -15,10 +15,6 @@ impl Packet for StatusRequestPacket {
     fn get_packet_id() -> usize {
         0x00
     }
-
-    fn get_phase() -> Phase {
-        Phase::Status
-    }
 }
 
 impl InboundPacket for StatusRequestPacket {
@@ -76,10 +72,6 @@ impl Packet for PingPacket {
     fn get_packet_id() -> usize {
         0x01
     }
-
-    fn get_phase() -> Phase {
-        Phase::Status
-    }
 }
 
 impl InboundPacket for PingPacket {
@@ -128,10 +120,6 @@ impl Packet for StatusResponsePacket {
     fn get_packet_id() -> usize {
         0x00
     }
-
-    fn get_phase() -> Phase {
-        Phase::Status
-    }
 }
 
 impl OutboundPacket for StatusResponsePacket {
@@ -165,10 +153,6 @@ impl PongPacket {
 impl Packet for PongPacket {
     fn get_packet_id() -> usize {
         0x01
-    }
-
-    fn get_phase() -> Phase {
-        Phase::Status
     }
 }
 

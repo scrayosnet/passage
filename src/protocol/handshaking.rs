@@ -23,10 +23,6 @@ impl Packet for HandshakePacket {
     fn get_packet_id() -> usize {
         0x00
     }
-
-    fn get_phase() -> Phase {
-        Phase::Handshake
-    }
 }
 
 impl InboundPacket for HandshakePacket {

@@ -12,7 +12,9 @@
 
 use crate::authentication;
 use crate::connection::Connection;
+use std::fmt::Debug;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tracing::{debug, info};
 use uuid::Uuid;
 
 pub(crate) mod configuration;
@@ -117,13 +119,55 @@ impl TryFrom<usize> for State {
     }
 }
 
+#[derive(Debug)]
+enum ResourcePackResult {
+    Success,
+    Declined,
+    DownloadFailed,
+    Accepted,
+    Downloaded,
+    InvalidUrl,
+    ReloadFailed,
+    Discorded,
+}
+
+impl From<ResourcePackResult> for usize {
+    fn from(result: ResourcePackResult) -> Self {
+        match result {
+            ResourcePackResult::Success => 0,
+            ResourcePackResult::Declined => 1,
+            ResourcePackResult::DownloadFailed => 2,
+            ResourcePackResult::Accepted => 3,
+            ResourcePackResult::Downloaded => 4,
+            ResourcePackResult::InvalidUrl => 5,
+            ResourcePackResult::ReloadFailed => 6,
+            ResourcePackResult::Discorded => 7,
+        }
+    }
+}
+
+impl TryFrom<usize> for ResourcePackResult {
+    type Error = Error;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(ResourcePackResult::Success),
+            1 => Ok(ResourcePackResult::Declined),
+            2 => Ok(ResourcePackResult::DownloadFailed),
+            3 => Ok(ResourcePackResult::Accepted),
+            4 => Ok(ResourcePackResult::Downloaded),
+            5 => Ok(ResourcePackResult::InvalidUrl),
+            6 => Ok(ResourcePackResult::ReloadFailed),
+            7 => Ok(ResourcePackResult::Discorded),
+            _ => Err(Error::IllegalEnumValue { value }),
+        }
+    }
+}
+
 /// Packets are network packets that are part of the protocol definition and identified by a context and ID.
 pub trait Packet {
     /// Returns the defined ID of this network packet.
     fn get_packet_id() -> usize;
-
-    /// Returns the defined phase of this network packet.
-    fn get_phase() -> Phase;
 }
 
 /// `OutboundPacket`s are packets that are written from the serverside.
@@ -156,7 +200,7 @@ pub trait AsyncWritePacket {
     /// [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Packet_format
-    async fn write_packet<T: OutboundPacket + Send + Sync>(
+    async fn write_packet<T: OutboundPacket + Send + Sync + Debug>(
         &mut self,
         packet: T,
     ) -> Result<(), Error>;
@@ -176,10 +220,15 @@ pub trait AsyncWritePacket {
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:UUID
     async fn write_uuid(&mut self, uuid: &Uuid) -> Result<(), Error>;
 
-    /// Writes a `Uuid` onto this object as described in the official [protocol documentation][protocol-doc].
+    /// Writes a `bool` onto this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Boolean
     async fn write_bool(&mut self, bool: bool) -> Result<(), Error>;
+
+    /// Writes a string TextComponent onto this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Java_Edition_protocol#Type:Text_Component
+    async fn write_text_component(&mut self, str: &str) -> Result<(), Error>;
 
     /// Writes a vec of `u8` onto this object as described in the official [protocol documentation][protocol-doc].
     ///
@@ -188,10 +237,12 @@ pub trait AsyncWritePacket {
 }
 
 impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
-    async fn write_packet<T: OutboundPacket + Send + Sync>(
+    async fn write_packet<T: OutboundPacket + Send + Sync + Debug>(
         &mut self,
         packet: T,
     ) -> Result<(), Error> {
+        info!(packet = ?packet, "Writing packet");
+
         // create a new buffer (our packets are very small)
         let mut buffer = Vec::with_capacity(48);
 
@@ -248,6 +299,15 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
 
     async fn write_bool(&mut self, bool: bool) -> Result<(), Error> {
         self.write_u8(bool as u8).await?;
+
+        Ok(())
+    }
+
+    async fn write_text_component(&mut self, str: &str) -> Result<(), Error> {
+        // writes a TAG_String (0x08) TextComponent
+        self.write_u8(0x08).await?;
+        self.write_u16(str.len() as u16).await?;
+        self.write_all(str.as_bytes()).await?;
 
         Ok(())
     }

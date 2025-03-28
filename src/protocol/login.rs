@@ -5,9 +5,170 @@ use crate::protocol::{
     AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet, Phase,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::debug;
+use tracing::{debug, info};
 use uuid::Uuid;
 
+/// The outbound [`DisconnectPacket`]. (Placeholder)
+///
+/// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Disconnect_(login))
+#[derive(Debug)]
+pub struct DisconnectPacket;
+
+impl Packet for DisconnectPacket {
+    fn get_packet_id() -> usize {
+        0x00
+    }
+}
+
+impl OutboundPacket for DisconnectPacket {
+    async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
+    where
+        S: AsyncWrite + Unpin + Send + Sync,
+    {
+        Ok(())
+    }
+}
+
+/// The outbound [`EncryptionRequestPacket`].
+///
+/// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Encryption_Request)
+#[derive(Debug)]
+pub struct EncryptionRequestPacket {
+    // server id - is always empty, so we skip it
+    pub public_key: Vec<u8>,
+    pub verify_token: VerifyToken,
+    pub should_authenticate: bool,
+}
+
+impl Packet for EncryptionRequestPacket {
+    fn get_packet_id() -> usize {
+        0x01
+    }
+}
+
+impl OutboundPacket for EncryptionRequestPacket {
+    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+    where
+        S: AsyncWrite + Unpin + Send + Sync,
+    {
+        buffer.write_string("").await?;
+        buffer.write_bytes(&self.public_key).await?;
+        buffer.write_bytes(&self.verify_token).await?;
+        buffer.write_bool(self.should_authenticate).await?;
+
+        Ok(())
+    }
+}
+
+/// The outbound [`LoginSuccessPacket`].
+///
+/// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Success)
+#[derive(Debug)]
+pub struct LoginSuccessPacket {
+    pub user_id: Uuid,
+    pub user_name: String,
+    // properties - we don't need those
+}
+
+impl Packet for LoginSuccessPacket {
+    fn get_packet_id() -> usize {
+        0x02
+    }
+}
+
+impl OutboundPacket for LoginSuccessPacket {
+    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+    where
+        S: AsyncWrite + Unpin + Send + Sync,
+    {
+        buffer.write_uuid(&self.user_id).await?;
+        buffer.write_string(&self.user_name).await?;
+        // no properties in array
+        buffer.write_varint(0).await?;
+
+        Ok(())
+    }
+}
+
+/// The outbound [`SetCompressionPacket`]. (Placeholder)
+///
+/// Enables compression. If compression is enabled, all following packets are encoded in the compressed
+/// packet format. Negative values will disable compression, meaning the packet format should remain
+/// in the uncompressed packet format. However, this packet is entirely optional, and if not sent,
+/// compression will also not be enabled (the vanilla server does not send the packet when compression
+/// is disabled).
+///
+/// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Set_Compression)
+#[derive(Debug)]
+pub struct SetCompressionPacket;
+
+impl Packet for SetCompressionPacket {
+    fn get_packet_id() -> usize {
+        0x03
+    }
+}
+
+impl OutboundPacket for SetCompressionPacket {
+    async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
+    where
+        S: AsyncWrite + Unpin + Send + Sync,
+    {
+        Ok(())
+    }
+}
+
+/// The outbound [`LoginPluginRequestPacket`]. (Placeholder)
+///
+/// Used to implement a custom handshaking flow together with Login Plugin Response. Unlike plugin
+/// messages in "play" mode, these messages follow a lock-step request/response scheme, where the
+/// client is expected to respond to a request indicating whether it understood. The vanilla client
+/// always responds that it hasn't understood, and sends an empty payload.
+///
+/// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Plugin_Request)
+#[derive(Debug)]
+pub struct LoginPluginRequestPacket;
+
+impl Packet for LoginPluginRequestPacket {
+    fn get_packet_id() -> usize {
+        0x04
+    }
+}
+
+impl OutboundPacket for LoginPluginRequestPacket {
+    async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
+    where
+        S: AsyncWrite + Unpin + Send + Sync,
+    {
+        Ok(())
+    }
+}
+
+/// The outbound [`CookieRequestPacket`]. (Placeholder)
+///
+/// Requests a cookie that was previously stored.
+///
+/// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Request_(login))
+#[derive(Debug)]
+pub struct CookieRequestPacket;
+
+impl Packet for CookieRequestPacket {
+    fn get_packet_id() -> usize {
+        0x05
+    }
+}
+
+impl OutboundPacket for CookieRequestPacket {
+    async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
+    where
+        S: AsyncWrite + Unpin + Send + Sync,
+    {
+        Ok(())
+    }
+}
+
+/// The inbound [`LoginStartPacket`].
+///
+/// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Start)
 #[derive(Debug)]
 pub struct LoginStartPacket {
     pub user_name: String,
@@ -17,10 +178,6 @@ pub struct LoginStartPacket {
 impl Packet for LoginStartPacket {
     fn get_packet_id() -> usize {
         0x00
-    }
-
-    fn get_phase() -> Phase {
-        Phase::Login
     }
 }
 
@@ -56,8 +213,11 @@ impl InboundPacket for LoginStartPacket {
         });
 
         // create a new encryption request and send it
-        let encryption_request =
-            EncryptionRequestPacket::new(authentication::ENCODED_PUB.clone(), verify_token, true);
+        let encryption_request = EncryptionRequestPacket {
+            public_key: authentication::ENCODED_PUB.clone(),
+            verify_token,
+            should_authenticate: true,
+        };
         debug!(
             packet = debug(&encryption_request),
             "sending encryption request packet"
@@ -68,6 +228,9 @@ impl InboundPacket for LoginStartPacket {
     }
 }
 
+/// The inbound [`EncryptionResponsePacket`].
+///
+/// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Encryption_Response)
 #[derive(Debug)]
 pub struct EncryptionResponsePacket {
     pub shared_secret: Vec<u8>,
@@ -77,10 +240,6 @@ pub struct EncryptionResponsePacket {
 impl Packet for EncryptionResponsePacket {
     fn get_packet_id() -> usize {
         0x01
-    }
-
-    fn get_phase() -> Phase {
-        Phase::Login
     }
 }
 
@@ -133,7 +292,10 @@ impl InboundPacket for EncryptionResponsePacket {
         con.enable_encryption(&shared_secret)?;
 
         // create a new login success packet and send it
-        let login_success = LoginSuccessPacket::new(auth_response.id, auth_response.name);
+        let login_success = LoginSuccessPacket {
+            user_id: auth_response.id,
+            user_name: auth_response.name,
+        };
         debug!(
             packet = debug(&login_success),
             "sending login success packet"
@@ -144,16 +306,43 @@ impl InboundPacket for EncryptionResponsePacket {
     }
 }
 
+/// The inbound [`LoginPluginResponsePacket`]. (Placeholder)
+///
+/// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Plugin_Response)
+#[derive(Debug)]
+pub struct LoginPluginResponsePacket;
+
+impl Packet for LoginPluginResponsePacket {
+    fn get_packet_id() -> usize {
+        0x02
+    }
+}
+
+impl InboundPacket for LoginPluginResponsePacket {
+    async fn new_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
+    where
+        S: AsyncRead + Unpin + Send + Sync,
+    {
+        Ok(Self)
+    }
+
+    async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    {
+        Ok(())
+    }
+}
+
+/// The inbound [`LoginAcknowledgedPacket`].
+///
+/// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Acknowledged)
 #[derive(Debug)]
 pub struct LoginAcknowledgedPacket;
 
 impl Packet for LoginAcknowledgedPacket {
     fn get_packet_id() -> usize {
         0x03
-    }
-
-    fn get_phase() -> Phase {
-        Phase::Login
     }
 }
 
@@ -172,89 +361,38 @@ impl InboundPacket for LoginAcknowledgedPacket {
         debug!(packet = debug(&self), "received login acknowledged packet");
 
         // switch to configuration phase
+        info!("switching to configuration phase");
+        con.phase = Phase::Configuration;
+
+        // handle configuration
         con.configure().await
     }
 }
 
+/// The inbound [`CookieResponsePacket`]. (Placeholder)
+///
+/// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Response_(login))
 #[derive(Debug)]
-pub struct EncryptionRequestPacket {
-    // server id - is always empty, so we skip it
-    public_key: Vec<u8>,
-    verify_token: VerifyToken,
-    should_authenticate: bool,
-}
+pub struct CookieResponsePacket;
 
-impl EncryptionRequestPacket {
-    pub const fn new(
-        public_key: Vec<u8>,
-        verify_token: VerifyToken,
-        should_authenticate: bool,
-    ) -> Self {
-        Self {
-            public_key,
-            verify_token,
-            should_authenticate,
-        }
-    }
-}
-
-impl Packet for EncryptionRequestPacket {
+impl Packet for CookieResponsePacket {
     fn get_packet_id() -> usize {
-        0x01
-    }
-
-    fn get_phase() -> Phase {
-        Phase::Login
+        0x04
     }
 }
 
-impl OutboundPacket for EncryptionRequestPacket {
-    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+impl InboundPacket for CookieResponsePacket {
+    async fn new_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
     where
-        S: AsyncWrite + Unpin + Send + Sync,
+        S: AsyncRead + Unpin + Send + Sync,
     {
-        buffer.write_string("").await?;
-        buffer.write_bytes(&self.public_key).await?;
-        buffer.write_bytes(&self.verify_token).await?;
-        buffer.write_bool(self.should_authenticate).await?;
-
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct LoginSuccessPacket {
-    user_id: Uuid,
-    user_name: String,
-    // properties - we don't need those
-}
-
-impl LoginSuccessPacket {
-    pub const fn new(user_id: Uuid, user_name: String) -> Self {
-        Self { user_id, user_name }
-    }
-}
-
-impl Packet for LoginSuccessPacket {
-    fn get_packet_id() -> usize {
-        0x02
+        Ok(Self)
     }
 
-    fn get_phase() -> Phase {
-        Phase::Login
-    }
-}
-
-impl OutboundPacket for LoginSuccessPacket {
-    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+    async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
     where
-        S: AsyncWrite + Unpin + Send + Sync,
+        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
     {
-        buffer.write_uuid(&self.user_id).await?;
-        buffer.write_string(&self.user_name).await?;
-        // no properties in array
-        buffer.write_varint(0).await?;
-
         Ok(())
     }
 }
@@ -348,8 +486,11 @@ mod tests {
         rng.try_fill_bytes(&mut verify_token_write).unwrap();
 
         // write the packet into a buffer and box it as a slice (sized)
-        let packet =
-            EncryptionRequestPacket::new(public_key_write.to_vec(), verify_token_write, true);
+        let packet = EncryptionRequestPacket {
+            public_key: public_key_write.to_vec(),
+            verify_token: verify_token_write,
+            should_authenticate: true,
+        };
         let mut packet_buffer = Cursor::new(Vec::<u8>::new());
         packet.write_to_buffer(&mut packet_buffer).await.unwrap();
         let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer.into_inner());
@@ -373,10 +514,10 @@ mod tests {
     #[tokio::test]
     async fn encode_login_success() {
         // write the packet into a buffer and box it as a slice (sized)
-        let packet = LoginSuccessPacket::new(
-            uuid!("9c09eef4-f68d-4387-9751-72bbff53d5a0"),
-            "Scrayos".to_string(),
-        );
+        let packet = LoginSuccessPacket {
+            user_id: uuid!("9c09eef4-f68d-4387-9751-72bbff53d5a0"),
+            user_name: "Scrayos".to_string(),
+        };
         let mut packet_buffer = Cursor::new(Vec::<u8>::new());
         packet.write_to_buffer(&mut packet_buffer).await.unwrap();
         let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer.into_inner());

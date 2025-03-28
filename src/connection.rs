@@ -2,16 +2,22 @@ use crate::authentication;
 use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
 use crate::protocol::Error::Generic;
 use crate::protocol::configuration::{
-    AddResourcePackPacket, KeepAlivePacket, ResourcePackResponsePacket, TransferPacket,
+    AcknowledgeFinishConfigurationPacket, AddResourcePackPacket, ClientInformationPacket,
+    InKnownPacksPacket, InPluginMessagePacket, KeepAlivePacket, PongPacket,
+    ResourcePackResponsePacket, TransferPacket,
 };
 use crate::protocol::handshaking::HandshakePacket;
-use crate::protocol::login::{EncryptionResponsePacket, LoginAcknowledgedPacket, LoginStartPacket};
+use crate::protocol::login::{
+    CookieResponsePacket, EncryptionResponsePacket, LoginAcknowledgedPacket,
+    LoginPluginResponsePacket, LoginStartPacket,
+};
 use crate::protocol::status::{PingPacket, StatusRequestPacket};
 use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, Phase, State};
 use crate::resource_pack_supplier::ResourcePackSupplier;
 use crate::status::Protocol;
 use crate::status_supplier::StatusSupplier;
 use crate::target_selector::TargetSelector;
+use std::io::Cursor;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -31,9 +37,13 @@ macro_rules! packets {
         match ($id, $ph) {
             $(($packet_id, $phase) => {
                 let packet = <$packet_type>::new_from_buffer(&mut $buffer).await?;
+                info!(packet = ?packet, "Read packet");
                 packet.handle($self).await
             })*,
-            _ => Ok(())
+            _ => {
+                warn!(packe_id = $id, phase = ?$ph, "Unsupported packet in phase");
+                Ok(())
+            }
         }
     }
 }
@@ -155,7 +165,7 @@ where
     }
 
     async fn handle_tick(&mut self) -> Result<(), Error> {
-        if self.phase != Phase::Handshake {
+        if self.phase != Phase::Configuration {
             return Ok(());
         }
 
@@ -185,11 +195,16 @@ where
         info!(length = length, packet_id = packet_id, phase = ?self.phase, "Handling packet");
 
         // split a separate reader from stream
-        let mut buffer = self.take(length as u64);
+        // TODO only advances inner if actually read!
+        let mut buffer = vec![];
+        self.take(length as u64 - 1)
+            .read_to_end(&mut buffer)
+            .await?;
+        let mut cursor = Cursor::new(&buffer);
 
         // deserialize and handle packet based on packet id and phase
         packets! {
-            (packet_id, phase, self, buffer)
+            (packet_id, phase, self, cursor)
             // handshake phase
             (0x00, Phase::Handshake) => HandshakePacket,
             // status phase
@@ -198,10 +213,18 @@ where
             // login phase
             (0x00, Phase::Login) => LoginStartPacket,
             (0x01, Phase::Login) => EncryptionResponsePacket,
+            (0x02, Phase::Login) => LoginPluginResponsePacket,
             (0x03, Phase::Login) => LoginAcknowledgedPacket,
+            (0x04, Phase::Login) => CookieResponsePacket,
             // configuration phase
+            (0x00, Phase::Configuration) => ClientInformationPacket,
+            (0x01, Phase::Configuration) => CookieResponsePacket,
+            (0x02, Phase::Configuration) => InPluginMessagePacket,
+            (0x03, Phase::Configuration) => AcknowledgeFinishConfigurationPacket,
             (0x04, Phase::Configuration) => KeepAlivePacket,
+            (0x05, Phase::Configuration) => PongPacket,
             (0x06, Phase::Configuration) => ResourcePackResponsePacket,
+            (0x07, Phase::Configuration) => InKnownPacksPacket,
             // ...
             // play phase
             // (unsupported)
@@ -212,6 +235,8 @@ where
         if self.stream.is_encrypted() {
             return Err(Error::Generic("already encrypted".to_string()));
         }
+
+        info!("enabling encryption");
 
         // get stream ciphers and wrap stream with cipher
         let (encryptor, decryptor) = authentication::create_ciphers(&shared_secret)?;
@@ -303,7 +328,10 @@ where
         let Some(target) = target else { return Ok(()) };
 
         // create a new transfer packet and send it
-        let transfer = TransferPacket::from_addr(target);
+        let transfer = TransferPacket {
+            host: target.ip().to_string(),
+            port: target.port() as usize,
+        };
         debug!(packet = debug(&transfer), "sending transfer packet");
         self.write_packet(transfer).await?;
 

@@ -13,7 +13,6 @@ use sha1::{Digest, Sha1};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tracing::trace;
 use uuid::Uuid;
 
 lazy_static! {
@@ -206,7 +205,6 @@ where
             let gen_arr = GenericArray::from_mut_slice(chunk);
             enc.encrypt_block_mut(gen_arr);
         }
-        trace!(buf_len = buf.len(), "encrypted write bytes");
 
         // pass to inner
         Pin::new(&mut self_mut.inner).poll_write(cx, &buf)
@@ -253,7 +251,6 @@ where
                 let gen_arr = GenericArray::from_mut_slice(chunk);
                 dec.decrypt_block_mut(gen_arr);
             }
-            trace!(buf_len = (cursor - buf.remaining()), "decrypted read bytes");
         }
 
         poll_result
