@@ -12,7 +12,10 @@ use uuid::Uuid;
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Disconnect_(login))
 #[derive(Debug)]
-pub struct DisconnectPacket;
+pub struct DisconnectPacket {
+    /// The json text component containing the reason of the disconnect.
+    reason: String,
+}
 
 impl Packet for DisconnectPacket {
     fn get_packet_id() -> usize {
@@ -21,10 +24,12 @@ impl Packet for DisconnectPacket {
 }
 
 impl OutboundPacket for DisconnectPacket {
-    async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
+    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
     where
         S: AsyncWrite + Unpin + Send + Sync,
     {
+        buffer.write_string(&self.reason).await?;
+
         Ok(())
     }
 }
@@ -100,6 +105,7 @@ impl OutboundPacket for LoginSuccessPacket {
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Set_Compression)
 #[derive(Debug)]
+#[deprecated(note = "placeholder implementation")]
 pub struct SetCompressionPacket;
 
 impl Packet for SetCompressionPacket {
@@ -126,6 +132,7 @@ impl OutboundPacket for SetCompressionPacket {
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Plugin_Request)
 #[derive(Debug)]
+#[deprecated(note = "placeholder implementation")]
 pub struct LoginPluginRequestPacket;
 
 impl Packet for LoginPluginRequestPacket {
@@ -149,6 +156,7 @@ impl OutboundPacket for LoginPluginRequestPacket {
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Request_(login))
 #[derive(Debug)]
+#[deprecated(note = "placeholder implementation")]
 pub struct CookieRequestPacket;
 
 impl Packet for CookieRequestPacket {
@@ -285,8 +293,10 @@ impl InboundPacket for EncryptionResponsePacket {
         )
         .await?;
 
-        // set success state
+        // set success state and override login state
         login.success = true;
+        login.user_id = auth_response.id.clone();
+        login.user_name = auth_response.name.clone();
 
         // enable encryption for the connection using the shared secret
         con.enable_encryption(&shared_secret)?;
@@ -310,6 +320,7 @@ impl InboundPacket for EncryptionResponsePacket {
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Plugin_Response)
 #[derive(Debug)]
+#[deprecated(note = "placeholder implementation")]
 pub struct LoginPluginResponsePacket;
 
 impl Packet for LoginPluginResponsePacket {
@@ -373,6 +384,7 @@ impl InboundPacket for LoginAcknowledgedPacket {
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Response_(login))
 #[derive(Debug)]
+#[deprecated(note = "placeholder implementation")]
 pub struct CookieResponsePacket;
 
 impl Packet for CookieResponsePacket {

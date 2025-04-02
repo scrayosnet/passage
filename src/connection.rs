@@ -1,6 +1,5 @@
 use crate::authentication;
 use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
-use crate::protocol::Error::Generic;
 use crate::protocol::configuration::{
     AcknowledgeFinishConfigurationPacket, AddResourcePackPacket, ClientInformationPacket,
     InKnownPacksPacket, InPluginMessagePacket, KeepAlivePacket, PongPacket,
@@ -12,6 +11,7 @@ use crate::protocol::login::{
     LoginPluginResponsePacket, LoginStartPacket,
 };
 use crate::protocol::status::{PingPacket, StatusRequestPacket};
+use crate::protocol::Error::Generic;
 use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, Phase, State};
 use crate::resource_pack_supplier::ResourcePackSupplier;
 use crate::status::Protocol;
@@ -23,8 +23,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::io::{AsyncReadExt, ReadBuf};
+use tokio::signal;
+use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -97,6 +99,8 @@ impl KeepAlive {
 pub struct Connection<S> {
     /// The connection reader
     stream: CipherStream<S, Aes128Cfb8Enc, Aes128Cfb8Dec>,
+    /// Shutdown channel, stops main loop
+    shutdown: Option<mpsc::UnboundedSender<()>>,
     /// The status supplier of the connection
     pub status_supplier: Arc<dyn StatusSupplier>,
     /// ...
@@ -130,6 +134,7 @@ where
     ) -> Connection<S> {
         Self {
             stream: CipherStream::new(stream, None, None),
+            shutdown: None,
             status_supplier,
             target_selector,
             resource_pack_supplier,
@@ -151,17 +156,30 @@ where
         // start ticker for keep-alive packets
         let mut interval = tokio::time::interval(Duration::from_secs(10));
 
+        // init shutdown signal
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        self.shutdown = Some(tx);
+
         // start listening for events
         loop {
             tokio::select! {
-                // use biased selection such that the timer is chosen first
+                // use biased selection such that branches are checked in order
                 biased;
+                // await shutdown
+                _ = rx.recv() => break,
+                _ = signal::ctrl_c() => break,
                 // await next timer tick for keep-alive
                 _ = interval.tick() => self.handle_tick().await?,
                 // await next packet in, reading the packet size (expect fast execution)
                 maybe_length = self.read_varint() => self.handle_packet(maybe_length?).await?,
             }
         }
+
+        // TODO or do outside?
+        // close stream cleanly
+        self.stream.shutdown().await?;
+
+        Ok(())
     }
 
     async fn handle_tick(&mut self) -> Result<(), Error> {
@@ -225,9 +243,6 @@ where
             (0x05, Phase::Configuration) => PongPacket,
             (0x06, Phase::Configuration) => ResourcePackResponsePacket,
             (0x07, Phase::Configuration) => InKnownPacksPacket,
-            // ...
-            // play phase
-            // (unsupported)
         }
     }
 
@@ -246,6 +261,14 @@ where
     }
 
     // utilities
+
+    /// Disables reading new packets and stopping the connection
+    pub fn shutdown(&mut self) {
+        // send shutdown message if available
+        if let Some(mut shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+    }
 
     pub async fn configure(&mut self) -> Result<(), Error> {
         // get and check internal state
