@@ -13,7 +13,7 @@ use uuid::Uuid;
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Disconnect_(login))
 #[derive(Debug)]
 pub struct DisconnectPacket {
-    /// The json text component containing the reason of the disconnect.
+    /// The JSON text component containing the reason of the disconnect.
     reason: String,
 }
 

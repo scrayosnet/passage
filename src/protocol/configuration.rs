@@ -1,8 +1,8 @@
 use crate::connection::Connection;
 use crate::protocol::Error::Generic;
 use crate::protocol::{
-    AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet,
-    ResourcePackResult,
+    AsyncReadPacket, AsyncWritePacket, ChatMode, DisplayedSkinParts, Error, InboundPacket,
+    MainHand, OutboundPacket, Packet, ParticleStatus, ResourcePackResult,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
@@ -62,7 +62,7 @@ impl OutboundPacket for OutPluginMessagePacket {
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Disconnect_(configuration))
 #[derive(Debug)]
 pub struct DisconnectPacket {
-    /// The JSON response reason that contains all self-reported server metadata.
+    /// The text component containing the reason of the disconnect.
     reason: String,
 }
 
@@ -168,8 +168,9 @@ impl OutboundPacket for KeepAlivePacket {
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Ping_(configuration))
 #[derive(Debug)]
-#[deprecated(note = "placeholder implementation")]
-pub struct PingPacket;
+pub struct PingPacket {
+    pub id: i32,
+}
 
 impl Packet for PingPacket {
     fn get_packet_id() -> usize {
@@ -178,10 +179,12 @@ impl Packet for PingPacket {
 }
 
 impl OutboundPacket for PingPacket {
-    async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
+    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
     where
         S: AsyncWrite + Unpin + Send + Sync,
     {
+        buffer.write_i32(self.id).await?;
+
         Ok(())
     }
 }
@@ -297,8 +300,10 @@ impl OutboundPacket for AddResourcePackPacket {
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Store_Cookie_(configuration))
 #[derive(Debug)]
-#[deprecated(note = "placeholder implementation")]
-pub struct StoreCookiePacket;
+pub struct StoreCookiePacket {
+    pub key: String,
+    pub payload: Vec<u8>,
+}
 
 impl Packet for StoreCookiePacket {
     fn get_packet_id() -> usize {
@@ -307,10 +312,13 @@ impl Packet for StoreCookiePacket {
 }
 
 impl OutboundPacket for StoreCookiePacket {
-    async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
+    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
     where
         S: AsyncWrite + Unpin + Send + Sync,
     {
+        buffer.write_string(&self.key).await?;
+        buffer.write_bytes(&self.payload).await?;
+
         Ok(())
     }
 }
@@ -474,8 +482,17 @@ impl OutboundPacket for ServerLinksPacket {
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Client_Information_(configuration))
 #[derive(Debug)]
-#[deprecated(note = "placeholder implementation")]
-pub struct ClientInformationPacket;
+pub struct ClientInformationPacket {
+    pub locale: String,
+    pub view_distance: i8,
+    pub chat_mode: ChatMode,
+    pub chat_colors: bool,
+    pub displayed_skin_parts: DisplayedSkinParts,
+    pub main_hand: MainHand,
+    pub enable_text_filtering: bool,
+    pub allow_server_listing: bool,
+    pub particle_status: ParticleStatus,
+}
 
 impl Packet for ClientInformationPacket {
     fn get_packet_id() -> usize {
@@ -484,11 +501,31 @@ impl Packet for ClientInformationPacket {
 }
 
 impl InboundPacket for ClientInformationPacket {
-    async fn new_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
+    async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
     where
         S: AsyncRead + Unpin + Send + Sync,
     {
-        Ok(Self)
+        let locale = buffer.read_string().await?;
+        let view_distance = buffer.read_i8().await?;
+        let chat_mode = buffer.read_varint().await?.try_into()?;
+        let chat_colors = buffer.read_bool().await?;
+        let displayed_skin_parts = DisplayedSkinParts(buffer.read_u8().await?);
+        let main_hand = buffer.read_varint().await?.try_into()?;
+        let enable_text_filtering = buffer.read_bool().await?;
+        let allow_server_listing = buffer.read_bool().await?;
+        let particle_status = buffer.read_varint().await?.try_into()?;
+
+        Ok(Self {
+            locale,
+            view_distance,
+            chat_mode,
+            chat_colors,
+            displayed_skin_parts,
+            main_hand,
+            enable_text_filtering,
+            allow_server_listing,
+            particle_status,
+        })
     }
 
     async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
@@ -605,8 +642,9 @@ impl InboundPacket for AcknowledgeFinishConfigurationPacket {
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Pong_(configuration))
 #[derive(Debug)]
-#[deprecated(note = "placeholder implementation")]
-pub struct PongPacket;
+pub struct PongPacket {
+    pub id: i32,
+}
 
 impl Packet for PongPacket {
     fn get_packet_id() -> usize {
@@ -615,11 +653,13 @@ impl Packet for PongPacket {
 }
 
 impl InboundPacket for PongPacket {
-    async fn new_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
+    async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
     where
         S: AsyncRead + Unpin + Send + Sync,
     {
-        Ok(Self)
+        let id = buffer.read_i32().await?;
+
+        Ok(Self { id })
     }
 
     async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>

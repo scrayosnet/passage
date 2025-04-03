@@ -70,17 +70,6 @@ pub enum Error {
     Generic(String),
 }
 
-/// State is the desired state that the connection should be in after the initial handshake.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum State {
-    /// Query the server information without connecting.
-    Status,
-    /// Log into the Minecraft server, establishing a connection.
-    Login,
-    /// The status s
-    Transfer,
-}
-
 /// Phase is the phase the connection is currently in. This dictates how packet are identified.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Phase {
@@ -94,6 +83,17 @@ pub enum Phase {
     Configuration,
     /// The play phase (unsupported).
     Play,
+}
+
+/// State is the desired state that the connection should be in after the initial handshake.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum State {
+    /// Query the server information without connecting.
+    Status,
+    /// Log into the Minecraft server, establishing a connection.
+    Login,
+    /// The status s
+    Transfer,
 }
 
 impl From<State> for usize {
@@ -159,6 +159,126 @@ impl TryFrom<usize> for ResourcePackResult {
             5 => Ok(ResourcePackResult::InvalidUrl),
             6 => Ok(ResourcePackResult::ReloadFailed),
             7 => Ok(ResourcePackResult::Discorded),
+            _ => Err(Error::IllegalEnumValue { value }),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ChatMode {
+    Enabled,
+    CommandsOnly,
+    Hidden,
+}
+
+impl From<ChatMode> for usize {
+    fn from(value: ChatMode) -> Self {
+        match value {
+            ChatMode::Enabled => 0,
+            ChatMode::CommandsOnly => 1,
+            ChatMode::Hidden => 2,
+        }
+    }
+}
+
+impl TryFrom<usize> for ChatMode {
+    type Error = Error;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(ChatMode::Enabled),
+            1 => Ok(ChatMode::CommandsOnly),
+            2 => Ok(ChatMode::Hidden),
+            _ => Err(Error::IllegalEnumValue { value }),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DisplayedSkinParts(pub u8);
+
+impl DisplayedSkinParts {
+    pub fn cape_enabled(&self) -> bool {
+        self.0 & 0x01 != 0
+    }
+
+    pub fn jacket_enabled(&self) -> bool {
+        self.0 & 0x02 != 0
+    }
+
+    pub fn left_sleeve_enabled(&self) -> bool {
+        self.0 & 0x04 != 0
+    }
+
+    pub fn right_sleeve_enabled(&self) -> bool {
+        self.0 & 0x08 != 0
+    }
+
+    pub fn left_pants_enabled(&self) -> bool {
+        self.0 & 0x10 != 0
+    }
+
+    pub fn right_pants_enabled(&self) -> bool {
+        self.0 & 0x20 != 0
+    }
+
+    pub fn hat_enabled(&self) -> bool {
+        self.0 & 0x40 != 0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MainHand {
+    Left,
+    Right,
+}
+
+impl From<MainHand> for usize {
+    fn from(value: MainHand) -> Self {
+        match value {
+            MainHand::Left => 0,
+            MainHand::Right => 1,
+        }
+    }
+}
+
+impl TryFrom<usize> for MainHand {
+    type Error = Error;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(MainHand::Left),
+            1 => Ok(MainHand::Right),
+            _ => Err(Error::IllegalEnumValue { value }),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ParticleStatus {
+    All,
+    Decreased,
+    Minimal,
+}
+
+impl From<ParticleStatus> for usize {
+    fn from(value: ParticleStatus) -> Self {
+        match value {
+            ParticleStatus::All => 0,
+            ParticleStatus::Decreased => 1,
+            ParticleStatus::Minimal => 2,
+        }
+    }
+}
+
+impl TryFrom<usize> for ParticleStatus {
+    type Error = Error;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(ParticleStatus::All),
+            1 => Ok(ParticleStatus::Decreased),
+            2 => Ok(ParticleStatus::Minimal),
             _ => Err(Error::IllegalEnumValue { value }),
         }
     }
