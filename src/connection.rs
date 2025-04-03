@@ -1,5 +1,6 @@
 use crate::authentication;
 use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
+use crate::protocol::Error::Generic;
 use crate::protocol::configuration::{
     AcknowledgeFinishConfigurationPacket, AddResourcePackPacket, ClientInformationPacket,
     InKnownPacksPacket, InPluginMessagePacket, KeepAlivePacket, PongPacket,
@@ -11,7 +12,6 @@ use crate::protocol::login::{
     LoginPluginResponsePacket, LoginStartPacket,
 };
 use crate::protocol::status::{PingPacket, StatusRequestPacket};
-use crate::protocol::Error::Generic;
 use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, Phase, State};
 use crate::resource_pack_supplier::ResourcePackSupplier;
 use crate::status::Protocol;

@@ -156,8 +156,9 @@ impl OutboundPacket for LoginPluginRequestPacket {
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Request_(login))
 #[derive(Debug)]
-#[deprecated(note = "placeholder implementation")]
-pub struct CookieRequestPacket;
+pub struct CookieRequestPacket {
+    pub key: String,
+}
 
 impl Packet for CookieRequestPacket {
     fn get_packet_id() -> usize {
@@ -166,10 +167,12 @@ impl Packet for CookieRequestPacket {
 }
 
 impl OutboundPacket for CookieRequestPacket {
-    async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
+    async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
     where
         S: AsyncWrite + Unpin + Send + Sync,
     {
+        buffer.write_string(&self.key).await?;
+
         Ok(())
     }
 }
@@ -384,8 +387,10 @@ impl InboundPacket for LoginAcknowledgedPacket {
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Response_(login))
 #[derive(Debug)]
-#[deprecated(note = "placeholder implementation")]
-pub struct CookieResponsePacket;
+pub struct CookieResponsePacket {
+    pub key: String,
+    pub payload: Option<Vec<u8>>,
+}
 
 impl Packet for CookieResponsePacket {
     fn get_packet_id() -> usize {
@@ -394,11 +399,18 @@ impl Packet for CookieResponsePacket {
 }
 
 impl InboundPacket for CookieResponsePacket {
-    async fn new_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
+    async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
     where
         S: AsyncRead + Unpin + Send + Sync,
     {
-        Ok(Self)
+        let key = buffer.read_string().await?;
+        let has_payload = buffer.read_bool().await?;
+        let mut payload = None;
+        if has_payload {
+            payload = Some(buffer.read_bytes().await?);
+        }
+
+        Ok(Self { key, payload })
     }
 
     async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>

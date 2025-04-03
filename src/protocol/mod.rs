@@ -342,6 +342,11 @@ pub(crate) trait AsyncReadPacket {
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:String
     async fn read_string(&mut self) -> Result<String, Error>;
 
+    /// Reads a `bool` from this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Boolean
+    async fn read_bool(&mut self) -> Result<bool, Error>;
+
     /// Reads a `Uuid` from this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:UUID
@@ -402,6 +407,11 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
         self.read_exact(&mut buffer).await?;
 
         String::from_utf8(buffer).map_err(|_| Error::InvalidEncoding)
+    }
+
+    async fn read_bool(&mut self) -> Result<bool, Error> {
+        let bool = self.read_u8().await?;
+        Ok(bool == 1u8)
     }
 
     async fn read_uuid(&mut self) -> Result<Uuid, Error> {
