@@ -1,17 +1,18 @@
 use crate::authentication;
 use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
 use crate::protocol::Error::Generic;
-use crate::protocol::configuration::{
-    AcknowledgeFinishConfigurationPacket, AddResourcePackPacket, ClientInformationPacket,
-    InKnownPacksPacket, InPluginMessagePacket, KeepAlivePacket, PongPacket,
-    ResourcePackResponsePacket, TransferPacket,
+use crate::protocol::configuration::inbound::{
+    AckFinishConfigurationPacket, ClientInformationPacket, KnownPacksPacket, PluginMessagePacket,
+    PongPacket, ResourcePackResponsePacket,
 };
-use crate::protocol::handshaking::HandshakePacket;
-use crate::protocol::login::{
+use crate::protocol::configuration::outbound::{AddResourcePackPacket, TransferPacket};
+use crate::protocol::configuration::{inbound, outbound};
+use crate::protocol::handshaking::inbound::HandshakePacket;
+use crate::protocol::login::inbound::{
     CookieResponsePacket, EncryptionResponsePacket, LoginAcknowledgedPacket,
     LoginPluginResponsePacket, LoginStartPacket,
 };
-use crate::protocol::status::{PingPacket, StatusRequestPacket};
+use crate::protocol::status::inbound::{PingPacket, StatusRequestPacket};
 use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, Phase, State};
 use crate::resource_pack_supplier::ResourcePackSupplier;
 use crate::status::Protocol;
@@ -30,24 +31,12 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-/// [`packets!`] macro expands to match statement matching a packet id and phase pair.
-/// For every matched pair, a corresponding packet is deserialized and handled.
-///
-/// CAUTION: specifically intended for [`Connection::handle_packet`] method.
-macro_rules! packets {
-    { ($id:expr, $ph:expr, $self:expr, $buffer:expr) $(($packet_id:literal, $phase:path) => $packet_type:ty,)* } => {
-        match ($id, $ph) {
-            $(($packet_id, $phase) => {
-                let packet = <$packet_type>::new_from_buffer(&mut $buffer).await?;
-                info!(packet = ?packet, "Read packet");
-                packet.handle($self).await
-            })*,
-            _ => {
-                warn!(packe_id = $id, phase = ?$ph, "Unsupported packet in phase");
-                Ok(())
-            }
-        }
-    }
+macro_rules! handle {
+    ($packet_type:ty, $buffer:expr, $self:expr) => {{
+        let packet = <$packet_type>::new_from_buffer($buffer).await?;
+        info!(packet = ?packet, "Read packet");
+        packet.handle($self).await
+    }}
 }
 
 /// ...
@@ -193,7 +182,7 @@ where
             return Err(Generic("keep alive not empty".to_string()));
         }
 
-        let packet = KeepAlivePacket::new(id);
+        let packet = outbound::KeepAlivePacket::new(id);
         self.write_packet(packet).await?;
 
         Ok(())
@@ -218,31 +207,35 @@ where
         self.take(length as u64 - 1)
             .read_to_end(&mut buffer)
             .await?;
-        let mut cursor = Cursor::new(&buffer);
+        let cursor = &mut Cursor::new(&buffer);
 
         // deserialize and handle packet based on packet id and phase
-        packets! {
-            (packet_id, phase, self, cursor)
+        match (packet_id, phase) {
             // handshake phase
-            (0x00, Phase::Handshake) => HandshakePacket,
+            (0x00, Phase::Handshake) => handle!(HandshakePacket, cursor, self),
             // status phase
-            (0x00, Phase::Status) => StatusRequestPacket,
-            (0x01, Phase::Status) => PingPacket,
+            (0x00, Phase::Status) => handle!(StatusRequestPacket, cursor, self),
+            (0x01, Phase::Status) => handle!(PingPacket, cursor, self),
             // login phase
-            (0x00, Phase::Login) => LoginStartPacket,
-            (0x01, Phase::Login) => EncryptionResponsePacket,
-            (0x02, Phase::Login) => LoginPluginResponsePacket,
-            (0x03, Phase::Login) => LoginAcknowledgedPacket,
-            (0x04, Phase::Login) => CookieResponsePacket,
+            (0x00, Phase::Login) => handle!(LoginStartPacket, cursor, self),
+            (0x01, Phase::Login) => handle!(EncryptionResponsePacket, cursor, self),
+            (0x02, Phase::Login) => handle!(LoginPluginResponsePacket, cursor, self),
+            (0x03, Phase::Login) => handle!(LoginAcknowledgedPacket, cursor, self),
+            (0x04, Phase::Login) => handle!(CookieResponsePacket, cursor, self),
             // configuration phase
-            (0x00, Phase::Configuration) => ClientInformationPacket,
-            (0x01, Phase::Configuration) => CookieResponsePacket,
-            (0x02, Phase::Configuration) => InPluginMessagePacket,
-            (0x03, Phase::Configuration) => AcknowledgeFinishConfigurationPacket,
-            (0x04, Phase::Configuration) => KeepAlivePacket,
-            (0x05, Phase::Configuration) => PongPacket,
-            (0x06, Phase::Configuration) => ResourcePackResponsePacket,
-            (0x07, Phase::Configuration) => InKnownPacksPacket,
+            (0x00, Phase::Configuration) => handle!(ClientInformationPacket, cursor, self),
+            (0x01, Phase::Configuration) => handle!(CookieResponsePacket, cursor, self),
+            (0x02, Phase::Configuration) => handle!(PluginMessagePacket, cursor, self),
+            (0x03, Phase::Configuration) => handle!(AckFinishConfigurationPacket, cursor, self),
+            (0x04, Phase::Configuration) => handle!(inbound::KeepAlivePacket, cursor, self),
+            (0x05, Phase::Configuration) => handle!(PongPacket, cursor, self),
+            (0x06, Phase::Configuration) => handle!(ResourcePackResponsePacket, cursor, self),
+            (0x07, Phase::Configuration) => handle!(KnownPacksPacket, cursor, self),
+            // otherwise
+            _ => {
+                warn!(packe_id = packet_id, phase = ?phase, "Unsupported packet in phase");
+                Ok(())
+            }
         }
     }
 
@@ -265,7 +258,7 @@ where
     /// Disables reading new packets and stopping the connection
     pub fn shutdown(&mut self) {
         // send shutdown message if available
-        if let Some(mut shutdown) = self.shutdown.take() {
+        if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
     }
