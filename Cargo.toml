@@ -3,7 +3,8 @@ name = "passage"
 description = "Minecraft Server Transfer Router"
 version = "0.1.0"
 authors = [
-    "Joshua Dean Küpper <admin@joshua-kuepper.de>"
+    "Joshua Dean Küpper <admin@joshua-kuepper.de>",
+    "Paul Wagner <contact@paulwagner.dev>",
 ]
 license = "MIT"
 repository = "https://github.com/scrayosnet/passage"
@@ -16,22 +17,22 @@ edition = "2024"
 rust-version = "1.85.0"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal"] }
+tokio = { version = "1.44", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal"] }
 tracing = "0.1"
-thiserror = "2"
+thiserror = "2.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = { version = "1.0.140", features = ["raw_value"] }
-uuid = { version = "1.16.0", features = ["v4", "serde"] }
-rsa = "0.9.8"
-rand = "0.8"
-num-bigint = "0.4.6"
-sha1 = "0.10.6"
-reqwest = { version = "0.12.14", default-features = false, features = ["json", "rustls-tls"] }
-cfb8 = "0.8.1"
-aes = "0.8.4"
-config = "0.15.11"
-sentry = { version = "0.35", default-features = false, features = ["backtrace", "contexts", "panic", "debug-images", "reqwest", "rustls", "tower"] }
-sentry-tracing = "0.35"
-async-trait = "0.1.88"
-lazy_static = "1.5.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["raw_value"] }
+uuid = { version = "1.16", features = ["v4", "serde"] }
+rsa = "0.9"
+rand = "0.9"
+num-bigint = "0.4"
+sha1 = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+cfb8 = "0.8"
+aes = "0.8"
+config = "0.15"
+sentry = { version = "0.37", default-features = false, features = ["backtrace", "contexts", "panic", "debug-images", "reqwest", "rustls", "tower"] }
+sentry-tracing = "0.37"
+async-trait = "0.1"
+lazy_static = "1.5"
