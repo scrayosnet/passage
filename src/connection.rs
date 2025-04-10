@@ -1,13 +1,15 @@
 use crate::authentication;
 use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
-use crate::protocol::Error::Generic;
 use crate::protocol::configuration::inbound::{
     AckFinishConfigurationPacket, ClientInformationPacket, KnownPacksPacket, PluginMessagePacket,
     PongPacket, ResourcePackResponsePacket,
 };
-use crate::protocol::configuration::outbound::{AddResourcePackPacket, TransferPacket};
+use crate::protocol::configuration::outbound::{
+    AddResourcePackPacket, DisconnectPacket, StoreCookiePacket, TransferPacket,
+};
 use crate::protocol::configuration::{inbound, outbound};
 use crate::protocol::handshaking::inbound::HandshakePacket;
+use crate::protocol::login::AUTH_COOKIE_KEY;
 use crate::protocol::login::inbound::{
     CookieResponsePacket, EncryptionResponsePacket, LoginAcknowledgedPacket,
     LoginPluginResponsePacket, LoginStartPacket,
@@ -39,6 +41,8 @@ macro_rules! handle {
     }}
 }
 
+// TODO improve state handling! Maybe Enums for every possible state? -> ensures order? / integrate phase enum?
+
 /// ...
 pub struct Handshake {
     /// The pretended protocol version.
@@ -65,6 +69,7 @@ pub struct Login {
 
 /// ...
 pub struct Configuration {
+    /// All unconfirmed resource packs (with bool if forced).
     pub transit_packs: Vec<(Uuid, bool)>,
 }
 
@@ -179,7 +184,7 @@ where
         let id = authentication::generate_keep_alive();
 
         if !self.last_keep_alive.replace(0, id) {
-            return Err(Generic("keep alive not empty".to_string()));
+            return Err(Error::Generic("keep alive not empty".to_string()));
         }
 
         let packet = outbound::KeepAlivePacket::new(id);
@@ -263,59 +268,7 @@ where
         }
     }
 
-    pub async fn configure(&mut self) -> Result<(), Error> {
-        // get and check internal state
-        let Some(handshake) = &self.handshake else {
-            return Err(Error::Generic("invalid state".to_string()));
-        };
-        let Some(login) = &self.login else {
-            return Err(Error::Generic("invalid state".to_string()));
-        };
-        if !login.success {
-            return Err(Error::Generic("invalid state".to_string()));
-        }
-
-        // switch to configuration phase
-        self.phase = Phase::Configuration;
-
-        // get resource packs to load
-        let packs = self
-            .resource_pack_supplier
-            .get_resource_packs(
-                &self.client_address,
-                (&handshake.server_address, handshake.server_port),
-                handshake.protocol_version as Protocol,
-                &login.user_name,
-                &login.user_id,
-            )
-            .await?;
-
-        // register resource packs to await
-        let pack_ids = packs.iter().map(|pack| (pack.uuid, pack.forced)).collect();
-        self.configuration = Some(Configuration {
-            transit_packs: pack_ids,
-        });
-
-        // handle no resource packs to send
-        if packs.is_empty() {
-            return self.transfer().await;
-        }
-
-        // send resource packs
-        for pack in packs {
-            self.write_packet(AddResourcePackPacket {
-                uuid: pack.uuid,
-                url: pack.url,
-                hash: pack.hash,
-                forced: pack.forced,
-                prompt_message: pack.prompt_message,
-            })
-            .await?;
-        }
-
-        Ok(())
-    }
-
+    /// Initializes the transfer
     pub async fn transfer(&mut self) -> Result<(), Error> {
         // get and check internal state
         let Some(handshake) = &self.handshake else {
@@ -341,7 +294,15 @@ where
             .await?;
 
         // disconnect if not target found
-        let Some(target) = target else { return Ok(()) };
+        let Some(target) = target else {
+            // TODO write actual message
+            self.write_packet(DisconnectPacket {
+                reason: "".to_string(),
+            })
+            .await?;
+            self.shutdown();
+            return Ok(());
+        };
 
         // create a new transfer packet and send it
         let transfer = TransferPacket {
@@ -350,6 +311,9 @@ where
         };
         debug!(packet = debug(&transfer), "sending transfer packet");
         self.write_packet(transfer).await?;
+
+        // start graceful shutdown
+        self.shutdown();
 
         Ok(())
     }

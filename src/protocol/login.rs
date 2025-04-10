@@ -1,12 +1,18 @@
 use crate::authentication;
 use crate::authentication::VerifyToken;
+use crate::connection::Configuration;
 use crate::connection::{Connection, Login};
+use crate::protocol::configuration::outbound::{AddResourcePackPacket, StoreCookiePacket};
+use crate::protocol::login::outbound::DisconnectPacket;
 use crate::protocol::{
     AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet, Phase,
 };
+use crate::status::Protocol;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+pub const AUTH_COOKIE_KEY: &str = "passage:authentication";
 
 pub mod outbound {
     use super::*;
@@ -17,7 +23,7 @@ pub mod outbound {
     #[derive(Debug)]
     pub struct DisconnectPacket {
         /// The JSON text component containing the reason of the disconnect.
-        reason: String,
+        pub(crate) reason: String,
     }
 
     impl Packet for DisconnectPacket {
@@ -301,7 +307,21 @@ pub mod inbound {
                 &shared_secret,
                 &authentication::ENCODED_PUB,
             )
-            .await?;
+            .await;
+
+            let auth_response = match auth_response {
+                Ok(inner) => inner,
+                Err(err) => {
+                    warn!(err = err, "mojang auth failed");
+                    // TODO write actual reason
+                    con.write_packet(DisconnectPacket {
+                        reason: "".to_string(),
+                    })
+                    .await?;
+                    con.shutdown();
+                    return Ok(());
+                }
+            };
 
             // set success state and override login state
             login.success = true;
@@ -381,12 +401,65 @@ pub mod inbound {
         {
             debug!(packet = debug(&self), "received login acknowledged packet");
 
+            // get and check internal state
+            let Some(handshake) = &con.handshake else {
+                return Err(Error::Generic("invalid state".to_string()));
+            };
+            let Some(login) = &con.login else {
+                return Err(Error::Generic("invalid state".to_string()));
+            };
+            if !login.success {
+                return Err(Error::Generic("invalid state".to_string()));
+            }
+
             // switch to configuration phase
             info!("switching to configuration phase");
             con.phase = Phase::Configuration;
 
-            // handle configuration
-            con.configure().await
+            // store auth cookie
+            con.write_packet(StoreCookiePacket {
+                key: AUTH_COOKIE_KEY.to_string(),
+                // TODO generate payload and encrypt with secret
+                payload: vec![],
+            })
+            .await?;
+
+            // get resource packs to load
+            let packs = con
+                .resource_pack_supplier
+                .get_resource_packs(
+                    &con.client_address,
+                    (&handshake.server_address, handshake.server_port),
+                    handshake.protocol_version as Protocol,
+                    &login.user_name,
+                    &login.user_id,
+                )
+                .await?;
+
+            // register resource packs to await
+            let pack_ids = packs.iter().map(|pack| (pack.uuid, pack.forced)).collect();
+            con.configuration = Some(Configuration {
+                transit_packs: pack_ids,
+            });
+
+            // handle no resource packs to send
+            if packs.is_empty() {
+                return con.transfer().await;
+            }
+
+            // send resource packs
+            for pack in packs {
+                let packet = AddResourcePackPacket {
+                    uuid: pack.uuid,
+                    url: pack.url,
+                    hash: pack.hash,
+                    forced: pack.forced,
+                    prompt_message: pack.prompt_message,
+                };
+                con.write_packet(packet).await?;
+            }
+
+            Ok(())
         }
     }
 
@@ -432,7 +505,7 @@ pub mod inbound {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::RngCore;
+    use rand::{RngCore, TryRngCore};
     use std::io::Cursor;
     use tokio::io::AsyncReadExt;
     use uuid::uuid;

@@ -66,7 +66,7 @@ pub mod outbound {
     #[derive(Debug)]
     pub struct DisconnectPacket {
         /// The text component containing the reason of the disconnect.
-        reason: String,
+        pub(crate) reason: String,
     }
 
     impl Packet for DisconnectPacket {
@@ -461,6 +461,7 @@ pub mod outbound {
 
 pub mod inbound {
     use super::*;
+    use crate::protocol::configuration::outbound::DisconnectPacket;
 
     /// The inbound [`ClientInformationPacket`]. (Placeholder)
     ///
@@ -764,7 +765,13 @@ pub mod inbound {
 
             // handle pack forced
             if forced && !success {
-                return Err(Generic("resource pack failed".to_string()));
+                // TODO write actual reason
+                con.write_packet(DisconnectPacket {
+                    reason: "".to_string(),
+                })
+                .await?;
+                con.shutdown();
+                return Ok(());
             }
 
             // handle all packs transferred
