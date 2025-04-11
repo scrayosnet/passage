@@ -1,11 +1,11 @@
 use crate::authentication;
 use crate::authentication::VerifyToken;
-use crate::connection::Configuration;
-use crate::connection::{Connection, Login};
+use crate::connection::KeepAlive;
+use crate::connection::{Connection, Phase, phase};
 use crate::protocol::configuration::outbound::{AddResourcePackPacket, StoreCookiePacket};
 use crate::protocol::login::outbound::DisconnectPacket;
 use crate::protocol::{
-    AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet, Phase,
+    AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet,
 };
 use crate::status::Protocol;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -224,17 +224,34 @@ pub mod inbound {
             S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
         {
             debug!(packet = debug(&self), "received login start packet");
+            phase!(
+                con.phase,
+                Phase::Login,
+                client_address,
+                protocol_version,
+                server_address,
+                server_port,
+                transfer,
+            );
+
+            // handle transfer
+            if *transfer {
+                // TODO implement me!
+            }
 
             // encode public key and generate verify token
             let verify_token = authentication::generate_token()?;
 
-            // save packet information to connection
-            con.login = Some(Login {
-                verify_token: verify_token.clone(),
+            // switch phase to accept encryption response
+            con.phase = Phase::Encryption {
+                client_address: *client_address,
+                protocol_version: *protocol_version,
+                server_address: server_address.clone(),
+                server_port: *server_port,
                 user_name: self.user_name.clone(),
                 user_id: self.user_id.clone(),
-                success: false,
-            });
+                verify_token,
+            };
 
             // create a new encryption request and send it
             let encryption_request = outbound::EncryptionRequestPacket {
@@ -286,11 +303,16 @@ pub mod inbound {
             S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
         {
             debug!(packet = debug(&self), "received encryption response packet");
-
-            // get login state from connection
-            let Some(login) = &mut con.login else {
-                return Err(Error::Generic("invalid state".to_string()));
-            };
+            phase!(
+                con.phase,
+                Phase::Encryption,
+                client_address,
+                protocol_version,
+                server_address,
+                server_port,
+                user_name,
+                verify_token,
+            );
 
             // decrypt the shared secret and verify token
             let shared_secret =
@@ -299,11 +321,11 @@ pub mod inbound {
                 authentication::decrypt(&authentication::KEY_PAIR.0, &self.verify_token)?;
 
             // verify the token is correct
-            authentication::verify_token(login.verify_token.clone(), &decrypted_verify_token)?;
+            authentication::verify_token(verify_token.clone(), &decrypted_verify_token)?;
 
             // get the data for login success
             let auth_response = authentication::authenticate_mojang(
-                &login.user_name,
+                &user_name,
                 &shared_secret,
                 &authentication::ENCODED_PUB,
             )
@@ -323,10 +345,15 @@ pub mod inbound {
                 }
             };
 
-            // set success state and override login state
-            login.success = true;
-            login.user_id = auth_response.id.clone();
-            login.user_name = auth_response.name.clone();
+            // switch to login-acknowledge phase
+            con.phase = Phase::Acknowledge {
+                client_address: *client_address,
+                protocol_version: *protocol_version,
+                server_address: server_address.clone(),
+                server_port: *server_port,
+                user_name: auth_response.name.clone(),
+                user_id: auth_response.id.clone(),
+            };
 
             // enable encryption for the connection using the shared secret
             con.enable_encryption(&shared_secret)?;
@@ -366,13 +393,6 @@ pub mod inbound {
         {
             Ok(Self)
         }
-
-        async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
-        where
-            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-        {
-            Ok(())
-        }
     }
 
     /// The inbound [`LoginAcknowledgedPacket`].
@@ -400,17 +420,16 @@ pub mod inbound {
             S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
         {
             debug!(packet = debug(&self), "received login acknowledged packet");
-
-            // get and check internal state
-            let Some(handshake) = &con.handshake else {
-                return Err(Error::Generic("invalid state".to_string()));
-            };
-            let Some(login) = &con.login else {
-                return Err(Error::Generic("invalid state".to_string()));
-            };
-            if !login.success {
-                return Err(Error::Generic("invalid state".to_string()));
-            }
+            phase!(
+                con.phase,
+                Phase::Acknowledge,
+                client_address,
+                protocol_version,
+                server_address,
+                server_port,
+                user_name,
+                user_id,
+            );
 
             // switch to configuration phase
             info!("switching to configuration phase");
@@ -428,19 +447,26 @@ pub mod inbound {
             let packs = con
                 .resource_pack_supplier
                 .get_resource_packs(
-                    &con.client_address,
-                    (&handshake.server_address, handshake.server_port),
-                    handshake.protocol_version as Protocol,
-                    &login.user_name,
-                    &login.user_id,
+                    client_address,
+                    (server_address, *server_port),
+                    *protocol_version as Protocol,
+                    user_name,
+                    user_id,
                 )
                 .await?;
-
-            // register resource packs to await
             let pack_ids = packs.iter().map(|pack| (pack.uuid, pack.forced)).collect();
-            con.configuration = Some(Configuration {
+
+            // switch to configuration phase
+            con.phase = Phase::Configuration {
+                client_address: *client_address,
+                protocol_version: *protocol_version,
+                server_address: server_address.clone(),
+                server_port: *server_port,
+                user_name: user_name.clone(),
+                user_id: *user_id,
                 transit_packs: pack_ids,
-            });
+                last_keep_alive: KeepAlive::empty(),
+            };
 
             // handle no resource packs to send
             if packs.is_empty() {
@@ -492,20 +518,13 @@ pub mod inbound {
 
             Ok(Self { key, payload })
         }
-
-        async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
-        where
-            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-        {
-            Ok(())
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{RngCore, TryRngCore};
+    use rand::TryRngCore;
     use std::io::Cursor;
     use tokio::io::AsyncReadExt;
     use uuid::uuid;
@@ -544,7 +563,7 @@ mod tests {
 
     #[tokio::test]
     async fn decode_encryption_response() {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut shared_secret = [0u8; 32];
         rng.try_fill_bytes(&mut shared_secret).unwrap();
         let mut verify_token = [0u8; 32];
@@ -584,7 +603,7 @@ mod tests {
 
     #[tokio::test]
     async fn encode_encryption_request() {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut public_key_write = [0u8; 32];
         rng.try_fill_bytes(&mut public_key_write).unwrap();
         let mut verify_token_write = [0u8; 32];

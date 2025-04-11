@@ -1,10 +1,13 @@
 use crate::connection::Connection;
+use crate::connection::{Phase, phase};
 use crate::protocol::Error::Generic;
+use crate::protocol::configuration::outbound::DisconnectPacket;
 use crate::protocol::{
     AsyncReadPacket, AsyncWritePacket, ChatMode, DisplayedSkinParts, Error, InboundPacket,
     MainHand, OutboundPacket, Packet, ParticleStatus, ResourcePackResult,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tracing::debug;
 use uuid::Uuid;
 
 pub mod outbound {
@@ -461,7 +464,6 @@ pub mod outbound {
 
 pub mod inbound {
     use super::*;
-    use crate::protocol::configuration::outbound::DisconnectPacket;
 
     /// The inbound [`ClientInformationPacket`]. (Placeholder)
     ///
@@ -514,13 +516,6 @@ pub mod inbound {
                 particle_status,
             })
         }
-
-        async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
-        where
-            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-        {
-            Ok(())
-        }
     }
 
     /// The inbound [`CookieResponsePacket`]. (Placeholder)
@@ -545,13 +540,6 @@ pub mod inbound {
             S: AsyncRead + Unpin + Send + Sync,
         {
             Ok(Self)
-        }
-
-        async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
-        where
-            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-        {
-            Ok(())
         }
     }
 
@@ -582,13 +570,6 @@ pub mod inbound {
         {
             Ok(Self)
         }
-
-        async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
-        where
-            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-        {
-            Ok(())
-        }
     }
 
     /// The inbound [`AckFinishConfigurationPacket`]. (Placeholder)
@@ -613,13 +594,6 @@ pub mod inbound {
             S: AsyncRead + Unpin + Send + Sync,
         {
             Ok(Self)
-        }
-
-        async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
-        where
-            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-        {
-            Ok(())
         }
     }
 
@@ -662,7 +636,10 @@ pub mod inbound {
         where
             S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
         {
-            if !con.last_keep_alive.replace(self.id, 0) {
+            debug!(packet = debug(&self), "received keep alive packet");
+            phase!(con.phase, Phase::Configuration, last_keep_alive,);
+
+            if !last_keep_alive.replace(self.id, 0) {
                 return Err(Generic("keep alive packet already received".to_string()));
             }
 
@@ -694,13 +671,6 @@ pub mod inbound {
             let id = buffer.read_i32().await?;
 
             Ok(Self { id })
-        }
-
-        async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
-        where
-            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-        {
-            Ok(())
         }
     }
 
@@ -734,6 +704,9 @@ pub mod inbound {
         where
             S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
         {
+            debug!(packet = debug(&self), "received keep alive packet");
+            phase!(con.phase, Phase::Configuration, transit_packs,);
+
             // check state for any final state in the resource pack loading process
             let success = match self.result {
                 ResourcePackResult::Success => true,
@@ -748,20 +721,14 @@ pub mod inbound {
                 }
             };
 
-            // get and check internal state
-            let Some(configuration) = &mut con.configuration else {
-                return Err(Error::Generic("invalid state".to_string()));
-            };
-
             // pop pack from list (ignoring unknown pack ids)
-            let Some(pos) = configuration
-                .transit_packs
+            let Some(pos) = transit_packs
                 .iter()
                 .position(|(uuid, _)| uuid == &self.uuid)
             else {
                 return Ok(());
             };
-            let (_, forced) = configuration.transit_packs.swap_remove(pos);
+            let (_, forced) = transit_packs.swap_remove(pos);
 
             // handle pack forced
             if forced && !success {
@@ -775,7 +742,7 @@ pub mod inbound {
             }
 
             // handle all packs transferred
-            if configuration.transit_packs.is_empty() {
+            if transit_packs.is_empty() {
                 return con.transfer().await;
             }
 
@@ -806,13 +773,6 @@ pub mod inbound {
             S: AsyncRead + Unpin + Send + Sync,
         {
             Ok(Self)
-        }
-
-        async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
-        where
-            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-        {
-            Ok(())
         }
     }
 }

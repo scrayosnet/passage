@@ -66,23 +66,13 @@ pub enum Error {
     EncodingFail(#[from] serde_json::Error),
     #[error("could not encrypt connection: {0}")]
     CryptographyFailed(#[from] authentication::Error),
+    #[error("invalid state: {actual} (expected {expected})")]
+    InvalidState {
+        expected: &'static str,
+        actual: &'static str,
+    },
     #[error("some generic error (placeholder)")]
     Generic(String),
-}
-
-/// Phase is the phase the connection is currently in. This dictates how packet are identified.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Phase {
-    /// The handshaking phase (initial state).
-    Handshake,
-    /// The status phase.
-    Status,
-    /// The login phase.
-    Login,
-    /// The configuration phase.
-    Configuration,
-    /// The play phase (unsupported).
-    Play,
 }
 
 /// State is the desired state that the connection should be in after the initial handshake.
@@ -305,9 +295,12 @@ pub trait InboundPacket: Packet + Sized {
     where
         S: AsyncRead + Unpin + Send + Sync;
 
-    async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
+    async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
     where
-        S: AsyncRead + AsyncWrite + Unpin + Send + Sync;
+        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+    {
+        Ok(())
+    }
 }
 
 /// `AsyncWritePacket` allows writing a specific [`OutboundPacket`] to an [`AsyncWrite`].

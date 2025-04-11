@@ -15,7 +15,7 @@ use crate::protocol::login::inbound::{
     LoginPluginResponsePacket, LoginStartPacket,
 };
 use crate::protocol::status::inbound::{PingPacket, StatusRequestPacket};
-use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, Phase, State};
+use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, State};
 use crate::resource_pack_supplier::ResourcePackSupplier;
 use crate::status::Protocol;
 use crate::status_supplier::StatusSupplier;
@@ -33,6 +33,8 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+pub use phase;
+
 macro_rules! handle {
     ($packet_type:ty, $buffer:expr, $self:expr) => {{
         let packet = <$packet_type>::new_from_buffer($buffer).await?;
@@ -41,41 +43,100 @@ macro_rules! handle {
     }}
 }
 
-// TODO improve state handling! Maybe Enums for every possible state? -> ensures order? / integrate phase enum?
-
-/// ...
-pub struct Handshake {
-    /// The pretended protocol version.
-    pub protocol_version: isize,
-    /// The pretended server address.
-    pub server_address: String,
-    /// The pretended server port.
-    pub server_port: u16,
-    /// The state from the handshake.
-    pub state: State,
+macro_rules! phase {
+    ($phase:expr, $expected:expr, $($field:tt,)*) => {
+        let $expected { $($field,)* .. } = &mut $phase else {
+            return Err(Error::InvalidState {
+                actual: $phase.name(),
+                expected: $expected.name(),
+            });
+        };
+    }
 }
 
-/// ...
-pub struct Login {
-    /// The generated verify token, if already generated
-    pub verify_token: [u8; 32],
-    /// ...
-    pub user_name: String,
-    /// ...
-    pub user_id: Uuid,
-    /// ...
-    pub success: bool,
+#[derive(Debug)]
+pub enum Phase {
+    Handshake {
+        client_address: SocketAddr,
+    },
+    Status {
+        client_address: SocketAddr,
+        protocol_version: isize,
+        server_address: String,
+        server_port: u16,
+    },
+    Login {
+        client_address: SocketAddr,
+        protocol_version: isize,
+        server_address: String,
+        server_port: u16,
+        transfer: bool,
+    },
+    Transfer {
+        client_address: SocketAddr,
+        protocol_version: isize,
+        server_address: String,
+        server_port: u16,
+        user_name: String,
+        user_id: Uuid,
+    },
+    Encryption {
+        client_address: SocketAddr,
+        protocol_version: isize,
+        server_address: String,
+        server_port: u16,
+        user_name: String,
+        user_id: Uuid,
+        verify_token: [u8; 32],
+    },
+    Acknowledge {
+        client_address: SocketAddr,
+        protocol_version: isize,
+        server_address: String,
+        server_port: u16,
+        user_name: String,
+        user_id: Uuid,
+    },
+    Configuration {
+        client_address: SocketAddr,
+        protocol_version: isize,
+        server_address: String,
+        server_port: u16,
+        user_name: String,
+        user_id: Uuid,
+        transit_packs: Vec<(Uuid, bool)>,
+        last_keep_alive: KeepAlive,
+    },
 }
 
-/// ...
-pub struct Configuration {
-    /// All unconfirmed resource packs (with bool if forced).
-    pub transit_packs: Vec<(Uuid, bool)>,
+impl Phase {
+    fn name(&self) -> &'static str {
+        match self {
+            Phase::Handshake { .. } => "Handshake",
+            Phase::Status { .. } => "Status",
+            Phase::Login { .. } => "Login",
+            Phase::Transfer { .. } => "Transfer",
+            Phase::Encryption { .. } => "Encryption",
+            Phase::Acknowledge { .. } => "Acknowledge",
+            Phase::Configuration { .. } => "Configuration",
+        }
+    }
 }
 
+impl std::fmt::Display for Phase {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
+#[derive(Debug)]
 pub struct KeepAlive([u64; 2]);
 
 impl KeepAlive {
+    pub fn empty() -> Self {
+        KeepAlive([0, 0])
+    }
+
     pub fn replace(&mut self, from: u64, to: u64) -> bool {
         if self.0[0] == from {
             self.0[0] = to;
@@ -101,18 +162,8 @@ pub struct Connection<S> {
     pub target_selector: Arc<dyn TargetSelector>,
     /// ...
     pub resource_pack_supplier: Arc<dyn ResourcePackSupplier>,
-    /// The client address.
-    pub client_address: SocketAddr,
     /// The current phase of the connection.
     pub phase: Phase,
-    /// All handshake data...
-    pub handshake: Option<Handshake>,
-    /// All login data...
-    pub login: Option<Login>,
-    /// All configuration data...
-    pub configuration: Option<Configuration>,
-    /// The time that the last three keep alive packet ids
-    pub last_keep_alive: KeepAlive,
 }
 
 impl<S> Connection<S>
@@ -132,12 +183,7 @@ where
             status_supplier,
             target_selector,
             resource_pack_supplier,
-            client_address,
-            phase: Phase::Handshake,
-            handshake: None,
-            login: None,
-            configuration: None,
-            last_keep_alive: KeepAlive([0; 2]),
+            phase: Phase::Handshake { client_address },
         }
     }
 }
@@ -177,13 +223,15 @@ where
     }
 
     async fn handle_tick(&mut self) -> Result<(), Error> {
-        if self.phase != Phase::Configuration {
+        let Phase::Configuration {
+            last_keep_alive, ..
+        } = &mut self.phase
+        else {
             return Ok(());
-        }
+        };
 
         let id = authentication::generate_keep_alive();
-
-        if !self.last_keep_alive.replace(0, id) {
+        if !last_keep_alive.replace(0, id) {
             return Err(Error::Generic("keep alive not empty".to_string()));
         }
 
@@ -203,8 +251,12 @@ where
         // extract the encoded packet id
         let packet_id = self.read_varint().await?;
 
-        let phase = self.phase.clone();
-        info!(length = length, packet_id = packet_id, phase = ?self.phase, "Handling packet");
+        info!(
+            length = length,
+            packet_id = packet_id,
+            phase = self.phase,
+            "Handling packet"
+        );
 
         // split a separate reader from stream
         // TODO only advances inner if actually read!
@@ -215,30 +267,38 @@ where
         let cursor = &mut Cursor::new(&buffer);
 
         // deserialize and handle packet based on packet id and phase
-        match (packet_id, phase) {
+        match (packet_id, &self.phase) {
             // handshake phase
-            (0x00, Phase::Handshake) => handle!(HandshakePacket, cursor, self),
+            (0x00, Phase::Handshake { .. }) => handle!(HandshakePacket, cursor, self),
             // status phase
-            (0x00, Phase::Status) => handle!(StatusRequestPacket, cursor, self),
-            (0x01, Phase::Status) => handle!(PingPacket, cursor, self),
+            (0x00, Phase::Status { .. }) => handle!(StatusRequestPacket, cursor, self),
+            (0x01, Phase::Status { .. }) => handle!(PingPacket, cursor, self),
             // login phase
-            (0x00, Phase::Login) => handle!(LoginStartPacket, cursor, self),
-            (0x01, Phase::Login) => handle!(EncryptionResponsePacket, cursor, self),
-            (0x02, Phase::Login) => handle!(LoginPluginResponsePacket, cursor, self),
-            (0x03, Phase::Login) => handle!(LoginAcknowledgedPacket, cursor, self),
-            (0x04, Phase::Login) => handle!(CookieResponsePacket, cursor, self),
+            (0x00, Phase::Login { .. }) => handle!(LoginStartPacket, cursor, self),
+            (0x01, Phase::Login { .. }) => handle!(EncryptionResponsePacket, cursor, self),
+            (0x02, Phase::Login { .. }) => handle!(LoginPluginResponsePacket, cursor, self),
+            (0x03, Phase::Login { .. }) => handle!(LoginAcknowledgedPacket, cursor, self),
+            (0x04, Phase::Login { .. }) => handle!(CookieResponsePacket, cursor, self),
             // configuration phase
-            (0x00, Phase::Configuration) => handle!(ClientInformationPacket, cursor, self),
-            (0x01, Phase::Configuration) => handle!(CookieResponsePacket, cursor, self),
-            (0x02, Phase::Configuration) => handle!(PluginMessagePacket, cursor, self),
-            (0x03, Phase::Configuration) => handle!(AckFinishConfigurationPacket, cursor, self),
-            (0x04, Phase::Configuration) => handle!(inbound::KeepAlivePacket, cursor, self),
-            (0x05, Phase::Configuration) => handle!(PongPacket, cursor, self),
-            (0x06, Phase::Configuration) => handle!(ResourcePackResponsePacket, cursor, self),
-            (0x07, Phase::Configuration) => handle!(KnownPacksPacket, cursor, self),
+            (0x00, Phase::Configuration { .. }) => handle!(ClientInformationPacket, cursor, self),
+            (0x01, Phase::Configuration { .. }) => handle!(CookieResponsePacket, cursor, self),
+            (0x02, Phase::Configuration { .. }) => handle!(PluginMessagePacket, cursor, self),
+            (0x03, Phase::Configuration { .. }) => {
+                handle!(AckFinishConfigurationPacket, cursor, self)
+            }
+            (0x04, Phase::Configuration { .. }) => handle!(inbound::KeepAlivePacket, cursor, self),
+            (0x05, Phase::Configuration { .. }) => handle!(PongPacket, cursor, self),
+            (0x06, Phase::Configuration { .. }) => {
+                handle!(ResourcePackResponsePacket, cursor, self)
+            }
+            (0x07, Phase::Configuration { .. }) => handle!(KnownPacksPacket, cursor, self),
             // otherwise
             _ => {
-                warn!(packe_id = packet_id, phase = ?phase, "Unsupported packet in phase");
+                warn!(
+                    packe_id = packet_id,
+                    phase = self.phase,
+                    "Unsupported packet in phase"
+                );
                 Ok(())
             }
         }
@@ -270,26 +330,27 @@ where
 
     /// Initializes the transfer
     pub async fn transfer(&mut self) -> Result<(), Error> {
-        // get and check internal state
-        let Some(handshake) = &self.handshake else {
-            return Err(Error::Generic("invalid state".to_string()));
-        };
-        let Some(login) = &self.login else {
-            return Err(Error::Generic("invalid state".to_string()));
-        };
-        if !login.success {
-            return Err(Error::Generic("invalid state".to_string()));
-        }
+        // get expected phase state
+        phase!(
+            self.phase,
+            Phase::Configuration,
+            protocol_version,
+            client_address,
+            server_address,
+            server_port,
+            user_id,
+            user_name,
+        );
 
         // select target
         let target = self
             .target_selector
             .select(
-                &self.client_address,
-                (&handshake.server_address, handshake.server_port),
-                handshake.protocol_version as Protocol,
-                &login.user_id,
-                &login.user_name,
+                client_address,
+                (server_address, *server_port),
+                *protocol_version as Protocol,
+                user_id,
+                user_name,
             )
             .await?;
 

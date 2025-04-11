@@ -1,5 +1,5 @@
-use crate::connection::Connection;
-use crate::protocol::{AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet, Phase};
+use crate::connection::{Connection, Phase, phase};
+use crate::protocol::{AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet};
 use crate::status::Protocol;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::debug;
@@ -105,19 +105,22 @@ pub mod inbound {
             S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
         {
             debug!(packet = debug(&self), "received status request packet");
-
-            // get handshake and login state from connection
-            let Some(handshake) = &con.handshake else {
-                return Err(Error::Generic("invalid state".to_string()));
-            };
+            phase!(
+                con.phase,
+                Phase::Status,
+                client_address,
+                server_address,
+                server_port,
+                protocol_version,
+            );
 
             // get status from status supplier
             let status = con
                 .status_supplier
                 .get_status(
-                    &con.client_address,
-                    (&handshake.server_address, handshake.server_port),
-                    handshake.protocol_version as Protocol,
+                    client_address,
+                    (server_address, *server_port),
+                    *protocol_version as Protocol,
                 )
                 .await?;
 
@@ -164,6 +167,7 @@ pub mod inbound {
             S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
         {
             debug!(packet = debug(&self), "received ping packet");
+            phase!(con.phase, Phase::Status,);
 
             // create a new pong packet and send it
             let pong_response = outbound::PongPacket::new(self.payload);
