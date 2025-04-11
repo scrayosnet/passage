@@ -19,7 +19,6 @@ pub mod outbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Request_(configuration))
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct CookieRequestPacket;
 
     impl Packet for CookieRequestPacket {
@@ -45,7 +44,6 @@ pub mod outbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Clientbound_Plugin_Message_(configuration))
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct PluginMessagePacket;
 
     impl Packet for PluginMessagePacket {
@@ -178,7 +176,6 @@ pub mod outbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Reset_Chat)
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct ResetChatPacket;
 
     impl Packet for ResetChatPacket {
@@ -203,7 +200,6 @@ pub mod outbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Registry_Data_2)
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct RegistryDataPacket;
 
     impl Packet for RegistryDataPacket {
@@ -225,7 +221,6 @@ pub mod outbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Remove_Resource_Pack_(configuration))
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct RemoveResourcePackPacket;
 
     impl Packet for RemoveResourcePackPacket {
@@ -344,7 +339,6 @@ pub mod outbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Feature_Flags)
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct FeatureFlagsPacket;
 
     impl Packet for FeatureFlagsPacket {
@@ -366,7 +360,6 @@ pub mod outbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Update_Tags_(configuration))
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct UpdateTagsPacket;
 
     impl Packet for UpdateTagsPacket {
@@ -393,7 +386,6 @@ pub mod outbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Clientbound_Known_Packs)
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct KnownPacksPacket;
 
     impl Packet for KnownPacksPacket {
@@ -418,7 +410,6 @@ pub mod outbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Custom_Report_Details_(configuration))
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct CustomReportDetailsPacket;
 
     impl Packet for CustomReportDetailsPacket {
@@ -443,7 +434,6 @@ pub mod outbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Server_Links_(configuration))
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct ServerLinksPacket;
 
     impl Packet for ServerLinksPacket {
@@ -525,7 +515,6 @@ pub mod inbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Response_(configuration))
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct CookieResponsePacket;
 
     impl Packet for CookieResponsePacket {
@@ -554,7 +543,6 @@ pub mod inbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Serverbound_Plugin_Message_(configuration))
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct PluginMessagePacket;
 
     impl Packet for PluginMessagePacket {
@@ -579,7 +567,6 @@ pub mod inbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Acknowledge_Finish_Configuration)
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct AckFinishConfigurationPacket;
 
     impl Packet for AckFinishConfigurationPacket {
@@ -758,7 +745,6 @@ pub mod inbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Serverbound_Known_Packs)
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct KnownPacksPacket;
 
     impl Packet for KnownPacksPacket {

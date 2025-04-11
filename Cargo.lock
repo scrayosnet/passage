@@ -983,7 +983,7 @@ dependencies = [
  "config",
  "lazy_static",
  "num-bigint",
- "rand 0.9.0",
+ "rand 0.8.5",
  "reqwest",
  "rsa",
  "sentry",

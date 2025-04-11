@@ -114,7 +114,6 @@ pub mod outbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Set_Compression)
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct SetCompressionPacket;
 
     impl Packet for SetCompressionPacket {
@@ -141,7 +140,6 @@ pub mod outbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Plugin_Request)
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct LoginPluginRequestPacket;
 
     impl Packet for LoginPluginRequestPacket {
@@ -334,7 +332,7 @@ pub mod inbound {
             let auth_response = match auth_response {
                 Ok(inner) => inner,
                 Err(err) => {
-                    warn!(err = err, "mojang auth failed");
+                    warn!(err = ?err, "mojang auth failed");
                     // TODO write actual reason
                     con.write_packet(DisconnectPacket {
                         reason: "".to_string(),
@@ -377,7 +375,6 @@ pub mod inbound {
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Plugin_Response)
     #[derive(Debug)]
-    #[deprecated(note = "placeholder implementation")]
     pub struct LoginPluginResponsePacket;
 
     impl Packet for LoginPluginResponsePacket {
@@ -431,18 +428,6 @@ pub mod inbound {
                 user_id,
             );
 
-            // switch to configuration phase
-            info!("switching to configuration phase");
-            con.phase = Phase::Configuration;
-
-            // store auth cookie
-            con.write_packet(StoreCookiePacket {
-                key: AUTH_COOKIE_KEY.to_string(),
-                // TODO generate payload and encrypt with secret
-                payload: vec![],
-            })
-            .await?;
-
             // get resource packs to load
             let packs = con
                 .resource_pack_supplier
@@ -457,6 +442,7 @@ pub mod inbound {
             let pack_ids = packs.iter().map(|pack| (pack.uuid, pack.forced)).collect();
 
             // switch to configuration phase
+            info!("switching to configuration phase");
             con.phase = Phase::Configuration {
                 client_address: *client_address,
                 protocol_version: *protocol_version,
@@ -467,6 +453,14 @@ pub mod inbound {
                 transit_packs: pack_ids,
                 last_keep_alive: KeepAlive::empty(),
             };
+
+            // store auth cookie
+            con.write_packet(StoreCookiePacket {
+                key: AUTH_COOKIE_KEY.to_string(),
+                // TODO generate payload and encrypt with secret
+                payload: vec![],
+            })
+            .await?;
 
             // handle no resource packs to send
             if packs.is_empty() {
@@ -524,7 +518,6 @@ pub mod inbound {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::TryRngCore;
     use std::io::Cursor;
     use tokio::io::AsyncReadExt;
     use uuid::uuid;
@@ -563,7 +556,7 @@ mod tests {
 
     #[tokio::test]
     async fn decode_encryption_response() {
-        let mut rng = rand::rng();
+        let mut rng = rand::random();
         let mut shared_secret = [0u8; 32];
         rng.try_fill_bytes(&mut shared_secret).unwrap();
         let mut verify_token = [0u8; 32];
@@ -603,7 +596,7 @@ mod tests {
 
     #[tokio::test]
     async fn encode_encryption_request() {
-        let mut rng = rand::rng();
+        let mut rng = rand::random();
         let mut public_key_write = [0u8; 32];
         rng.try_fill_bytes(&mut public_key_write).unwrap();
         let mut verify_token_write = [0u8; 32];

@@ -5,7 +5,7 @@ use crate::target_selector::TargetSelector;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 pub async fn serve(
     listener: TcpListener,
@@ -34,7 +34,7 @@ pub async fn serve(
 
             // handle the client connection
             if let Err(e) = con.listen().await {
-                info!(
+                warn!(
                     cause = e.to_string(),
                     addr = &addr.to_string(),
                     "failure communicating with a client"
@@ -50,7 +50,7 @@ pub async fn serve(
                 );
             }
 
-            debug!(addr = &addr.to_string(), "closed connection with a client");
+            info!(addr = &addr.to_string(), "closed connection with a client");
         });
     }
 }

@@ -61,7 +61,7 @@ pub async fn start(state: Config) -> Result<(), Box<dyn std::error::Error>> {
         enforces_secure_chat: Some(true),
     });
     let target_selector =
-        SimpleTargetSelector::from_target(SocketAddr::from_str("149.248.195.184:25565")?);
+        SimpleTargetSelector::from_target(SocketAddr::from_str("116.202.130.184:26426")?);
 
     let resource_pack_supplier = TestResourcePackSupplier;
 

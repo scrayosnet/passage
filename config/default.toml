@@ -26,7 +26,7 @@ adapter = "none"
 adapter = "none"
 
 [target_selector.fixed]
-target = "justchunks.net"
+target = "116.202.130.184:26426"
 
 [target_discoverer]
 adapter = "none"

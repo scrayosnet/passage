@@ -33,8 +33,6 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-pub use phase;
-
 macro_rules! handle {
     ($packet_type:ty, $buffer:expr, $self:expr) => {{
         let packet = <$packet_type>::new_from_buffer($buffer).await?;
@@ -43,16 +41,20 @@ macro_rules! handle {
     }}
 }
 
+#[macro_export]
 macro_rules! phase {
-    ($phase:expr, $expected:expr, $($field:tt,)*) => {
+    ($phase:expr, $expected:path, $($field:ident,)*) => {
         let $expected { $($field,)* .. } = &mut $phase else {
             return Err(Error::InvalidState {
                 actual: $phase.name(),
-                expected: $expected.name(),
+                expected: "", // $expected.name()
             });
         };
     }
 }
+
+use Phase::{Acknowledge, Configuration, Encryption, Handshake, Login, Status, Transfer};
+pub use phase;
 
 #[derive(Debug)]
 pub enum Phase {
@@ -110,15 +112,15 @@ pub enum Phase {
 }
 
 impl Phase {
-    fn name(&self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
-            Phase::Handshake { .. } => "Handshake",
-            Phase::Status { .. } => "Status",
-            Phase::Login { .. } => "Login",
-            Phase::Transfer { .. } => "Transfer",
-            Phase::Encryption { .. } => "Encryption",
-            Phase::Acknowledge { .. } => "Acknowledge",
-            Phase::Configuration { .. } => "Configuration",
+            Handshake { .. } => "Handshake",
+            Status { .. } => "Status",
+            Login { .. } => "Login",
+            Transfer { .. } => "Transfer",
+            Encryption { .. } => "Encryption",
+            Acknowledge { .. } => "Acknowledge",
+            Configuration { .. } => "Configuration",
         }
     }
 }
@@ -183,7 +185,7 @@ where
             status_supplier,
             target_selector,
             resource_pack_supplier,
-            phase: Phase::Handshake { client_address },
+            phase: Handshake { client_address },
         }
     }
 }
@@ -215,15 +217,11 @@ where
             }
         }
 
-        // TODO or do outside?
-        // close stream cleanly
-        self.stream.shutdown().await?;
-
         Ok(())
     }
 
     async fn handle_tick(&mut self) -> Result<(), Error> {
-        let Phase::Configuration {
+        let Configuration {
             last_keep_alive, ..
         } = &mut self.phase
         else {
@@ -254,7 +252,7 @@ where
         info!(
             length = length,
             packet_id = packet_id,
-            phase = self.phase,
+            phase = ?self.phase,
             "Handling packet"
         );
 
@@ -264,39 +262,35 @@ where
         self.take(length as u64 - 1)
             .read_to_end(&mut buffer)
             .await?;
-        let cursor = &mut Cursor::new(&buffer);
+        let buf = &mut Cursor::new(&buffer);
 
         // deserialize and handle packet based on packet id and phase
         match (packet_id, &self.phase) {
-            // handshake phase
-            (0x00, Phase::Handshake { .. }) => handle!(HandshakePacket, cursor, self),
-            // status phase
-            (0x00, Phase::Status { .. }) => handle!(StatusRequestPacket, cursor, self),
-            (0x01, Phase::Status { .. }) => handle!(PingPacket, cursor, self),
-            // login phase
-            (0x00, Phase::Login { .. }) => handle!(LoginStartPacket, cursor, self),
-            (0x01, Phase::Login { .. }) => handle!(EncryptionResponsePacket, cursor, self),
-            (0x02, Phase::Login { .. }) => handle!(LoginPluginResponsePacket, cursor, self),
-            (0x03, Phase::Login { .. }) => handle!(LoginAcknowledgedPacket, cursor, self),
-            (0x04, Phase::Login { .. }) => handle!(CookieResponsePacket, cursor, self),
-            // configuration phase
-            (0x00, Phase::Configuration { .. }) => handle!(ClientInformationPacket, cursor, self),
-            (0x01, Phase::Configuration { .. }) => handle!(CookieResponsePacket, cursor, self),
-            (0x02, Phase::Configuration { .. }) => handle!(PluginMessagePacket, cursor, self),
-            (0x03, Phase::Configuration { .. }) => {
-                handle!(AckFinishConfigurationPacket, cursor, self)
+            (0x00, Handshake { .. }) => handle!(HandshakePacket, buf, self),
+            (0x00, Status { .. }) => handle!(StatusRequestPacket, buf, self),
+            (0x01, Status { .. }) => handle!(PingPacket, buf, self),
+            (0x00, Login { .. }) => handle!(LoginStartPacket, buf, self),
+            //(0x04, Transfer { .. }) => handle!(CookieResponsePacket, buf, self),
+            (0x01, Encryption { .. }) => handle!(EncryptionResponsePacket, buf, self),
+            //(0x02, Phase::Login { .. }) => handle!(LoginPluginResponsePacket, cursor, self),
+            (0x03, Acknowledge { .. }) => handle!(LoginAcknowledgedPacket, buf, self),
+            (0x00, Configuration { .. }) => handle!(ClientInformationPacket, buf, self),
+            (0x01, Configuration { .. }) => handle!(CookieResponsePacket, buf, self),
+            (0x02, Configuration { .. }) => handle!(PluginMessagePacket, buf, self),
+            (0x03, Configuration { .. }) => {
+                handle!(AckFinishConfigurationPacket, buf, self)
             }
-            (0x04, Phase::Configuration { .. }) => handle!(inbound::KeepAlivePacket, cursor, self),
-            (0x05, Phase::Configuration { .. }) => handle!(PongPacket, cursor, self),
-            (0x06, Phase::Configuration { .. }) => {
-                handle!(ResourcePackResponsePacket, cursor, self)
+            (0x04, Configuration { .. }) => handle!(inbound::KeepAlivePacket, buf, self),
+            (0x05, Configuration { .. }) => handle!(PongPacket, buf, self),
+            (0x06, Configuration { .. }) => {
+                handle!(ResourcePackResponsePacket, buf, self)
             }
-            (0x07, Phase::Configuration { .. }) => handle!(KnownPacksPacket, cursor, self),
+            (0x07, Configuration { .. }) => handle!(KnownPacksPacket, buf, self),
             // otherwise
             _ => {
                 warn!(
                     packe_id = packet_id,
-                    phase = self.phase,
+                    phase = ?self.phase,
                     "Unsupported packet in phase"
                 );
                 Ok(())
@@ -324,6 +318,7 @@ where
     pub fn shutdown(&mut self) {
         // send shutdown message if available
         if let Some(shutdown) = self.shutdown.take() {
+            info!("sending connection shutdown signal");
             let _ = shutdown.send(());
         }
     }
@@ -333,7 +328,7 @@ where
         // get expected phase state
         phase!(
             self.phase,
-            Phase::Configuration,
+            Configuration,
             protocol_version,
             client_address,
             server_address,
