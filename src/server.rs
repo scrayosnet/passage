@@ -15,7 +15,13 @@ pub async fn serve(
 ) -> Result<(), Box<dyn std::error::Error>> {
     loop {
         // accept the next incoming connection
-        let (mut stream, addr) = listener.accept().await?;
+        let (mut stream, addr) = tokio::select! {
+            accepted = listener.accept() => accepted?,
+            _ = tokio::signal::ctrl_c() => {
+                info!("received connection ctrl_c signal");
+                return Ok(());
+            },
+        };
 
         // clone values to be moved
         let status_supplier = Arc::clone(&status_supplier);

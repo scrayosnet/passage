@@ -28,7 +28,6 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::io::{AsyncReadExt, ReadBuf};
-use tokio::signal;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -209,7 +208,6 @@ where
                 biased;
                 // await shutdown
                 _ = rx.recv() => break,
-                _ = signal::ctrl_c() => break,
                 // await next timer tick for keep-alive
                 _ = interval.tick() => self.handle_tick().await?,
                 // await next packet in, reading the packet size (expect fast execution)
