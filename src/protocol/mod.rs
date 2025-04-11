@@ -14,7 +14,7 @@ use crate::authentication;
 use crate::connection::Connection;
 use std::fmt::Debug;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tracing::{debug, info};
+use tracing::info;
 use uuid::Uuid;
 
 pub(crate) mod configuration;
@@ -110,7 +110,7 @@ impl TryFrom<usize> for State {
 }
 
 #[derive(Debug)]
-enum ResourcePackResult {
+pub enum ResourcePackResult {
     Success,
     Declined,
     DownloadFailed,

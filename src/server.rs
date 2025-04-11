@@ -5,7 +5,7 @@ use crate::target_selector::TargetSelector;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 pub async fn serve(
     listener: TcpListener,

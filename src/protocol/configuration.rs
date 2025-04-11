@@ -595,13 +595,7 @@ pub mod inbound {
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Finish_Configuration)
     #[derive(Debug)]
     pub struct KeepAlivePacket {
-        id: u64,
-    }
-
-    impl KeepAlivePacket {
-        pub const fn new(id: u64) -> Self {
-            Self { id }
-        }
+        pub id: u64,
     }
 
     impl Packet for KeepAlivePacket {

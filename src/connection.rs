@@ -4,18 +4,14 @@ use crate::protocol::configuration::inbound::{
     AckFinishConfigurationPacket, ClientInformationPacket, KnownPacksPacket, PluginMessagePacket,
     PongPacket, ResourcePackResponsePacket,
 };
-use crate::protocol::configuration::outbound::{
-    AddResourcePackPacket, DisconnectPacket, StoreCookiePacket, TransferPacket,
-};
+use crate::protocol::configuration::outbound::{DisconnectPacket, TransferPacket};
 use crate::protocol::configuration::{inbound, outbound};
 use crate::protocol::handshaking::inbound::HandshakePacket;
-use crate::protocol::login::AUTH_COOKIE_KEY;
 use crate::protocol::login::inbound::{
-    CookieResponsePacket, EncryptionResponsePacket, LoginAcknowledgedPacket,
-    LoginPluginResponsePacket, LoginStartPacket,
+    CookieResponsePacket, EncryptionResponsePacket, LoginAcknowledgedPacket, LoginStartPacket,
 };
 use crate::protocol::status::inbound::{PingPacket, StatusRequestPacket};
-use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, State};
+use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket};
 use crate::resource_pack_supplier::ResourcePackSupplier;
 use crate::status::Protocol;
 use crate::status_supplier::StatusSupplier;
@@ -26,7 +22,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, ReadBuf};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};

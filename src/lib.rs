@@ -14,7 +14,6 @@ mod target_selector;
 mod target_selector_strategy;
 
 use crate::config::Config;
-use crate::resource_pack_supplier::none::NoneResourcePackSupplier;
 use crate::resource_pack_supplier::test::TestResourcePackSupplier;
 use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
 use crate::status_supplier::simple::SimpleStatusSupplier;
