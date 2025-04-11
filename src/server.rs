@@ -1,7 +1,7 @@
+use crate::adapter::resourcepack::ResourcepackSupplier;
+use crate::adapter::status::StatusSupplier;
+use crate::adapter::target_selection::TargetSelector;
 use crate::connection::Connection;
-use crate::resource_pack_supplier::ResourcePackSupplier;
-use crate::status_supplier::StatusSupplier;
-use crate::target_selector::TargetSelector;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
@@ -11,7 +11,7 @@ pub async fn serve(
     listener: TcpListener,
     status_supplier: Arc<dyn StatusSupplier>,
     target_selector: Arc<dyn TargetSelector>,
-    resource_pack_supplier: Arc<dyn ResourcePackSupplier>,
+    resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     loop {
         // accept the next incoming connection
@@ -26,7 +26,7 @@ pub async fn serve(
         // clone values to be moved
         let status_supplier = Arc::clone(&status_supplier);
         let target_selector = Arc::clone(&target_selector);
-        let resource_pack_supplier = Arc::clone(&resource_pack_supplier);
+        let resourcepack_supplier = Arc::clone(&resourcepack_supplier);
 
         tokio::spawn(async move {
             // build connection wrapper for stream
@@ -35,7 +35,7 @@ pub async fn serve(
                 addr,
                 Arc::clone(&status_supplier),
                 Arc::clone(&target_selector),
-                Arc::clone(&resource_pack_supplier),
+                Arc::clone(&resourcepack_supplier),
             );
 
             // handle the client connection

@@ -1,7 +1,7 @@
 use crate::authentication;
 use crate::authentication::VerifyToken;
 use crate::connection::KeepAlive;
-use crate::connection::{Connection, Phase, phase};
+use crate::connection::{phase, Connection, Phase};
 use crate::protocol::configuration::outbound::{AddResourcePackPacket, StoreCookiePacket};
 use crate::protocol::login::outbound::DisconnectPacket;
 use crate::protocol::{
@@ -430,8 +430,8 @@ pub mod inbound {
 
             // get resource packs to load
             let packs = con
-                .resource_pack_supplier
-                .get_resource_packs(
+                .resourcepack_supplier
+                .get_resourcepacks(
                     client_address,
                     (server_address, *server_port),
                     *protocol_version as Protocol,

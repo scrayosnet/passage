@@ -16,19 +16,19 @@ auth_enabled = false
 username = "username" # update if (auth) enabled
 password = "password" # update if (auth) enabled
 
-[resource_pack]
+[resourcepack]
 adapter = "none"
 
 [status]
 adapter = "none"
 
-[target_selector]
+[target]
 adapter = "none"
 
-[target_selector.fixed]
+[target.fixed]
 target = "116.202.130.184:26426"
 
-[target_discoverer]
+[target_strategy]
 adapter = "none"
 
 [logging]

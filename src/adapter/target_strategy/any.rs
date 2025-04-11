@@ -1,6 +1,7 @@
+use crate::adapter::target_selection::Target;
+use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::protocol::Error;
 use crate::status::Protocol;
-use crate::target_selector::TargetSelector;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -22,15 +23,16 @@ impl SimpleTargetSelector {
 }
 
 #[async_trait]
-impl TargetSelector for SimpleTargetSelector {
+impl TargetSelectorStrategy for SimpleTargetSelector {
     async fn select(
         &self,
-        _client_addr: &SocketAddr,
-        _server_addr: (&str, u16),
-        _protocol: Protocol,
-        _user_id: &Uuid,
-        _username: &str,
-    ) -> Result<Option<SocketAddr>, Error> {
-        Ok(self.target)
+        client_addr: &SocketAddr,
+        server_addr: &(String, u16),
+        protocol: Protocol,
+        username: &str,
+        user_id: &Uuid,
+        targets: &[Target],
+    ) -> Result<Option<String>, Error> {
+        Ok(targets.first().map(|target| target.identifier.clone()))
     }
 }

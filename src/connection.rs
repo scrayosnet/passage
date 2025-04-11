@@ -1,3 +1,6 @@
+use crate::adapter::resourcepack::ResourcepackSupplier;
+use crate::adapter::status::StatusSupplier;
+use crate::adapter::target_selection::TargetSelector;
 use crate::authentication;
 use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
 use crate::protocol::configuration::inbound::{
@@ -12,10 +15,7 @@ use crate::protocol::login::inbound::{
 };
 use crate::protocol::status::inbound::{PingPacket, StatusRequestPacket};
 use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket};
-use crate::resource_pack_supplier::ResourcePackSupplier;
 use crate::status::Protocol;
-use crate::status_supplier::StatusSupplier;
-use crate::target_selector::TargetSelector;
 use std::io::Cursor;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -158,7 +158,7 @@ pub struct Connection<S> {
     /// ...
     pub target_selector: Arc<dyn TargetSelector>,
     /// ...
-    pub resource_pack_supplier: Arc<dyn ResourcePackSupplier>,
+    pub resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
     /// The current phase of the connection.
     pub phase: Phase,
 }
@@ -172,14 +172,14 @@ where
         client_address: SocketAddr,
         status_supplier: Arc<dyn StatusSupplier>,
         target_selector: Arc<dyn TargetSelector>,
-        resource_pack_supplier: Arc<dyn ResourcePackSupplier>,
+        resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
     ) -> Connection<S> {
         Self {
             stream: CipherStream::new(stream, None, None),
             shutdown: None,
             status_supplier,
             target_selector,
-            resource_pack_supplier,
+            resourcepack_supplier,
             phase: Handshake { client_address },
         }
     }

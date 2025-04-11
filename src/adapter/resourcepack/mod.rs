@@ -1,5 +1,5 @@
+pub(crate) mod fixed;
 pub(crate) mod none;
-pub(crate) mod test;
 
 use crate::protocol::Error;
 use crate::status::Protocol;
@@ -9,19 +9,19 @@ use std::net::SocketAddr;
 use uuid::Uuid;
 
 #[async_trait]
-pub trait ResourcePackSupplier: Send + Sync {
-    async fn get_resource_packs(
+pub trait ResourcepackSupplier: Send + Sync {
+    async fn get_resourcepacks(
         &self,
         client_addr: &SocketAddr,
         server_addr: (&str, u16),
         protocol: Protocol,
         username: &str,
         user_id: &Uuid,
-    ) -> Result<Vec<ResourcePack>, Error>;
+    ) -> Result<Vec<Resourcepack>, Error>;
 }
 
 #[derive(Debug, Serialize, Clone)]
-pub struct ResourcePack {
+pub struct Resourcepack {
     pub uuid: Uuid,
     pub url: String,
     pub hash: String,

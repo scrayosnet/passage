@@ -1,9 +1,13 @@
+use crate::adapter::target_selection::Target;
 use crate::protocol::Error;
 use crate::status::Protocol;
-use crate::target_selector::Target;
+use async_trait::async_trait;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
+pub mod any;
+
+#[async_trait]
 pub trait TargetSelectorStrategy: Send {
     async fn select(
         &self,
@@ -13,5 +17,5 @@ pub trait TargetSelectorStrategy: Send {
         username: &str,
         user_id: &Uuid,
         targets: &[Target],
-    ) -> impl Future<Output = Result<Option<SocketAddr>, Error>> + Send;
+    ) -> Result<Option<String>, Error>;
 }
