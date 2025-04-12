@@ -255,8 +255,7 @@ where
             "Handling packet"
         );
 
-        // split a separate reader from stream
-        // TODO only advances inner if actually read!
+        // split a separate reader from stream and read packet bytes (advancing stream)
         let mut buffer = vec![];
         self.take(length as u64 - 1)
             .read_to_end(&mut buffer)

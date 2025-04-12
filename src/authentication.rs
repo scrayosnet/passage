@@ -16,11 +16,12 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use uuid::Uuid;
 
 lazy_static! {
-    pub(crate) static ref KEY_PAIR: (RsaPrivateKey, RsaPublicKey) = generate_keypair().expect("");
-    pub(crate) static ref ENCODED_PUB: Vec<u8> = encode_public_key(&KEY_PAIR.1).expect("");
-}
+    /// The RSA keypair of the application.
+    pub(crate) static ref KEY_PAIR: (RsaPrivateKey, RsaPublicKey) = generate_keypair().expect("failed to generate keypair");
 
-// TODo lazy static keys and encoded
+    /// The encoded public key.
+    pub(crate) static ref ENCODED_PUB: Vec<u8> = encode_public_key(&KEY_PAIR.1).expect("failed to encode keypair");
+}
 
 /// The internal error type for all errors related to the authentication and cryptography.
 ///
