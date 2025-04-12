@@ -7,21 +7,16 @@ use tracing::debug;
 pub mod outbound {
     use super::*;
 
-    /// This is the response for a specific [`StatusRequestPacket`] that contains all self-reported metadata.
+    /// The outbound [`StatusResponsePacket`].
     ///
     /// This packet can be received only after a [`StatusRequestPacket`] and will not close the connection, allowing for a
     /// ping sequence to be exchanged afterward.
+    ///
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Status_Response)
     #[derive(Debug)]
     pub struct StatusResponsePacket {
         /// The JSON response body that contains all self-reported server metadata.
         pub body: String,
-    }
-
-    impl StatusResponsePacket {
-        /// Creates a new [`StatusResponsePacket`] with the supplied payload.
-        pub const fn new(body: String) -> Self {
-            Self { body }
-        }
     }
 
     impl Packet for StatusResponsePacket {
@@ -79,10 +74,12 @@ pub mod outbound {
 pub mod inbound {
     use super::*;
 
-    /// This packet requests the server metadata for display in the multiplayer menu.
+    /// The inbound [`StatusRequestPacket`].
     ///
-    /// The status can be hidden by closing the connection instead. After the status was exchanged, a ping sequence may
-    /// be performed afterward.
+    /// The status can only be requested once immediately after the handshake, before any ping. The
+    /// server won't respond otherwise.
+    ///
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Status_Request)
     #[derive(Debug)]
     pub struct StatusRequestPacket;
 
@@ -128,7 +125,9 @@ pub mod inbound {
             let json_response = serde_json::to_string(&status)?;
 
             // create a new status response packet and send it
-            let request = outbound::StatusResponsePacket::new(json_response);
+            let request = outbound::StatusResponsePacket {
+                body: json_response,
+            };
             debug!(packet = debug(&request), "sending status response packet");
             con.write_packet(request).await?;
 
@@ -136,10 +135,9 @@ pub mod inbound {
         }
     }
 
-    /// This is the request for a specific [`PongPacket`] that can be used to measure the server ping.
+    /// The inbound [`PingPacket`].
     ///
-    /// This packet can be sent after a connection was established or the [`StatusResponsePacket`] was received. Initiating
-    /// the ping sequence will consume the connection after the [`PongPacket`] was received.
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Ping_Request_(status))
     #[derive(Debug)]
     pub struct PingPacket {
         /// The arbitrary payload that will be returned from the server (to identify the corresponding request).
@@ -230,7 +228,9 @@ mod tests {
     #[tokio::test]
     async fn encode_status_response() {
         // write the packet into a buffer and box it as a slice (sized)
-        let packet = outbound::StatusResponsePacket::new("{\"some\": \"values\"}".to_string());
+        let packet = outbound::StatusResponsePacket {
+            body: "{\"some\": \"values\"}".to_string(),
+        };
         let mut packet_buffer = Cursor::new(Vec::<u8>::new());
         packet.write_to_buffer(&mut packet_buffer).await.unwrap();
         let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer.into_inner());

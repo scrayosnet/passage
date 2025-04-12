@@ -1,7 +1,7 @@
 use crate::authentication;
 use crate::authentication::VerifyToken;
 use crate::connection::KeepAlive;
-use crate::connection::{phase, Connection, Phase};
+use crate::connection::{Connection, Phase, phase};
 use crate::protocol::configuration::outbound::{AddResourcePackPacket, StoreCookiePacket};
 use crate::protocol::login::outbound::DisconnectPacket;
 use crate::protocol::{

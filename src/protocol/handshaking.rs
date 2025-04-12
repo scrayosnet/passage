@@ -6,10 +6,12 @@ use tracing::debug;
 pub mod inbound {
     use super::*;
 
-    /// This packet initiates the connection and tells the server the details of the client and intent.
+    /// The inbound [`HandshakePacket`].
     ///
-    /// The data in this packet can differ from the actual data that was used but will be considered by the server when
-    /// assembling the response. Therefore, these values can be assumed as true.
+    /// This packet causes the server to switch into the target state. It should be sent right after
+    /// opening the TCP connection to prevent the server from disconnecting.
+    ///
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Handshake)
     #[derive(Debug)]
     pub struct HandshakePacket {
         /// The pretended protocol version.
