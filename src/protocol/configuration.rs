@@ -1,6 +1,5 @@
 use crate::connection::Connection;
 use crate::connection::{Phase, phase};
-use crate::protocol::Error::Generic;
 use crate::protocol::configuration::outbound::DisconnectPacket;
 use crate::protocol::{
     AsyncReadPacket, AsyncWritePacket, ChatMode, DisplayedSkinParts, Error, InboundPacket,
@@ -454,6 +453,7 @@ pub mod outbound {
 
 pub mod inbound {
     use super::*;
+    use tracing::warn;
 
     /// The inbound [`ClientInformationPacket`]. (Placeholder)
     ///
@@ -621,7 +621,7 @@ pub mod inbound {
             phase!(con.phase, Phase::Configuration, last_keep_alive,);
 
             if !last_keep_alive.replace(self.id, 0) {
-                return Err(Generic("keep alive packet already received".to_string()));
+                debug!(id = self.id, "keep alive packet id unknown");
             }
 
             Ok(())

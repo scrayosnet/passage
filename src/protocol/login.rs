@@ -354,7 +354,7 @@ pub mod inbound {
             };
 
             // enable encryption for the connection using the shared secret
-            con.enable_encryption(&shared_secret)?;
+            con.apply_encryption(&shared_secret)?;
 
             // create a new login success packet and send it
             let login_success = outbound::LoginSuccessPacket {

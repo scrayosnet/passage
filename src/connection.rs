@@ -224,7 +224,12 @@ where
 
         let id = authentication::generate_keep_alive();
         if !last_keep_alive.replace(0, id) {
-            return Err(Error::Generic("keep alive not empty".to_string()));
+            self.write_packet(DisconnectPacket {
+                reason: "Missed Keepalive".to_string(),
+            })
+            .await?;
+            self.shutdown();
+            return Ok(());
         }
 
         let packet = outbound::KeepAlivePacket::new(id);
@@ -292,11 +297,7 @@ where
         }
     }
 
-    pub(crate) fn enable_encryption(&mut self, shared_secret: &[u8]) -> Result<(), Error> {
-        if self.stream.is_encrypted() {
-            return Err(Error::Generic("already encrypted".to_string()));
-        }
-
+    pub(crate) fn apply_encryption(&mut self, shared_secret: &[u8]) -> Result<(), Error> {
         info!("enabling encryption");
 
         // get stream ciphers and wrap stream with cipher

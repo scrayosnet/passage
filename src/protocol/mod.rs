@@ -32,24 +32,24 @@ pub enum Error {
     /// An error occurred while reading or writing to the underlying byte stream.
     #[error("error reading or writing data: {0}")]
     Io(#[from] std::io::Error),
+
     /// The received packet is of an invalid length that we cannot process.
     #[error("illegal packet length")]
     IllegalPacketLength,
-    /// The received state index cannot be mapped to an existing state.
-    #[error("illegal state index: {state}")]
-    IllegalState {
-        /// The state index that was received.
-        state: usize,
-    },
+
     /// The received value index cannot be mapped to an existing enum.
-    #[error("illegal enum value index: {value}")]
+    #[error("illegal enum value index for {kind}: {value}")]
     IllegalEnumValue {
+        /// The enum kind which was parsed.
+        kind: &'static str,
         /// The value that was received.
         value: usize,
     },
+
     /// The received `VarInt` cannot be correctly decoded (was formed incorrectly).
     #[error("invalid VarInt data")]
     InvalidVarInt,
+
     /// The received packet ID is not mapped to an expected packet.
     #[error("illegal packet ID: {actual} (expected {expected})")]
     IllegalPacketId {
@@ -58,21 +58,25 @@ pub enum Error {
         /// The actual value that was observed.
         actual: usize,
     },
+
     /// The JSON response of a packet is incorrectly encoded (not UTF-8).
     #[error("invalid response body (invalid encoding)")]
     InvalidEncoding,
+
     /// The JSON version of a packet content could not be encoded.
     #[error("invalid struct for JSON (encoding problem)")]
     EncodingFail(#[from] serde_json::Error),
+
+    /// Some crypto/authentication request failed.
     #[error("could not encrypt connection: {0}")]
     CryptographyFailed(#[from] authentication::Error),
+
+    /// The packet handle was called while in an unexpected phase.
     #[error("invalid state: {actual} (expected {expected})")]
     InvalidState {
         expected: &'static str,
         actual: &'static str,
     },
-    #[error("some generic error (placeholder)")]
-    Generic(String),
 }
 
 /// State is the desired state that the connection should be in after the initial handshake.
@@ -104,7 +108,10 @@ impl TryFrom<usize> for State {
             1 => Ok(State::Status),
             2 => Ok(State::Login),
             3 => Ok(State::Transfer),
-            _ => Err(Error::IllegalState { state: value }),
+            _ => Err(Error::IllegalEnumValue {
+                kind: "State",
+                value,
+            }),
         }
     }
 }
@@ -149,7 +156,10 @@ impl TryFrom<usize> for ResourcePackResult {
             5 => Ok(ResourcePackResult::InvalidUrl),
             6 => Ok(ResourcePackResult::ReloadFailed),
             7 => Ok(ResourcePackResult::Discorded),
-            _ => Err(Error::IllegalEnumValue { value }),
+            _ => Err(Error::IllegalEnumValue {
+                kind: "ResourcePackResult",
+                value,
+            }),
         }
     }
 }
@@ -179,7 +189,10 @@ impl TryFrom<usize> for ChatMode {
             0 => Ok(ChatMode::Enabled),
             1 => Ok(ChatMode::CommandsOnly),
             2 => Ok(ChatMode::Hidden),
-            _ => Err(Error::IllegalEnumValue { value }),
+            _ => Err(Error::IllegalEnumValue {
+                kind: "ChatMode",
+                value,
+            }),
         }
     }
 }
@@ -239,7 +252,10 @@ impl TryFrom<usize> for MainHand {
         match value {
             0 => Ok(MainHand::Left),
             1 => Ok(MainHand::Right),
-            _ => Err(Error::IllegalEnumValue { value }),
+            _ => Err(Error::IllegalEnumValue {
+                kind: "MainHand",
+                value,
+            }),
         }
     }
 }
@@ -269,7 +285,10 @@ impl TryFrom<usize> for ParticleStatus {
             0 => Ok(ParticleStatus::All),
             1 => Ok(ParticleStatus::Decreased),
             2 => Ok(ParticleStatus::Minimal),
-            _ => Err(Error::IllegalEnumValue { value }),
+            _ => Err(Error::IllegalEnumValue {
+                kind: "ParticleStatus",
+                value,
+            }),
         }
     }
 }
