@@ -69,10 +69,11 @@ pub fn sign(message: &[u8], secret: &[u8]) -> Vec<u8> {
     output
 }
 
-pub fn check_sign(message: &[u8], secret: &[u8]) -> bool {
+pub fn check_sign<'a>(message: &'a [u8], secret: &[u8]) -> (bool, &'a [u8]) {
     let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size!");
     mac.update(&message[32..]);
-    mac.verify_slice(&message[..32]).is_ok()
+    let ok = mac.verify_slice(&message[..32]).is_ok();
+    (ok, &message[32..])
 }
 
 pub fn generate_keep_alive() -> u64 {

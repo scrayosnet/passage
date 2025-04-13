@@ -1,6 +1,6 @@
 use crate::adapter::target_selection::{Target, TargetSelector};
-use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use crate::adapter::target_strategy::TargetSelectorStrategy;
+use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use crate::protocol::Error;
 use crate::status::Protocol;
 use async_trait::async_trait;

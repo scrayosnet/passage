@@ -352,6 +352,7 @@ pub mod inbound {
 
             // handle mojang auth if not handled by cookie
             if *should_authenticate {
+                info!(user_id = ?user_id, "requesting mojang auth");
                 // get the data for login success
                 let auth_response = authentication::authenticate_mojang(
                     &user_name,
@@ -599,14 +600,17 @@ pub mod inbound {
             // verify token
             let mut should_authenticate = true;
             if let Some(message) = self.payload {
-                if authentication::check_sign(&message, secret) {
-                    let cookie = serde_json::from_slice::<AuthCookie>(&message)?;
+                let (ok, message) = authentication::check_sign(&message, secret);
+                if ok {
+                    let cookie = serde_json::from_slice::<AuthCookie>(message)?;
                     let expires_at = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .expect("time error")
                         .as_secs()
                         + AUTH_COOKIE_EXPIRY_SECS;
-                    if cookie.client_addr == *client_address && cookie.timestamp < expires_at {
+                    if cookie.client_addr.ip() == client_address.ip()
+                        && cookie.timestamp < expires_at
+                    {
                         should_authenticate = false;
 
                         // update state by token
