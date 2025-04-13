@@ -1,7 +1,7 @@
 use crate::authentication;
 use crate::authentication::VerifyToken;
 use crate::connection::KeepAlive;
-use crate::connection::{phase, Connection, Phase};
+use crate::connection::{Connection, Phase, phase};
 use crate::protocol::configuration::outbound::{AddResourcePackPacket, StoreCookiePacket};
 use crate::protocol::login::outbound::DisconnectPacket;
 use crate::protocol::{
@@ -259,7 +259,7 @@ pub mod inbound {
                 con.write_packet(CookieRequestPacket {
                     key: AUTH_COOKIE_KEY.to_string(),
                 })
-                    .await?;
+                .await?;
                 return Ok(());
             }
 
@@ -358,7 +358,7 @@ pub mod inbound {
                     &shared_secret,
                     &authentication::ENCODED_PUB,
                 )
-                    .await;
+                .await;
 
                 let auth_response = match auth_response {
                     Ok(inner) => inner,
@@ -368,7 +368,7 @@ pub mod inbound {
                         con.write_packet(DisconnectPacket {
                             reason: "".to_string(),
                         })
-                            .await?;
+                        .await?;
                         con.shutdown();
                         return Ok(());
                     }
@@ -514,7 +514,7 @@ pub mod inbound {
                         key: AUTH_COOKIE_KEY.to_string(),
                         payload: authentication::sign(&auth_payload, secret),
                     })
-                        .await?;
+                    .await?;
                 }
             }
 

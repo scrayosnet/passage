@@ -273,7 +273,7 @@ where
             (0x00, Status { .. }) => handle!(StatusRequestPacket, buf, self),
             (0x01, Status { .. }) => handle!(PingPacket, buf, self),
             (0x00, Login { .. }) => handle!(LoginStartPacket, buf, self),
-            //(0x04, Transfer { .. }) => handle!(CookieResponsePacket, buf, self),
+            (0x04, Transfer { .. }) => handle!(CookieResponsePacket, buf, self),
             (0x01, Encryption { .. }) => handle!(EncryptionResponsePacket, buf, self),
             //(0x02, Phase::Login { .. }) => handle!(LoginPluginResponsePacket, cursor, self),
             (0x03, Acknowledge { .. }) => handle!(LoginAcknowledgedPacket, buf, self),
