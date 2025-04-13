@@ -1,18 +1,29 @@
 use crate::authentication;
 use crate::authentication::VerifyToken;
 use crate::connection::KeepAlive;
-use crate::connection::{Connection, Phase, phase};
+use crate::connection::{phase, Connection, Phase};
 use crate::protocol::configuration::outbound::{AddResourcePackPacket, StoreCookiePacket};
 use crate::protocol::login::outbound::DisconnectPacket;
 use crate::protocol::{
     AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet,
 };
 use crate::status::Protocol;
+use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 pub const AUTH_COOKIE_KEY: &str = "passage:authentication";
+pub const AUTH_COOKIE_EXPIRY_SECS: u64 = 6 * 60 * 60; // 6 hours
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AuthCookie {
+    pub timestamp: u64,
+    pub client_addr: SocketAddr,
+    pub user_name: String,
+    pub user_id: Uuid,
+}
 
 pub mod outbound {
     use super::*;
@@ -187,6 +198,8 @@ pub mod outbound {
 
 pub mod inbound {
     use super::*;
+    use crate::protocol::login::outbound::CookieRequestPacket;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     /// The inbound [`LoginStartPacket`].
     ///
@@ -233,8 +246,21 @@ pub mod inbound {
             );
 
             // handle transfer
-            if *transfer {
-                // TODO implement me!
+            if *transfer && con.auth_secret.is_some() {
+                // update phase and wait for cookie
+                con.phase = Phase::Transfer {
+                    client_address: *client_address,
+                    protocol_version: *protocol_version,
+                    server_address: server_address.clone(),
+                    server_port: *server_port,
+                    user_name: self.user_name.clone(),
+                    user_id: self.user_id.clone(),
+                };
+                con.write_packet(CookieRequestPacket {
+                    key: AUTH_COOKIE_KEY.to_string(),
+                })
+                    .await?;
+                return Ok(());
             }
 
             // encode public key and generate verify token
@@ -249,6 +275,7 @@ pub mod inbound {
                 user_name: self.user_name.clone(),
                 user_id: self.user_id.clone(),
                 verify_token,
+                should_authenticate: true,
             };
 
             // create a new encryption request and send it
@@ -309,7 +336,9 @@ pub mod inbound {
                 server_address,
                 server_port,
                 user_name,
+                user_id,
                 verify_token,
+                should_authenticate,
             );
 
             // decrypt the shared secret and verify token
@@ -321,26 +350,39 @@ pub mod inbound {
             // verify the token is correct
             authentication::verify_token(verify_token.clone(), &decrypted_verify_token)?;
 
-            // get the data for login success
-            let auth_response = authentication::authenticate_mojang(
-                &user_name,
-                &shared_secret,
-                &authentication::ENCODED_PUB,
-            )
-            .await;
+            // handle mojang auth if not handled by cookie
+            if *should_authenticate {
+                // get the data for login success
+                let auth_response = authentication::authenticate_mojang(
+                    &user_name,
+                    &shared_secret,
+                    &authentication::ENCODED_PUB,
+                )
+                    .await;
 
-            let auth_response = match auth_response {
-                Ok(inner) => inner,
-                Err(err) => {
-                    warn!(err = ?err, "mojang auth failed");
-                    // TODO write actual reason
-                    con.write_packet(DisconnectPacket {
-                        reason: "".to_string(),
-                    })
-                    .await?;
-                    con.shutdown();
-                    return Ok(());
-                }
+                let auth_response = match auth_response {
+                    Ok(inner) => inner,
+                    Err(err) => {
+                        warn!(err = ?err, "mojang auth failed");
+                        // TODO write actual reason
+                        con.write_packet(DisconnectPacket {
+                            reason: "".to_string(),
+                        })
+                            .await?;
+                        con.shutdown();
+                        return Ok(());
+                    }
+                };
+
+                // update state for actual use info
+                *user_name = auth_response.name;
+                *user_id = auth_response.id;
+            }
+
+            // build response packet
+            let login_success = outbound::LoginSuccessPacket {
+                user_name: user_name.clone(),
+                user_id: user_id.clone(),
             };
 
             // switch to login-acknowledge phase
@@ -349,18 +391,15 @@ pub mod inbound {
                 protocol_version: *protocol_version,
                 server_address: server_address.clone(),
                 server_port: *server_port,
-                user_name: auth_response.name.clone(),
-                user_id: auth_response.id.clone(),
+                user_name: user_name.clone(),
+                user_id: user_id.clone(),
+                should_write_auth_cookie: *should_authenticate,
             };
 
             // enable encryption for the connection using the shared secret
             con.apply_encryption(&shared_secret)?;
 
             // create a new login success packet and send it
-            let login_success = outbound::LoginSuccessPacket {
-                user_id: auth_response.id,
-                user_name: auth_response.name,
-            };
             debug!(
                 packet = debug(&login_success),
                 "sending login success packet"
@@ -426,7 +465,21 @@ pub mod inbound {
                 server_port,
                 user_name,
                 user_id,
+                should_write_auth_cookie,
             );
+            let should_write_auth_cookie = *should_write_auth_cookie;
+
+            // generate auth cookie payload
+            let now_secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time error")
+                .as_secs();
+            let auth_payload = serde_json::to_vec(&AuthCookie {
+                timestamp: now_secs,
+                client_addr: *client_address,
+                user_name: user_name.clone(),
+                user_id: user_id.clone(),
+            })?;
 
             // get resource packs to load
             let packs = con
@@ -455,12 +508,15 @@ pub mod inbound {
             };
 
             // store auth cookie
-            con.write_packet(StoreCookiePacket {
-                key: AUTH_COOKIE_KEY.to_string(),
-                // TODO generate payload and encrypt with secret
-                payload: vec![],
-            })
-            .await?;
+            if should_write_auth_cookie {
+                if let Some(secret) = &con.auth_secret {
+                    con.write_packet(StoreCookiePacket {
+                        key: AUTH_COOKIE_KEY.to_string(),
+                        payload: authentication::sign(&auth_payload, secret),
+                    })
+                        .await?;
+                }
+            }
 
             // handle no resource packs to send
             if packs.is_empty() {
@@ -483,7 +539,7 @@ pub mod inbound {
         }
     }
 
-    /// The inbound [`CookieResponsePacket`]. (Placeholder)
+    /// The inbound [`CookieResponsePacket`].
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Response_(login))
     #[derive(Debug)]
@@ -511,6 +567,83 @@ pub mod inbound {
             }
 
             Ok(Self { key, payload })
+        }
+
+        async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
+        where
+            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
+        {
+            debug!(packet = debug(&self), "received cookie response packet");
+
+            // only supports auth cookie
+            if self.key != AUTH_COOKIE_KEY {
+                return Ok(());
+            }
+
+            // get auth cookie secret
+            let Some(secret) = &con.auth_secret else {
+                return Ok(());
+            };
+
+            phase!(
+                con.phase,
+                Phase::Transfer,
+                client_address,
+                protocol_version,
+                server_address,
+                server_port,
+                user_name,
+                user_id,
+            );
+
+            // verify token
+            let mut should_authenticate = true;
+            if let Some(message) = self.payload {
+                if authentication::check_sign(&message, secret) {
+                    let cookie = serde_json::from_slice::<AuthCookie>(&message)?;
+                    let expires_at = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("time error")
+                        .as_secs()
+                        + AUTH_COOKIE_EXPIRY_SECS;
+                    if cookie.client_addr == *client_address && cookie.timestamp < expires_at {
+                        should_authenticate = false;
+
+                        // update state by token
+                        *user_name = cookie.user_name;
+                        *user_id = cookie.user_id;
+                    }
+                }
+            }
+
+            // encode public key and generate verify token
+            let verify_token = authentication::generate_token()?;
+
+            // switch phase to accept encryption response
+            con.phase = Phase::Encryption {
+                client_address: *client_address,
+                protocol_version: *protocol_version,
+                server_address: server_address.clone(),
+                server_port: *server_port,
+                user_name: user_name.clone(),
+                user_id: user_id.clone(),
+                verify_token,
+                should_authenticate,
+            };
+
+            // create a new encryption request and send it
+            let encryption_request = outbound::EncryptionRequestPacket {
+                public_key: authentication::ENCODED_PUB.clone(),
+                verify_token,
+                should_authenticate,
+            };
+            debug!(
+                packet = debug(&encryption_request),
+                "sending encryption request packet"
+            );
+            con.write_packet(encryption_request).await?;
+
+            Ok(())
         }
     }
 }

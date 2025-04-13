@@ -85,6 +85,7 @@ pub enum Phase {
         user_name: String,
         user_id: Uuid,
         verify_token: [u8; 32],
+        should_authenticate: bool,
     },
     Acknowledge {
         client_address: SocketAddr,
@@ -93,6 +94,7 @@ pub enum Phase {
         server_port: u16,
         user_name: String,
         user_id: Uuid,
+        should_write_auth_cookie: bool,
     },
     Configuration {
         client_address: SocketAddr,
@@ -161,6 +163,8 @@ pub struct Connection<S> {
     pub resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
     /// The current phase of the connection.
     pub phase: Phase,
+    /// Auth cookie secret.
+    pub auth_secret: Option<Vec<u8>>,
 }
 
 impl<S> Connection<S>
@@ -181,6 +185,7 @@ where
             target_selector,
             resourcepack_supplier,
             phase: Handshake { client_address },
+            auth_secret: Some(b"secret".to_vec()),
         }
     }
 }

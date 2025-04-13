@@ -2,6 +2,7 @@ use crate::authentication::Error::InvalidVerifyToken;
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut};
 use cfb8::cipher::{BlockSizeUser, KeyIvInit};
+use hmac::{Hmac, Mac};
 use lazy_static::lazy_static;
 use num_bigint::BigInt;
 use rand::rngs::OsRng;
@@ -10,9 +11,10 @@ use rsa::pkcs8::EncodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
+use sha2::Sha256;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use uuid::Uuid;
 
 lazy_static! {
@@ -49,6 +51,28 @@ pub enum Error {
         expected: VerifyToken,
         actual: Vec<u8>,
     },
+}
+
+/// Hmac type, expects 32 Byte hash
+pub type HmacSha256 = Hmac<Sha256>;
+
+pub fn sign(message: &[u8], secret: &[u8]) -> Vec<u8> {
+    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size!");
+    mac.update(message);
+    let hash = mac.finalize().into_bytes();
+
+    // Build the final binary format (hash is always 32 byte)
+    let mut output = Vec::with_capacity(32 + message.len());
+    output.extend_from_slice(&hash);
+    output.extend_from_slice(message);
+
+    output
+}
+
+pub fn check_sign(message: &[u8], secret: &[u8]) -> bool {
+    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size!");
+    mac.update(&message[32..]);
+    mac.verify_slice(&message[..32]).is_ok()
 }
 
 pub fn generate_keep_alive() -> u64 {
