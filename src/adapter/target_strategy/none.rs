@@ -6,24 +6,11 @@ use async_trait::async_trait;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-pub struct AnyTargetSelectorStrategy {
-    target: Option<SocketAddr>,
-}
-
-impl AnyTargetSelectorStrategy {
-    pub fn new() -> Self {
-        Self { target: None }
-    }
-
-    pub fn from_target(target: impl Into<SocketAddr>) -> Self {
-        Self {
-            target: Some(target.into()),
-        }
-    }
-}
+#[derive(Default)]
+pub struct NoneTargetSelectorStrategy;
 
 #[async_trait]
-impl TargetSelectorStrategy for AnyTargetSelectorStrategy {
+impl TargetSelectorStrategy for NoneTargetSelectorStrategy {
     async fn select(
         &self,
         _client_addr: &SocketAddr,
@@ -31,8 +18,8 @@ impl TargetSelectorStrategy for AnyTargetSelectorStrategy {
         _protocol: Protocol,
         _username: &str,
         _user_id: &Uuid,
-        targets: &[Target],
+        _targets: &[Target],
     ) -> Result<Option<String>, Error> {
-        Ok(targets.first().map(|target| target.identifier.clone()))
+        Ok(None)
     }
 }

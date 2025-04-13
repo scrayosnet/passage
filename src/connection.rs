@@ -343,8 +343,8 @@ where
                 client_address,
                 (server_address, *server_port),
                 *protocol_version as Protocol,
-                user_id,
                 user_name,
+                user_id,
             )
             .await?;
 

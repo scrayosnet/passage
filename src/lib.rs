@@ -10,11 +10,14 @@ mod server;
 mod status;
 
 use crate::adapter::target_selection::fixed::FixedTargetSelector;
+use crate::adapter::target_selection::Target;
+use crate::adapter::target_strategy::any::AnyTargetSelectorStrategy;
 use crate::config::Config;
 use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
 use adapter::resourcepack::fixed::FixedResourcePackSupplier;
 use adapter::status::simple::SimpleStatusSupplier;
 use serde_json::value::RawValue;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -55,8 +58,14 @@ pub async fn start(state: Config) -> Result<(), Box<dyn std::error::Error>> {
         favicon: None,
         enforces_secure_chat: Some(true),
     });
+    let target = Target {
+        identifier: "test".to_string(),
+        address: SocketAddr::from_str("116.202.130.184:26426")?,
+        meta: HashMap::<String, String>::default(),
+    };
+    let target_strategy = AnyTargetSelectorStrategy::new();
     let target_selector =
-        FixedTargetSelector::from_target(SocketAddr::from_str("116.202.130.184:26426")?);
+        FixedTargetSelector::from_targets(Arc::new(target_strategy), vec![target]);
 
     let resourcepack_supplier = FixedResourcePackSupplier;
 

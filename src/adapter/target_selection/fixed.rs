@@ -1,22 +1,33 @@
-use crate::adapter::target_selection::TargetSelector;
+use crate::adapter::target_selection::{Target, TargetSelector};
+use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
+use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::protocol::Error;
 use crate::status::Protocol;
 use async_trait::async_trait;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use uuid::Uuid;
 
 pub struct FixedTargetSelector {
-    target: Option<SocketAddr>,
+    strategy: Arc<dyn TargetSelectorStrategy>,
+    targets: Vec<Target>,
 }
 
 impl FixedTargetSelector {
     pub fn new() -> Self {
-        Self { target: None }
+        Self {
+            strategy: Arc::new(NoneTargetSelectorStrategy),
+            targets: vec![],
+        }
     }
 
-    pub fn from_target(target: impl Into<SocketAddr>) -> Self {
+    pub fn from_targets(
+        strategy: Arc<dyn TargetSelectorStrategy>,
+        targets: impl Into<Vec<Target>>,
+    ) -> Self {
         Self {
-            target: Some(target.into()),
+            strategy,
+            targets: targets.into(),
         }
     }
 }
@@ -25,12 +36,26 @@ impl FixedTargetSelector {
 impl TargetSelector for FixedTargetSelector {
     async fn select(
         &self,
-        _client_addr: &SocketAddr,
-        _server_addr: (&str, u16),
-        _protocol: Protocol,
-        _user_id: &Uuid,
-        _username: &str,
+        client_addr: &SocketAddr,
+        server_addr: (&str, u16),
+        protocol: Protocol,
+        username: &str,
+        user_id: &Uuid,
     ) -> Result<Option<SocketAddr>, Error> {
-        Ok(self.target)
+        let selected_target = self
+            .strategy
+            .select(
+                client_addr,
+                server_addr,
+                protocol,
+                username,
+                user_id,
+                &self.targets,
+            )
+            .await?;
+        let address = selected_target
+            .and_then(|identifier| self.targets.iter().find(|t| t.identifier == identifier));
+
+        Ok(address.map(|target| target.address))
     }
 }
