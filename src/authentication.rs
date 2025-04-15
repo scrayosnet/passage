@@ -23,6 +23,9 @@ lazy_static! {
 
     /// The encoded public key.
     pub(crate) static ref ENCODED_PUB: Vec<u8> = encode_public_key(&KEY_PAIR.1).expect("failed to encode keypair");
+
+    /// The shared http client (for mojang requests).
+    static ref HTTP_CLIENT: reqwest::Client = reqwest::Client::builder().build().expect("failed to create http client");
 }
 
 /// The internal error type for all errors related to the authentication and cryptography.
@@ -163,7 +166,9 @@ pub async fn authenticate_mojang(
     let hash = minecraft_hash(shared_secret, encoded_public);
 
     // issue a request to Mojang's authentication endpoint
-    let response = reqwest::get(format!("https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}")).await?
+    let response = HTTP_CLIENT.get(format!("https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}"))
+        .send()
+        .await?
         .error_for_status()?;
 
     // extract the fields of the response
