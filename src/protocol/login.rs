@@ -11,7 +11,7 @@ use crate::status::Protocol;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 pub const AUTH_COOKIE_KEY: &str = "passage:authentication";
@@ -352,7 +352,6 @@ pub mod inbound {
 
             // handle mojang auth if not handled by cookie
             if *should_authenticate {
-                info!(user_id = ?user_id, "requesting mojang auth");
                 // get the data for login success
                 let auth_response = authentication::authenticate_mojang(
                     &user_name,
@@ -496,7 +495,6 @@ pub mod inbound {
             let pack_ids = packs.iter().map(|pack| (pack.uuid, pack.forced)).collect();
 
             // switch to configuration phase
-            info!("switching to configuration phase");
             con.phase = Phase::Configuration {
                 client_address: *client_address,
                 protocol_version: *protocol_version,

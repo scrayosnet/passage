@@ -6,6 +6,7 @@ pub mod authentication;
 pub mod config;
 mod connection;
 mod protocol;
+mod rate_limiter;
 mod server;
 mod status;
 
@@ -34,12 +35,10 @@ use tracing::info;
 ///
 /// Will return an appropriate error if the socket cannot be bound to the supplied address, or the TCP server cannot be
 /// properly initialized.
-pub async fn start(state: Config) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // bind the socket address on all interfaces
-    let addr = state.address;
-    info!(addr = addr.to_string(), "binding socket address");
-    let listener = TcpListener::bind(addr).await?;
-    info!(addr = addr.to_string(), "successfully bound server socket");
+    info!(addr = config.address.to_string(), "binding socket address");
+    let listener = TcpListener::bind(&config.address).await?;
 
     // initialize services
     let status_supplier = SimpleStatusSupplier::from_status(ServerStatus {
@@ -66,19 +65,18 @@ pub async fn start(state: Config) -> Result<(), Box<dyn std::error::Error>> {
     let target_strategy = AnyTargetSelectorStrategy::new();
     let target_selector =
         FixedTargetSelector::from_targets(Arc::new(target_strategy), vec![target]);
-
     let resourcepack_supplier = FixedResourcePackSupplier;
 
     // serve the router service on the bound socket address
     server::serve(
+        config,
         listener,
         Arc::new(status_supplier),
         Arc::new(target_selector),
         Arc::new(resourcepack_supplier),
     )
     .await?;
-    info!("protocol server stopped successfully");
 
-    // exit with success
+    info!("protocol server stopped successfully");
     Ok(())
 }

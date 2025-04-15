@@ -35,10 +35,9 @@
 //! let config: Config = Config::new()?;
 //! ```
 
-mod log_filter;
-
-use crate::config::log_filter::parse_level_filter;
-use config::{ConfigError, Environment, File, FileFormat};
+use config::{
+    ConfigError, Environment, File, FileFormat, FileStoredFormat, Format, Map, Value, ValueKind,
+};
 use serde::Deserialize;
 use std::env;
 use std::net::SocketAddr;
@@ -82,12 +81,12 @@ pub struct Sentry {
     pub environment: String,
 }
 
-/// [Logging] hold the log configuration.
 #[derive(Debug, Clone, Deserialize)]
-pub struct Logging {
-    /// The log level that should be printed.
-    #[serde(deserialize_with = "parse_level_filter")]
-    pub level: log_filter::LogFilter,
+pub struct RateLimiter {
+    pub enabled: bool,
+    /// Duration in seconds
+    pub duration: u64,
+    pub size: usize,
 }
 
 /// [Config] holds all configuration for the application. I.g. one immutable instance is created
@@ -97,23 +96,23 @@ pub struct Logging {
 /// with status ok.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    /// The logging configuration.
-    pub logging: Logging,
-
     /// The metrics configuration. The metrics service is part of the [RestServer].
     pub metrics: Metrics,
 
     /// The sentry configuration.
     pub sentry: Sentry,
 
+    /// The rate limiter config.
+    pub rate_limiter: RateLimiter,
+
     /// The network address that should be used to bind the HTTP server for connection requests.
     pub address: SocketAddr,
 
-    /// The timeout in fractional seconds that is used for connection timeouts.
-    pub timeout: f64,
+    /// The timeout in seconds that is used for connection timeouts.
+    pub timeout: u64,
 
-    /// The length of the cryptographic key pair for authentication.
-    pub key_length: u32,
+    /// The auth cookie secret, disabled if empty.
+    pub auth_secret: Option<String>,
 }
 
 impl Config {
@@ -123,6 +122,7 @@ impl Config {
         let env_prefix = env::var("ENV_PREFIX").unwrap_or("passage".into());
         // the path of the custom configuration file
         let config_file = env::var("CONFIG_FILE").unwrap_or("config/config".into());
+        let key_file = env::var("KEY_FILE").unwrap_or("config/auth_secret".into());
 
         let s = config::Config::builder()
             // load default configuration (embedded at compile time)
@@ -132,6 +132,7 @@ impl Config {
             ))
             // load custom configuration from file (at runtime)
             .add_source(File::with_name(&config_file).required(false))
+            .add_source(File::new(&key_file, KeyFile).required(false))
             // add in config from the environment (with a prefix of APP)
             // e.g. `PASSAGE__DEBUG=1` would set the `debug` key, on the other hand,
             // `PASSAGE__CACHE__REDIS__ENABLED=1` would enable the redis cache.
@@ -157,5 +158,32 @@ impl Default for Config {
         // you can deserialize (and thus freeze) the entire configuration as
         s.try_deserialize()
             .expect("expected default configuration to be deserializable")
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct KeyFile;
+
+impl Format for KeyFile {
+    fn parse(
+        &self,
+        uri: Option<&String>,
+        text: &str,
+    ) -> Result<Map<String, Value>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut result = Map::new();
+
+        result.insert(
+            // key has to match config param
+            "auth_secret".to_owned(),
+            Value::new(uri, ValueKind::String(text.into())),
+        );
+
+        Ok(result)
+    }
+}
+
+impl FileStoredFormat for KeyFile {
+    fn file_extensions(&self) -> &'static [&'static str] {
+        &[]
     }
 }

@@ -14,7 +14,7 @@ use sha1::{Digest, Sha1};
 use sha2::Sha256;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use uuid::Uuid;
 
 lazy_static! {

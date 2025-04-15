@@ -13,8 +13,8 @@
 use crate::authentication;
 use crate::connection::Connection;
 use std::fmt::Debug;
+use std::io::ErrorKind;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tracing::info;
 use uuid::Uuid;
 
 pub(crate) mod configuration;
@@ -77,6 +77,15 @@ pub enum Error {
         expected: &'static str,
         actual: &'static str,
     },
+}
+
+impl Error {
+    pub fn is_connection_closed(&self) -> bool {
+        let Error::Io(err) = self else {
+            return false;
+        };
+        err.kind() == ErrorKind::UnexpectedEof
+    }
 }
 
 /// State is the desired state that the connection should be in after the initial handshake.
@@ -373,8 +382,6 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
         &mut self,
         packet: T,
     ) -> Result<(), Error> {
-        info!(packet = ?packet, "Writing packet");
-
         // create a new buffer (our packets are very small)
         let mut buffer = Vec::with_capacity(48);
 

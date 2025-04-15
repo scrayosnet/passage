@@ -453,7 +453,6 @@ pub mod outbound {
 
 pub mod inbound {
     use super::*;
-    use tracing::warn;
 
     /// The inbound [`ClientInformationPacket`]. (Placeholder)
     ///

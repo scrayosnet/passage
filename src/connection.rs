@@ -25,13 +25,16 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, ReadBuf};
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{debug, trace};
 use uuid::Uuid;
+
+/// The max packet length in bytes. Larger packets are rejected.
+const MAX_PACKET_LENGTH: usize = 10_000;
 
 macro_rules! handle {
     ($packet_type:ty, $buffer:expr, $self:expr) => {{
         let packet = <$packet_type>::new_from_buffer($buffer).await?;
-        info!(packet = ?packet, "Read packet");
+        trace!(packet = ?packet, "Read packet");
         packet.handle($self).await
     }}
 }
@@ -42,7 +45,7 @@ macro_rules! phase {
         let $expected { $($field,)* .. } = &mut $phase else {
             return Err(Error::InvalidState {
                 actual: $phase.name(),
-                expected: "", // $expected.name()
+                expected: stringify!($expected),
             });
         };
     }
@@ -177,6 +180,7 @@ where
         status_supplier: Arc<dyn StatusSupplier>,
         target_selector: Arc<dyn TargetSelector>,
         resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
+        auth_secret: Option<Vec<u8>>,
     ) -> Connection<S> {
         Self {
             stream: CipherStream::new(stream, None, None),
@@ -185,7 +189,7 @@ where
             target_selector,
             resourcepack_supplier,
             phase: Handshake { client_address },
-            auth_secret: Some(b"secret".to_vec()),
+            auth_secret,
         }
     }
 }
@@ -245,15 +249,18 @@ where
 
     async fn handle_packet(&mut self, length: usize) -> Result<(), Error> {
         // check the length of the packe for any following content
-        if length == 0 || length > 10_000 {
-            warn!(length, "packet length should be between 0 and 10_000");
+        if length == 0 || length > MAX_PACKET_LENGTH {
+            debug!(
+                length,
+                "packet length should be between 0 and {MAX_PACKET_LENGTH}"
+            );
             return Err(Error::IllegalPacketLength);
         }
 
         // extract the encoded packet id
         let packet_id = self.read_varint().await?;
 
-        info!(
+        trace!(
             length = length,
             packet_id = packet_id,
             phase = ?self.phase,
@@ -291,7 +298,7 @@ where
             (0x07, Configuration { .. }) => handle!(KnownPacksPacket, buf, self),
             // otherwise
             _ => {
-                warn!(
+                debug!(
                     packe_id = packet_id,
                     phase = ?self.phase,
                     "Unsupported packet in phase"
@@ -302,7 +309,7 @@ where
     }
 
     pub(crate) fn apply_encryption(&mut self, shared_secret: &[u8]) -> Result<(), Error> {
-        info!("enabling encryption");
+        debug!("enabling encryption");
 
         // get stream ciphers and wrap stream with cipher
         let (encryptor, decryptor) = authentication::create_ciphers(&shared_secret)?;
@@ -317,7 +324,7 @@ where
     pub fn shutdown(&mut self) {
         // send shutdown message if available
         if let Some(shutdown) = self.shutdown.take() {
-            info!("sending connection shutdown signal");
+            debug!("sending connection shutdown signal");
             let _ = shutdown.send(());
         }
     }
