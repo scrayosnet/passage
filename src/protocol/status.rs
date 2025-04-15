@@ -172,6 +172,9 @@ pub mod inbound {
             debug!(packet = debug(&pong_response), "sending pong packet");
             con.write_packet(pong_response).await?;
 
+            // close connection
+            con.shutdown();
+
             Ok(())
         }
     }
