@@ -41,22 +41,25 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(&config.address).await?;
 
     // initialize services
-    let status_supplier = SimpleStatusSupplier::from_status(ServerStatus {
-        version: ServerVersion {
-            name: "JustChunks 2025".to_owned(),
-            protocol: config.protocol,
+    let status_supplier = SimpleStatusSupplier::from_status(
+        config.protocol.clone(),
+        ServerStatus {
+            version: ServerVersion {
+                name: "JustChunks 2025".to_owned(),
+                protocol: 0,
+            },
+            players: Some(ServerPlayers {
+                online: 5,
+                max: 10,
+                sample: None,
+            }),
+            description: Some(RawValue::from_string(
+                r#"{"text":"PASSAGE IS RUNNING","color":"gold"}"#.to_string(),
+            )?),
+            favicon: None,
+            enforces_secure_chat: Some(true),
         },
-        players: Some(ServerPlayers {
-            online: 5,
-            max: 10,
-            sample: None,
-        }),
-        description: Some(RawValue::from_string(
-            r#"{"text":"PASSAGE IS RUNNING","color":"gold"}"#.to_string(),
-        )?),
-        favicon: None,
-        enforces_secure_chat: Some(true),
-    });
+    );
     let target = Target {
         identifier: "test".to_string(),
         address: SocketAddr::from_str("116.202.130.184:26426")?,

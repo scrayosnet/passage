@@ -6,12 +6,14 @@ use std::net::SocketAddr;
 
 #[derive(Default)]
 pub struct SimpleStatusSupplier {
+    protocol: crate::config::Protocol,
     status: Option<ServerStatus>,
 }
 
 impl SimpleStatusSupplier {
-    pub fn from_status(status: impl Into<ServerStatus>) -> Self {
+    pub fn from_status(protocol: crate::config::Protocol, status: impl Into<ServerStatus>) -> Self {
         Self {
+            protocol,
             status: Some(status.into()),
         }
     }
@@ -29,7 +31,13 @@ impl StatusSupplier for SimpleStatusSupplier {
         let Some(mut stat) = stat else {
             return Ok(None);
         };
-        stat.version.protocol = protocol;
+
+        // set protocol version
+        stat.version.protocol = self.protocol.preferred;
+        if self.protocol.min <= protocol && protocol <= self.protocol.max {
+            stat.version.protocol = protocol;
+        }
+
         Ok(Some(stat))
     }
 }

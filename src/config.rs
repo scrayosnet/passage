@@ -40,7 +40,7 @@
 //! let config: Config = Config::new()?;
 //! ```
 
-use crate::status::Protocol;
+use crate::status;
 use config::{
     ConfigError, Environment, File, FileFormat, FileStoredFormat, Format, Map, Value, ValueKind,
 };
@@ -93,6 +93,13 @@ pub struct RateLimiter {
     /// Duration in seconds
     pub duration: u64,
     pub size: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct Protocol {
+    pub preferred: status::Protocol,
+    pub min: status::Protocol,
+    pub max: status::Protocol,
 }
 
 /// [Config] holds all configuration for the application. I.g. one immutable instance is created
