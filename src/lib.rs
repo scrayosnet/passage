@@ -3,6 +3,7 @@
 
 mod adapter;
 pub mod authentication;
+mod cipher_stream;
 pub mod config;
 mod connection;
 mod protocol;

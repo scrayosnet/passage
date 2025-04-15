@@ -2,7 +2,6 @@ use crate::adapter::resourcepack::ResourcepackSupplier;
 use crate::adapter::status::StatusSupplier;
 use crate::adapter::target_selection::TargetSelector;
 use crate::authentication;
-use crate::authentication::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
 use crate::protocol::configuration::inbound::{
     AckFinishConfigurationPacket, ClientInformationPacket, KnownPacksPacket, PluginMessagePacket,
     PongPacket, ResourcePackResponsePacket,
@@ -51,6 +50,7 @@ macro_rules! phase {
     }
 }
 
+use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
 use Phase::{Acknowledge, Configuration, Encryption, Handshake, Login, Status, Transfer};
 pub use phase;
 
