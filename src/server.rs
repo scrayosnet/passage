@@ -3,8 +3,10 @@ use crate::adapter::status::StatusSupplier;
 use crate::adapter::target_selection::TargetSelector;
 use crate::connection::Connection;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+use tokio::time::timeout;
 use tracing::{info, warn};
 
 pub async fn serve(
@@ -28,7 +30,7 @@ pub async fn serve(
         let target_selector = Arc::clone(&target_selector);
         let resourcepack_supplier = Arc::clone(&resourcepack_supplier);
 
-        tokio::spawn(async move {
+        tokio::spawn(timeout(Duration::from_secs(5), async move {
             // build connection wrapper for stream
             let mut con = Connection::new(
                 &mut stream,
@@ -57,6 +59,6 @@ pub async fn serve(
             }
 
             info!(addr = &addr.to_string(), "closed connection with a client");
-        });
+        }));
     }
 }

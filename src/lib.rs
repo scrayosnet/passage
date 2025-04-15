@@ -9,8 +9,8 @@ mod protocol;
 mod server;
 mod status;
 
-use crate::adapter::target_selection::fixed::FixedTargetSelector;
 use crate::adapter::target_selection::Target;
+use crate::adapter::target_selection::fixed::FixedTargetSelector;
 use crate::adapter::target_strategy::any::AnyTargetSelectorStrategy;
 use crate::config::Config;
 use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
