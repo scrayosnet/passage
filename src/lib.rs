@@ -44,7 +44,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let status_supplier = SimpleStatusSupplier::from_status(ServerStatus {
         version: ServerVersion {
             name: "JustChunks 2025".to_owned(),
-            protocol: 0,
+            protocol: config.protocol,
         },
         players: Some(ServerPlayers {
             online: 5,

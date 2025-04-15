@@ -40,6 +40,7 @@
 //! let config: Config = Config::new()?;
 //! ```
 
+use crate::status::Protocol;
 use config::{
     ConfigError, Environment, File, FileFormat, FileStoredFormat, Format, Map, Value, ValueKind,
 };
@@ -118,6 +119,9 @@ pub struct Config {
 
     /// The auth cookie secret, disabled if empty.
     pub auth_secret: Option<String>,
+
+    /// The supported protocol version.
+    pub protocol: Protocol,
 }
 
 impl Config {

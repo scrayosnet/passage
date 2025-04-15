@@ -2,6 +2,7 @@
 
 address = "0.0.0.0:25565"
 timeout = 120
+protocol = 0
 
 [sentry]
 enabled = false
