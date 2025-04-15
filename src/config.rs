@@ -3,7 +3,7 @@
 //!
 //! # Layers
 //!
-//! The configuration consists of up to three layers. Upper layers overwrite lower layer configurations
+//! The configuration consists of multiple layers. Upper layers overwrite lower layer configurations
 //! (e.g. environment variables overwrite the default configuration).
 //!
 //! ## Layer 1 (Environment variables) \[optional\]
@@ -13,7 +13,12 @@
 //! an environment variable defaulting to `PASSAGE`. That means, the nested config field `cache.redis.enabled`
 //! can be overwritten by the environment variable `PASSAGE__CACHE__REDIS__ENABLED`.
 //!
-//! ## Layer 2 (Custom configuration) \[optional\]
+//! ## Layer 2 (Auth Secret File) \[optional\]
+//!
+//! The next layer is just for setting the auth cookie secret. It reads a single file as the key. Set
+//! the location using the `AUTH_SECRET_FILE` environment variable, defaulting to `config/auth_secret`.
+//!
+//! ## Layer 3 (Custom configuration) \[optional\]
 //!
 //! The next layer is an optional configuration file intended to be used by deployments and local testing. The file
 //! location can be configured using the `CONFIG_FILE` environment variable, defaulting to `config/config`.
@@ -21,7 +26,7 @@
 //! published by git as its configuration is context dependent (e.g. local/cluster) and probably contains
 //! secrets.
 //!
-//! ## Layer 3 (Default configuration)
+//! ## Layer 4 (Default configuration)
 //!
 //! The default configuration provides default value for all config fields. It is loaded from
 //! `config/default.toml` at compile time.
@@ -122,7 +127,7 @@ impl Config {
         let env_prefix = env::var("ENV_PREFIX").unwrap_or("passage".into());
         // the path of the custom configuration file
         let config_file = env::var("CONFIG_FILE").unwrap_or("config/config".into());
-        let key_file = env::var("KEY_FILE").unwrap_or("config/auth_secret".into());
+        let auth_secret_file = env::var("AUTH_SECRET_FILE").unwrap_or("config/auth_secret".into());
 
         let s = config::Config::builder()
             // load default configuration (embedded at compile time)
@@ -132,7 +137,7 @@ impl Config {
             ))
             // load custom configuration from file (at runtime)
             .add_source(File::with_name(&config_file).required(false))
-            .add_source(File::new(&key_file, KeyFile).required(false))
+            .add_source(File::new(&auth_secret_file, AuthSecretFile).required(false))
             // add in config from the environment (with a prefix of APP)
             // e.g. `PASSAGE__DEBUG=1` would set the `debug` key, on the other hand,
             // `PASSAGE__CACHE__REDIS__ENABLED=1` would enable the redis cache.
@@ -162,9 +167,9 @@ impl Default for Config {
 }
 
 #[derive(Debug, Clone)]
-pub struct KeyFile;
+pub struct AuthSecretFile;
 
-impl Format for KeyFile {
+impl Format for AuthSecretFile {
     fn parse(
         &self,
         uri: Option<&String>,
@@ -182,7 +187,7 @@ impl Format for KeyFile {
     }
 }
 
-impl FileStoredFormat for KeyFile {
+impl FileStoredFormat for AuthSecretFile {
     fn file_extensions(&self) -> &'static [&'static str] {
         &[]
     }
