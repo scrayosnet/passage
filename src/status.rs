@@ -1,7 +1,7 @@
 use serde::Serialize;
 use serde_json::value::RawValue;
 
-pub type Protocol = i64;
+pub type Protocol = i32;
 
 /// The information on the protocol version of a server.
 #[derive(Debug, Serialize, Clone)]

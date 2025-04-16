@@ -3,7 +3,7 @@ use crate::protocol::Error;
 use crate::status::Protocol;
 use async_trait::async_trait;
 use std::net::SocketAddr;
-use uuid::{Uuid, uuid};
+use uuid::{uuid, Uuid};
 
 #[derive(Default)]
 pub struct FixedResourcePackSupplier;
@@ -23,7 +23,7 @@ impl ResourcepackSupplier for FixedResourcePackSupplier {
             url: "https://impackable.justchunks.net/download/67e3e6e8704c701ec3cf5f8b".to_string(),
             hash: "c7affa49facf2b14238f1d2f7f04d7d0360bdb1d".to_string(),
             forced: true,
-            prompt_message: "Please install!".to_string(),
+            prompt_message: Some("Please install!".to_string()),
         }])
     }
 }

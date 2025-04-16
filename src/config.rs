@@ -87,6 +87,7 @@ pub struct Sentry {
     pub environment: String,
 }
 
+/// [RateLimiter] hold the connection rate limiting configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RateLimiter {
     pub enabled: bool,
@@ -95,11 +96,40 @@ pub struct RateLimiter {
     pub size: usize,
 }
 
+/// [Protocol] hold the protocol limitation and
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Protocol {
     pub preferred: status::Protocol,
     pub min: status::Protocol,
     pub max: status::Protocol,
+}
+
+/// [Status] hold the status (ping) configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Status {
+    /// Adapter to retrieve the results.
+    pub adapter: String,
+}
+
+/// [Resourcepack] hold the resourcepack configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Resourcepack {
+    /// Adapter to retrieve the results.
+    pub adapter: String,
+}
+
+/// [Target] hold the target discovery configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Target {
+    /// Adapter to retrieve the results.
+    pub adapter: String,
+}
+
+/// [TargetStrategy] hold the target strategy configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TargetStrategy {
+    /// Adapter to retrieve the results.
+    pub adapter: String,
 }
 
 /// [Config] holds all configuration for the application. I.g. one immutable instance is created
@@ -129,6 +159,18 @@ pub struct Config {
 
     /// The supported protocol version.
     pub protocol: Protocol,
+
+    /// The status (ping) configuration.
+    pub status: Status,
+
+    /// The resourcepack configuration.
+    pub resourcepack: Resourcepack,
+
+    /// The target discovery configuration.
+    pub target: Target,
+
+    /// The target strategy configuration.
+    pub target_strategy: TargetStrategy,
 }
 
 impl Config {

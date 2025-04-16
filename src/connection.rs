@@ -312,7 +312,7 @@ where
         debug!("enabling encryption");
 
         // get stream ciphers and wrap stream with cipher
-        let (encryptor, decryptor) = authentication::create_ciphers(&shared_secret)?;
+        let (encryptor, decryptor) = authentication::create_ciphers(shared_secret)?;
         self.stream.set_encryption(Some(encryptor), Some(decryptor));
 
         Ok(())
@@ -424,7 +424,7 @@ mod tests {
     use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
     use crate::adapter::target_selection::none::NoneTargetSelector;
     use crate::protocol::status::outbound::StatusResponsePacket;
-    use crate::protocol::{State, status};
+    use crate::protocol::{status, State};
     use crate::status::ServerStatus;
     use async_trait::async_trait;
     use std::str::FromStr;

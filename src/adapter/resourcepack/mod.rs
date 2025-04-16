@@ -26,5 +26,5 @@ pub struct Resourcepack {
     pub url: String,
     pub hash: String,
     pub forced: bool,
-    pub prompt_message: String,
+    pub prompt_message: Option<String>,
 }

@@ -52,7 +52,6 @@ pub async fn serve(
         }
 
         // clone values to be moved
-        let timeout_duration = timeout_duration.clone();
         let status_supplier = Arc::clone(&status_supplier);
         let target_selector = Arc::clone(&target_selector);
         let resourcepack_supplier = Arc::clone(&resourcepack_supplier);

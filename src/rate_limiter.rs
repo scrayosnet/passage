@@ -74,7 +74,7 @@ where
         for (key, value) in self.entries.iter_mut() {
             while value
                 .front()
-                .map_or(false, |time| time.elapsed() > Duration::from_secs(10))
+                .is_some_and(|time| time.elapsed() > Duration::from_secs(10))
             {
                 value.pop_front();
                 self.size -= 1;

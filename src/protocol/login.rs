@@ -1,7 +1,7 @@
 use crate::authentication;
 use crate::authentication::VerifyToken;
 use crate::connection::KeepAlive;
-use crate::connection::{Connection, Phase, phase};
+use crate::connection::{phase, Connection, Phase};
 use crate::protocol::configuration::outbound::{AddResourcePackPacket, StoreCookiePacket};
 use crate::protocol::{
     AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet,
@@ -355,7 +355,7 @@ pub mod inbound {
                     server_address: server_address.clone(),
                     server_port: *server_port,
                     user_name: self.user_name.clone(),
-                    user_id: self.user_id.clone(),
+                    user_id: self.user_id,
                 };
                 con.write_packet(CookieRequestPacket {
                     key: AUTH_COOKIE_KEY.to_string(),
@@ -374,7 +374,7 @@ pub mod inbound {
                 server_address: server_address.clone(),
                 server_port: *server_port,
                 user_name: self.user_name.clone(),
-                user_id: self.user_id.clone(),
+                user_id: self.user_id,
                 verify_token,
                 should_authenticate: true,
             };
@@ -463,13 +463,13 @@ pub mod inbound {
                 authentication::decrypt(&authentication::KEY_PAIR.0, &self.verify_token)?;
 
             // verify the token is correct
-            authentication::verify_token(verify_token.clone(), &decrypted_verify_token)?;
+            authentication::verify_token(*verify_token, &decrypted_verify_token)?;
 
             // handle mojang auth if not handled by cookie
             if *should_authenticate {
                 // get the data for login success
                 let auth_response = authentication::authenticate_mojang(
-                    &user_name,
+                    user_name,
                     &shared_secret,
                     &authentication::ENCODED_PUB,
                 )
@@ -497,7 +497,7 @@ pub mod inbound {
             // build response packet
             let login_success = outbound::LoginSuccessPacket {
                 user_name: user_name.clone(),
-                user_id: user_id.clone(),
+                user_id: *user_id,
             };
 
             // switch to login-acknowledge phase
@@ -507,7 +507,7 @@ pub mod inbound {
                 server_address: server_address.clone(),
                 server_port: *server_port,
                 user_name: user_name.clone(),
-                user_id: user_id.clone(),
+                user_id: *user_id,
                 should_write_auth_cookie: *should_authenticate,
             };
 
@@ -613,7 +613,7 @@ pub mod inbound {
                 timestamp: now_secs,
                 client_addr: *client_address,
                 user_name: user_name.clone(),
-                user_id: user_id.clone(),
+                user_id: *user_id,
             })?;
 
             // get resource packs to load
@@ -664,8 +664,7 @@ pub mod inbound {
                     url: pack.url,
                     hash: pack.hash,
                     forced: pack.forced,
-                    // TODO add option support to pack
-                    prompt_message: Some(pack.prompt_message),
+                    prompt_message: pack.prompt_message,
                 };
                 con.write_packet(packet).await?;
             }
@@ -780,7 +779,7 @@ pub mod inbound {
                 server_address: server_address.clone(),
                 server_port: *server_port,
                 user_name: user_name.clone(),
-                user_id: user_id.clone(),
+                user_id: *user_id,
                 verify_token,
                 should_authenticate,
             };
