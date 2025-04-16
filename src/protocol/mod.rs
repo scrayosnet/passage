@@ -425,7 +425,7 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
             if value != 0 {
                 buf[0] |= 0b1000_0000;
             }
-            self.write(&mut buf).await?;
+            self.write_all(&buf).await?;
 
             if value == 0 {
                 break;
@@ -443,7 +443,7 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
             if value != 0 {
                 buf[0] |= 0b1000_0000;
             }
-            self.write(&mut buf).await?;
+            self.write_all(&buf).await?;
 
             if value == 0 {
                 break;
@@ -566,7 +566,7 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
         let mut ans = 0;
         for i in 0..5 {
             self.read_exact(&mut buf).await?;
-            ans |= ((buf[0] & 0b0111_1111) as i32) << 7 * i;
+            ans |= ((buf[0] & 0b0111_1111) as i32) << (7 * i);
             if buf[0] & 0b1000_0000 == 0 {
                 break;
             }
@@ -579,7 +579,7 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
         let mut ans = 0;
         for i in 0..9 {
             self.read_exact(&mut buf).await?;
-            ans |= ((buf[0] & 0b0111_1111) as i64) << 7 * i;
+            ans |= ((buf[0] & 0b0111_1111) as i64) << (7 * i);
             if buf[0] & 0b1000_0000 == 0 {
                 break;
             }

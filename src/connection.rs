@@ -322,7 +322,7 @@ where
 
     /// Disables reading new packets and stopping the connection
     pub fn shutdown(&mut self) {
-        // send shutdown message if available
+        // send a shutdown message if available
         if let Some(shutdown) = self.shutdown.take() {
             debug!("sending connection shutdown signal");
             let _ = shutdown.send(());
@@ -424,7 +424,7 @@ mod tests {
     use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
     use crate::adapter::target_selection::none::NoneTargetSelector;
     use crate::protocol::status::outbound::StatusResponsePacket;
-    use crate::protocol::{status, State};
+    use crate::protocol::{State, status};
     use crate::status::ServerStatus;
     use async_trait::async_trait;
     use std::str::FromStr;

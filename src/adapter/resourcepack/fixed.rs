@@ -3,7 +3,7 @@ use crate::protocol::Error;
 use crate::status::Protocol;
 use async_trait::async_trait;
 use std::net::SocketAddr;
-use uuid::{uuid, Uuid};
+use uuid::{Uuid, uuid};
 
 #[derive(Default)]
 pub struct FixedResourcePackSupplier;
