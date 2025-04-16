@@ -1,6 +1,9 @@
 use crate::connection::{Connection, Phase, phase};
-use crate::protocol::{AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet};
+use crate::protocol::{
+    AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet,
+};
 use crate::status::Protocol;
+use fake::Dummy;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::debug;
 
@@ -13,7 +16,7 @@ pub mod outbound {
     /// ping sequence to be exchanged afterward.
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Status_Response)
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Eq, PartialEq, Dummy)]
     pub struct StatusResponsePacket {
         /// The JSON response body that contains all self-reported server metadata.
         pub body: String,
@@ -36,11 +39,23 @@ pub mod outbound {
         }
     }
 
+    #[cfg(test)]
+    impl InboundPacket for StatusResponsePacket {
+        async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+        where
+            S: AsyncRead + Unpin + Send + Sync,
+        {
+            let body = buffer.read_string().await?;
+
+            Ok(Self { body })
+        }
+    }
+
     /// This is the response to a specific [`PingPacket`] that can be used to measure the server ping.
     ///
     /// This packet will be sent after a corresponding [`PingPacket`] and will have the same payload as the request. This
     /// also consumes the connection, ending the Server List Ping sequence.
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct PongPacket {
         /// The arbitrary payload that was sent from the client (to identify the corresponding response).
         pub payload: u64,
@@ -69,6 +84,18 @@ pub mod outbound {
             Ok(())
         }
     }
+
+    #[cfg(test)]
+    impl InboundPacket for PongPacket {
+        async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+        where
+            S: AsyncRead + Unpin + Send + Sync,
+        {
+            let payload = buffer.read_u64().await?;
+
+            Ok(Self { payload })
+        }
+    }
 }
 
 pub mod inbound {
@@ -80,12 +107,22 @@ pub mod inbound {
     /// server won't respond otherwise.
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Status_Request)
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct StatusRequestPacket;
 
     impl Packet for StatusRequestPacket {
         fn get_packet_id() -> usize {
             0x00
+        }
+    }
+
+    #[cfg(test)]
+    impl OutboundPacket for StatusRequestPacket {
+        async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
+        where
+            S: AsyncWrite + Unpin + Send + Sync,
+        {
+            Ok(())
         }
     }
 
@@ -138,7 +175,7 @@ pub mod inbound {
     /// The inbound [`PingPacket`].
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Ping_Request_(status))
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct PingPacket {
         /// The arbitrary payload that will be returned from the server (to identify the corresponding request).
         pub payload: u64,
@@ -147,6 +184,18 @@ pub mod inbound {
     impl Packet for PingPacket {
         fn get_packet_id() -> usize {
             0x01
+        }
+    }
+
+    #[cfg(test)]
+    impl OutboundPacket for PingPacket {
+        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+        where
+            S: AsyncWrite + Unpin + Send + Sync,
+        {
+            buffer.write_u64(self.payload).await?;
+
+            Ok(())
         }
     }
 
@@ -183,86 +232,14 @@ pub mod inbound {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::AsyncReadPacket;
-    use std::io::Cursor;
-    use tokio::io::AsyncWriteExt;
+    use crate::protocol::tests::assert_packet;
 
     #[tokio::test]
-    async fn packet_ids_valid() {
-        assert_eq!(outbound::StatusResponsePacket::get_packet_id(), 0x00);
-        assert_eq!(outbound::PongPacket::get_packet_id(), 0x01);
-        assert_eq!(inbound::StatusRequestPacket::get_packet_id(), 0x00);
-        assert_eq!(inbound::PingPacket::get_packet_id(), 0x01);
-    }
+    async fn packets() {
+        assert_packet::<outbound::StatusResponsePacket>(0x00).await;
+        assert_packet::<outbound::PongPacket>(0x01).await;
 
-    #[tokio::test]
-    async fn decode_status_request() {
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
-        let _packet = inbound::StatusRequestPacket::new_from_buffer(&mut buffer)
-            .await
-            .unwrap();
-        assert_eq!(
-            buffer.position() as usize,
-            buffer.get_ref().len(),
-            "There are remaining bytes in the buffer"
-        );
-    }
-
-    #[tokio::test]
-    async fn decode_ping() {
-        let payload = 11u64;
-
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
-        buffer.write_u64(payload).await.unwrap();
-
-        let mut read_buffer: Cursor<Vec<u8>> = Cursor::new(buffer.into_inner());
-        let packet = inbound::PingPacket::new_from_buffer(&mut read_buffer)
-            .await
-            .unwrap();
-        assert_eq!(packet.payload, payload);
-
-        assert_eq!(
-            read_buffer.position() as usize,
-            read_buffer.get_ref().len(),
-            "There are remaining bytes in the buffer"
-        );
-    }
-
-    #[tokio::test]
-    async fn encode_status_response() {
-        // write the packet into a buffer and box it as a slice (sized)
-        let packet = outbound::StatusResponsePacket {
-            body: "{\"some\": \"values\"}".to_string(),
-        };
-        let mut packet_buffer = Cursor::new(Vec::<u8>::new());
-        packet.write_to_buffer(&mut packet_buffer).await.unwrap();
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer.into_inner());
-
-        let body = buffer.read_string().await.unwrap();
-        assert_eq!(body, packet.body);
-
-        assert_eq!(
-            buffer.position() as usize,
-            buffer.get_ref().len(),
-            "There are remaining bytes in the buffer"
-        );
-    }
-
-    #[tokio::test]
-    async fn encode_pong() {
-        // write the packet into a buffer and box it as a slice (sized)
-        let packet = outbound::PongPacket::new(17);
-        let mut packet_buffer = Cursor::new(Vec::<u8>::new());
-        packet.write_to_buffer(&mut packet_buffer).await.unwrap();
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer.into_inner());
-
-        let payload = buffer.read_u64().await.unwrap();
-        assert_eq!(payload, packet.payload);
-
-        assert_eq!(
-            buffer.position() as usize,
-            buffer.get_ref().len(),
-            "There are remaining bytes in the buffer"
-        );
+        assert_packet::<inbound::StatusRequestPacket>(0x00).await;
+        assert_packet::<inbound::PingPacket>(0x01).await;
     }
 }

@@ -1,10 +1,15 @@
 use crate::connection::{Connection, Phase, phase};
-use crate::protocol::{AsyncReadPacket, Error, InboundPacket, Packet, State};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
+use crate::protocol::{
+    AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet, State,
+};
+use fake::Dummy;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::debug;
 
 pub mod inbound {
     use super::*;
+    use crate::protocol::VarInt;
+    use crate::status::Protocol;
 
     /// The inbound [`HandshakePacket`].
     ///
@@ -12,10 +17,10 @@ pub mod inbound {
     /// opening the TCP connection to prevent the server from disconnecting.
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Handshake)
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Eq, PartialEq, Dummy)]
     pub struct HandshakePacket {
         /// The pretended protocol version.
-        pub protocol_version: isize,
+        pub protocol_version: VarInt,
         /// The pretended server address.
         pub server_address: String,
         /// The pretended server port.
@@ -30,12 +35,27 @@ pub mod inbound {
         }
     }
 
+    #[cfg(test)]
+    impl OutboundPacket for HandshakePacket {
+        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+        where
+            S: AsyncWrite + Unpin + Send + Sync,
+        {
+            buffer.write_varint(self.protocol_version).await?;
+            buffer.write_string(&self.server_address).await?;
+            buffer.write_u16(self.server_port).await?;
+            buffer.write_varint(self.next_state.into()).await?;
+
+            Ok(())
+        }
+    }
+
     impl InboundPacket for HandshakePacket {
         async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
         {
-            let protocol_version = buffer.read_varint().await? as isize;
+            let protocol_version = buffer.read_varint().await?;
             let server_address = buffer.read_string().await?;
             let server_port = buffer.read_u16().await?;
             let next_state = buffer.read_varint().await?.try_into()?;
@@ -87,42 +107,10 @@ pub mod inbound {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::AsyncWritePacket;
-    use std::io::Cursor;
-    use tokio::io::AsyncWriteExt;
+    use crate::protocol::tests::assert_packet;
 
     #[tokio::test]
-    async fn packet_ids_valid() {
-        assert_eq!(inbound::HandshakePacket::get_packet_id(), 0x00);
-    }
-
-    #[tokio::test]
-    async fn decode_handshake() {
-        let protocol_version = 13;
-        let server_address = "test";
-        let server_port = 1337;
-        let next_state = State::Transfer;
-
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
-        buffer.write_varint(protocol_version).await.unwrap();
-        buffer.write_string(server_address).await.unwrap();
-        buffer.write_u16(server_port).await.unwrap();
-        buffer.write_varint(next_state.into()).await.unwrap();
-
-        let mut read_buffer: Cursor<Vec<u8>> = Cursor::new(buffer.into_inner());
-        let packet = inbound::HandshakePacket::new_from_buffer(&mut read_buffer)
-            .await
-            .unwrap();
-
-        assert_eq!(packet.protocol_version, protocol_version as isize);
-        assert_eq!(packet.server_address, server_address);
-        assert_eq!(packet.server_port, server_port);
-        assert_eq!(packet.next_state, next_state);
-
-        assert_eq!(
-            read_buffer.position() as usize,
-            read_buffer.get_ref().len(),
-            "There are remaining bytes in the buffer"
-        );
+    async fn packets() {
+        assert_packet::<inbound::HandshakePacket>(0x00).await;
     }
 }

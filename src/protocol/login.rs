@@ -3,11 +3,11 @@ use crate::authentication::VerifyToken;
 use crate::connection::KeepAlive;
 use crate::connection::{Connection, Phase, phase};
 use crate::protocol::configuration::outbound::{AddResourcePackPacket, StoreCookiePacket};
-use crate::protocol::login::outbound::DisconnectPacket;
 use crate::protocol::{
     AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet,
 };
 use crate::status::Protocol;
+use fake::Dummy;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -31,7 +31,7 @@ pub mod outbound {
     /// The outbound [`DisconnectPacket`]. (Placeholder)
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Disconnect_(login))
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct DisconnectPacket {
         /// The JSON text component containing the reason of the disconnect.
         pub(crate) reason: String,
@@ -54,12 +54,25 @@ pub mod outbound {
         }
     }
 
+    #[cfg(test)]
+    impl InboundPacket for DisconnectPacket {
+        async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+        where
+            S: AsyncRead + Unpin + Send + Sync,
+        {
+            let reason = buffer.read_string().await?;
+
+            Ok(Self { reason })
+        }
+    }
+
     /// The outbound [`EncryptionRequestPacket`].
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Encryption_Request)
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct EncryptionRequestPacket {
-        // server id - is always empty, so we skip it
+        // ignore max size
+        pub server_id: String,
         pub public_key: Vec<u8>,
         pub verify_token: VerifyToken,
         pub should_authenticate: bool,
@@ -76,7 +89,7 @@ pub mod outbound {
         where
             S: AsyncWrite + Unpin + Send + Sync,
         {
-            buffer.write_string("").await?;
+            buffer.write_string(&self.server_id).await?;
             buffer.write_bytes(&self.public_key).await?;
             buffer.write_bytes(&self.verify_token).await?;
             buffer.write_bool(self.should_authenticate).await?;
@@ -85,10 +98,34 @@ pub mod outbound {
         }
     }
 
+    #[cfg(test)]
+    impl InboundPacket for EncryptionRequestPacket {
+        async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+        where
+            S: AsyncRead + Unpin + Send + Sync,
+        {
+            let server_id = buffer.read_string().await?;
+            let public_key = buffer.read_bytes().await?;
+            let verify_token = buffer
+                .read_bytes()
+                .await?
+                .try_into()
+                .map_err(|_| Error::ArrayConversionFailed)?;
+            let should_authenticate = buffer.read_bool().await?;
+
+            Ok(Self {
+                server_id,
+                public_key,
+                verify_token,
+                should_authenticate,
+            })
+        }
+    }
+
     /// The outbound [`LoginSuccessPacket`].
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Success)
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct LoginSuccessPacket {
         pub user_id: Uuid,
         pub user_name: String,
@@ -115,6 +152,25 @@ pub mod outbound {
         }
     }
 
+    #[cfg(test)]
+    impl InboundPacket for LoginSuccessPacket {
+        async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+        where
+            S: AsyncRead + Unpin + Send + Sync,
+        {
+            println!(".");
+            let user_id = buffer.read_uuid().await?;
+            println!(".");
+            let user_name = buffer.read_string().await?;
+            println!(".");
+            // expect no properties in array
+            let _properties = buffer.read_varint().await?;
+            println!(".");
+
+            Ok(Self { user_id, user_name })
+        }
+    }
+
     /// The outbound [`SetCompressionPacket`]. (Placeholder)
     ///
     /// Enables compression. If compression is enabled, all following packets are encoded in the compressed
@@ -124,7 +180,7 @@ pub mod outbound {
     /// is disabled).
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Set_Compression)
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct SetCompressionPacket;
 
     impl Packet for SetCompressionPacket {
@@ -142,6 +198,16 @@ pub mod outbound {
         }
     }
 
+    #[cfg(test)]
+    impl InboundPacket for SetCompressionPacket {
+        async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+        where
+            S: AsyncRead + Unpin + Send + Sync,
+        {
+            Ok(Self)
+        }
+    }
+
     /// The outbound [`LoginPluginRequestPacket`]. (Placeholder)
     ///
     /// Used to implement a custom handshaking flow together with Login Plugin Response. Unlike plugin
@@ -150,7 +216,7 @@ pub mod outbound {
     /// always responds that it hasn't understood, and sends an empty payload.
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Plugin_Request)
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct LoginPluginRequestPacket;
 
     impl Packet for LoginPluginRequestPacket {
@@ -168,12 +234,22 @@ pub mod outbound {
         }
     }
 
+    #[cfg(test)]
+    impl InboundPacket for LoginPluginRequestPacket {
+        async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+        where
+            S: AsyncRead + Unpin + Send + Sync,
+        {
+            Ok(Self)
+        }
+    }
+
     /// The outbound [`CookieRequestPacket`]. (Placeholder)
     ///
     /// Requests a cookie that was previously stored.
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Request_(login))
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct CookieRequestPacket {
         pub key: String,
     }
@@ -194,6 +270,18 @@ pub mod outbound {
             Ok(())
         }
     }
+
+    #[cfg(test)]
+    impl InboundPacket for CookieRequestPacket {
+        async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+        where
+            S: AsyncRead + Unpin + Send + Sync,
+        {
+            let key = buffer.read_string().await?;
+
+            Ok(Self { key })
+        }
+    }
 }
 
 pub mod inbound {
@@ -204,7 +292,7 @@ pub mod inbound {
     /// The inbound [`LoginStartPacket`].
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Start)
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct LoginStartPacket {
         pub user_name: String,
         pub user_id: Uuid,
@@ -213,6 +301,19 @@ pub mod inbound {
     impl Packet for LoginStartPacket {
         fn get_packet_id() -> usize {
             0x00
+        }
+    }
+
+    #[cfg(test)]
+    impl OutboundPacket for LoginStartPacket {
+        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+        where
+            S: AsyncWrite + Unpin + Send + Sync,
+        {
+            buffer.write_string(&self.user_name).await?;
+            buffer.write_uuid(&self.user_id).await?;
+
+            Ok(())
         }
     }
 
@@ -280,6 +381,7 @@ pub mod inbound {
 
             // create a new encryption request and send it
             let encryption_request = outbound::EncryptionRequestPacket {
+                server_id: "".to_owned(),
                 public_key: authentication::ENCODED_PUB.clone(),
                 verify_token,
                 should_authenticate: true,
@@ -297,7 +399,7 @@ pub mod inbound {
     /// The inbound [`EncryptionResponsePacket`].
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Encryption_Response)
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct EncryptionResponsePacket {
         pub shared_secret: Vec<u8>,
         pub verify_token: Vec<u8>,
@@ -306,6 +408,19 @@ pub mod inbound {
     impl Packet for EncryptionResponsePacket {
         fn get_packet_id() -> usize {
             0x01
+        }
+    }
+
+    #[cfg(test)]
+    impl OutboundPacket for EncryptionResponsePacket {
+        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+        where
+            S: AsyncWrite + Unpin + Send + Sync,
+        {
+            buffer.write_bytes(&self.shared_secret).await?;
+            buffer.write_bytes(&self.verify_token).await?;
+
+            Ok(())
         }
     }
 
@@ -365,7 +480,7 @@ pub mod inbound {
                     Err(err) => {
                         warn!(err = ?err, "mojang auth failed");
                         // TODO write actual reason
-                        con.write_packet(DisconnectPacket {
+                        con.write_packet(outbound::DisconnectPacket {
                             reason: "".to_string(),
                         })
                         .await?;
@@ -413,12 +528,22 @@ pub mod inbound {
     /// The inbound [`LoginPluginResponsePacket`]. (Placeholder)
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Plugin_Response)
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct LoginPluginResponsePacket;
 
     impl Packet for LoginPluginResponsePacket {
         fn get_packet_id() -> usize {
             0x02
+        }
+    }
+
+    #[cfg(test)]
+    impl OutboundPacket for LoginPluginResponsePacket {
+        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+        where
+            S: AsyncWrite + Unpin + Send + Sync,
+        {
+            Ok(())
         }
     }
 
@@ -434,12 +559,22 @@ pub mod inbound {
     /// The inbound [`LoginAcknowledgedPacket`].
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Acknowledged)
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct LoginAcknowledgedPacket;
 
     impl Packet for LoginAcknowledgedPacket {
         fn get_packet_id() -> usize {
             0x03
+        }
+    }
+
+    #[cfg(test)]
+    impl OutboundPacket for LoginAcknowledgedPacket {
+        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+        where
+            S: AsyncWrite + Unpin + Send + Sync,
+        {
+            Ok(())
         }
     }
 
@@ -529,7 +664,8 @@ pub mod inbound {
                     url: pack.url,
                     hash: pack.hash,
                     forced: pack.forced,
-                    prompt_message: pack.prompt_message,
+                    // TODO add option support to pack
+                    prompt_message: Some(pack.prompt_message),
                 };
                 con.write_packet(packet).await?;
             }
@@ -541,7 +677,7 @@ pub mod inbound {
     /// The inbound [`CookieResponsePacket`].
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Response_(login))
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq, Dummy)]
     pub struct CookieResponsePacket {
         pub key: String,
         pub payload: Option<Vec<u8>>,
@@ -550,6 +686,22 @@ pub mod inbound {
     impl Packet for CookieResponsePacket {
         fn get_packet_id() -> usize {
             0x04
+        }
+    }
+
+    #[cfg(test)]
+    impl OutboundPacket for CookieResponsePacket {
+        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+        where
+            S: AsyncWrite + Unpin + Send + Sync,
+        {
+            buffer.write_string(&self.key).await?;
+            buffer.write_bool(self.payload.is_some()).await?;
+            if let Some(payload) = &self.payload {
+                buffer.write_bytes(payload).await?;
+            }
+
+            Ok(())
         }
     }
 
@@ -635,6 +787,7 @@ pub mod inbound {
 
             // create a new encryption request and send it
             let encryption_request = outbound::EncryptionRequestPacket {
+                server_id: "".to_owned(),
                 public_key: authentication::ENCODED_PUB.clone(),
                 verify_token,
                 should_authenticate,
@@ -653,138 +806,21 @@ pub mod inbound {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
-    use tokio::io::AsyncReadExt;
-    use uuid::uuid;
+    use crate::protocol::tests::assert_packet;
 
     #[tokio::test]
-    async fn packet_ids_valid() {
-        assert_eq!(outbound::EncryptionRequestPacket::get_packet_id(), 0x01);
-        assert_eq!(outbound::LoginSuccessPacket::get_packet_id(), 0x02);
-        assert_eq!(inbound::LoginStartPacket::get_packet_id(), 0x00);
-        assert_eq!(inbound::EncryptionResponsePacket::get_packet_id(), 0x01);
-        assert_eq!(inbound::LoginAcknowledgedPacket::get_packet_id(), 0x03);
-    }
+    async fn packets() {
+        assert_packet::<outbound::DisconnectPacket>(0x00).await;
+        assert_packet::<outbound::EncryptionRequestPacket>(0x01).await;
+        assert_packet::<outbound::LoginSuccessPacket>(0x02).await;
+        assert_packet::<outbound::SetCompressionPacket>(0x03).await;
+        assert_packet::<outbound::LoginPluginRequestPacket>(0x04).await;
+        assert_packet::<outbound::CookieRequestPacket>(0x05).await;
 
-    #[tokio::test]
-    async fn decode_login_start() {
-        let user_name = "Scrayos";
-        let user_id = uuid!("9c09eef4-f68d-4387-9751-72bbff53d5a0");
-
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
-        buffer.write_string(user_name).await.unwrap();
-        buffer.write_uuid(&user_id).await.unwrap();
-
-        let mut read_buffer: Cursor<Vec<u8>> = Cursor::new(buffer.into_inner());
-        let packet = inbound::LoginStartPacket::new_from_buffer(&mut read_buffer)
-            .await
-            .unwrap();
-        assert_eq!(packet.user_name, user_name);
-        assert_eq!(packet.user_id, user_id);
-
-        assert_eq!(
-            read_buffer.position() as usize,
-            read_buffer.get_ref().len(),
-            "There are remaining bytes in the buffer"
-        );
-    }
-
-    #[tokio::test]
-    async fn decode_encryption_response() {
-        let mut rng = rand::random();
-        let mut shared_secret = [0u8; 32];
-        rng.try_fill_bytes(&mut shared_secret).unwrap();
-        let mut verify_token = [0u8; 32];
-        rng.try_fill_bytes(&mut verify_token).unwrap();
-
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
-        buffer.write_bytes(&shared_secret).await.unwrap();
-        buffer.write_bytes(&verify_token).await.unwrap();
-
-        let mut read_buffer: Cursor<Vec<u8>> = Cursor::new(buffer.into_inner());
-        let packet = inbound::EncryptionResponsePacket::new_from_buffer(&mut read_buffer)
-            .await
-            .unwrap();
-        assert_eq!(packet.shared_secret, shared_secret);
-        assert_eq!(packet.verify_token, verify_token);
-
-        assert_eq!(
-            read_buffer.position() as usize,
-            read_buffer.get_ref().len(),
-            "There are remaining bytes in the buffer"
-        );
-    }
-
-    #[tokio::test]
-    async fn decode_login_acknowledged() {
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
-
-        let _packet = inbound::LoginAcknowledgedPacket::new_from_buffer(&mut buffer)
-            .await
-            .unwrap();
-        assert_eq!(
-            buffer.position() as usize,
-            buffer.get_ref().len(),
-            "There are remaining bytes in the buffer"
-        );
-    }
-
-    #[tokio::test]
-    async fn encode_encryption_request() {
-        let mut rng = rand::random();
-        let mut public_key_write = [0u8; 32];
-        rng.try_fill_bytes(&mut public_key_write).unwrap();
-        let mut verify_token_write = [0u8; 32];
-        rng.try_fill_bytes(&mut verify_token_write).unwrap();
-
-        // write the packet into a buffer and box it as a slice (sized)
-        let packet = outbound::EncryptionRequestPacket {
-            public_key: public_key_write.to_vec(),
-            verify_token: verify_token_write,
-            should_authenticate: true,
-        };
-        let mut packet_buffer = Cursor::new(Vec::<u8>::new());
-        packet.write_to_buffer(&mut packet_buffer).await.unwrap();
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer.into_inner());
-
-        let server_id = buffer.read_string().await.unwrap();
-        let public_key = buffer.read_bytes().await.unwrap();
-        let verify_token = buffer.read_bytes().await.unwrap();
-        let should_authenticate = buffer.read_u8().await.unwrap();
-        assert_eq!(server_id, "");
-        assert_eq!(public_key, packet.public_key);
-        assert_eq!(verify_token, packet.verify_token);
-        assert_eq!(should_authenticate != 0, packet.should_authenticate);
-
-        assert_eq!(
-            buffer.position() as usize,
-            buffer.get_ref().len(),
-            "There are remaining bytes in the buffer"
-        );
-    }
-
-    #[tokio::test]
-    async fn encode_login_success() {
-        // write the packet into a buffer and box it as a slice (sized)
-        let packet = outbound::LoginSuccessPacket {
-            user_id: uuid!("9c09eef4-f68d-4387-9751-72bbff53d5a0"),
-            user_name: "Scrayos".to_string(),
-        };
-        let mut packet_buffer = Cursor::new(Vec::<u8>::new());
-        packet.write_to_buffer(&mut packet_buffer).await.unwrap();
-        let mut buffer: Cursor<Vec<u8>> = Cursor::new(packet_buffer.into_inner());
-
-        let user_id = buffer.read_uuid().await.unwrap();
-        let user_name = buffer.read_string().await.unwrap();
-        let property_count = buffer.read_varint().await.unwrap();
-        assert_eq!(user_id, packet.user_id);
-        assert_eq!(user_name, packet.user_name);
-        assert_eq!(property_count, 0);
-
-        assert_eq!(
-            buffer.position() as usize,
-            buffer.get_ref().len(),
-            "There are remaining bytes in the buffer"
-        );
+        assert_packet::<inbound::LoginStartPacket>(0x00).await;
+        assert_packet::<inbound::EncryptionResponsePacket>(0x01).await;
+        assert_packet::<inbound::LoginPluginResponsePacket>(0x02).await;
+        assert_packet::<inbound::LoginAcknowledgedPacket>(0x03).await;
+        assert_packet::<inbound::CookieResponsePacket>(0x04).await;
     }
 }

@@ -13,7 +13,7 @@ use crate::protocol::login::inbound::{
     CookieResponsePacket, EncryptionResponsePacket, LoginAcknowledgedPacket, LoginStartPacket,
 };
 use crate::protocol::status::inbound::{PingPacket, StatusRequestPacket};
-use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket};
+use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, VarInt};
 use crate::status::Protocol;
 use std::io::Cursor;
 use std::net::SocketAddr;
@@ -28,7 +28,7 @@ use tracing::{debug, trace};
 use uuid::Uuid;
 
 /// The max packet length in bytes. Larger packets are rejected.
-const MAX_PACKET_LENGTH: usize = 10_000;
+const MAX_PACKET_LENGTH: VarInt = 10_000;
 
 macro_rules! handle {
     ($packet_type:ty, $buffer:expr, $self:expr) => {{
@@ -61,20 +61,20 @@ pub enum Phase {
     },
     Status {
         client_address: SocketAddr,
-        protocol_version: isize,
+        protocol_version: VarInt,
         server_address: String,
         server_port: u16,
     },
     Login {
         client_address: SocketAddr,
-        protocol_version: isize,
+        protocol_version: VarInt,
         server_address: String,
         server_port: u16,
         transfer: bool,
     },
     Transfer {
         client_address: SocketAddr,
-        protocol_version: isize,
+        protocol_version: VarInt,
         server_address: String,
         server_port: u16,
         user_name: String,
@@ -82,7 +82,7 @@ pub enum Phase {
     },
     Encryption {
         client_address: SocketAddr,
-        protocol_version: isize,
+        protocol_version: VarInt,
         server_address: String,
         server_port: u16,
         user_name: String,
@@ -92,7 +92,7 @@ pub enum Phase {
     },
     Acknowledge {
         client_address: SocketAddr,
-        protocol_version: isize,
+        protocol_version: VarInt,
         server_address: String,
         server_port: u16,
         user_name: String,
@@ -101,7 +101,7 @@ pub enum Phase {
     },
     Configuration {
         client_address: SocketAddr,
-        protocol_version: isize,
+        protocol_version: VarInt,
         server_address: String,
         server_port: u16,
         user_name: String,
@@ -247,7 +247,7 @@ where
         Ok(())
     }
 
-    async fn handle_packet(&mut self, length: usize) -> Result<(), Error> {
+    async fn handle_packet(&mut self, length: VarInt) -> Result<(), Error> {
         // check the length of the packe for any following content
         if length == 0 || length > MAX_PACKET_LENGTH {
             debug!(
@@ -369,7 +369,7 @@ where
         // create a new transfer packet and send it
         let transfer = TransferPacket {
             host: target.ip().to_string(),
-            port: target.port() as usize,
+            port: target.port(),
         };
         debug!(packet = debug(&transfer), "sending transfer packet");
         self.write_packet(transfer).await?;

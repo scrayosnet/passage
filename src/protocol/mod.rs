@@ -12,6 +12,7 @@
 
 use crate::authentication;
 use crate::connection::Connection;
+use fake::Dummy;
 use std::fmt::Debug;
 use std::io::ErrorKind;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -21,6 +22,10 @@ pub(crate) mod configuration;
 pub(crate) mod handshaking;
 pub(crate) mod login;
 pub(crate) mod status;
+
+pub type VarInt = i32;
+
+pub type VarLong = i64;
 
 /// The internal error type for all errors related to the protocol communication.
 ///
@@ -43,7 +48,7 @@ pub enum Error {
         /// The enum kind which was parsed.
         kind: &'static str,
         /// The value that was received.
-        value: usize,
+        value: VarInt,
     },
 
     /// The received `VarInt` cannot be correctly decoded (was formed incorrectly).
@@ -71,6 +76,10 @@ pub enum Error {
     #[error("could not encrypt connection: {0}")]
     CryptographyFailed(#[from] authentication::Error),
 
+    /// Some array conversion failed.
+    #[error("could not convert into array")]
+    ArrayConversionFailed,
+
     /// The packet handle was called while in an unexpected phase.
     #[error("invalid state: {actual} (expected {expected})")]
     InvalidState {
@@ -89,7 +98,7 @@ impl Error {
 }
 
 /// State is the desired state that the connection should be in after the initial handshake.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Dummy)]
 pub enum State {
     /// Query the server information without connecting.
     Status,
@@ -99,7 +108,7 @@ pub enum State {
     Transfer,
 }
 
-impl From<State> for usize {
+impl From<State> for VarInt {
     fn from(state: State) -> Self {
         match state {
             State::Status => 1,
@@ -109,10 +118,10 @@ impl From<State> for usize {
     }
 }
 
-impl TryFrom<usize> for State {
+impl TryFrom<VarInt> for State {
     type Error = Error;
 
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
+    fn try_from(value: VarInt) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(State::Status),
             2 => Ok(State::Login),
@@ -125,7 +134,7 @@ impl TryFrom<usize> for State {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Dummy)]
 pub enum ResourcePackResult {
     Success,
     Declined,
@@ -137,7 +146,7 @@ pub enum ResourcePackResult {
     Discorded,
 }
 
-impl From<ResourcePackResult> for usize {
+impl From<ResourcePackResult> for VarInt {
     fn from(result: ResourcePackResult) -> Self {
         match result {
             ResourcePackResult::Success => 0,
@@ -152,10 +161,10 @@ impl From<ResourcePackResult> for usize {
     }
 }
 
-impl TryFrom<usize> for ResourcePackResult {
+impl TryFrom<VarInt> for ResourcePackResult {
     type Error = Error;
 
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
+    fn try_from(value: VarInt) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(ResourcePackResult::Success),
             1 => Ok(ResourcePackResult::Declined),
@@ -173,14 +182,14 @@ impl TryFrom<usize> for ResourcePackResult {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Dummy)]
 pub enum ChatMode {
     Enabled,
     CommandsOnly,
     Hidden,
 }
 
-impl From<ChatMode> for usize {
+impl From<ChatMode> for VarInt {
     fn from(value: ChatMode) -> Self {
         match value {
             ChatMode::Enabled => 0,
@@ -190,10 +199,10 @@ impl From<ChatMode> for usize {
     }
 }
 
-impl TryFrom<usize> for ChatMode {
+impl TryFrom<VarInt> for ChatMode {
     type Error = Error;
 
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
+    fn try_from(value: VarInt) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(ChatMode::Enabled),
             1 => Ok(ChatMode::CommandsOnly),
@@ -206,7 +215,7 @@ impl TryFrom<usize> for ChatMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Dummy)]
 pub struct DisplayedSkinParts(pub u8);
 
 impl DisplayedSkinParts {
@@ -239,13 +248,13 @@ impl DisplayedSkinParts {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Dummy)]
 pub enum MainHand {
     Left,
     Right,
 }
 
-impl From<MainHand> for usize {
+impl From<MainHand> for VarInt {
     fn from(value: MainHand) -> Self {
         match value {
             MainHand::Left => 0,
@@ -254,10 +263,10 @@ impl From<MainHand> for usize {
     }
 }
 
-impl TryFrom<usize> for MainHand {
+impl TryFrom<VarInt> for MainHand {
     type Error = Error;
 
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
+    fn try_from(value: VarInt) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(MainHand::Left),
             1 => Ok(MainHand::Right),
@@ -269,14 +278,14 @@ impl TryFrom<usize> for MainHand {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Dummy)]
 pub enum ParticleStatus {
     All,
     Decreased,
     Minimal,
 }
 
-impl From<ParticleStatus> for usize {
+impl From<ParticleStatus> for VarInt {
     fn from(value: ParticleStatus) -> Self {
         match value {
             ParticleStatus::All => 0,
@@ -286,10 +295,10 @@ impl From<ParticleStatus> for usize {
     }
 }
 
-impl TryFrom<usize> for ParticleStatus {
+impl TryFrom<VarInt> for ParticleStatus {
     type Error = Error;
 
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
+    fn try_from(value: VarInt) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(ParticleStatus::All),
             1 => Ok(ParticleStatus::Decreased),
@@ -346,10 +355,15 @@ pub trait AsyncWritePacket {
         packet: T,
     ) -> Result<(), Error>;
 
-    /// Writes a `VarInt` onto this object as described in the official [protocol documentation][protocol-doc].
+    /// Writes a [`VarInt`] onto this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
-    async fn write_varint(&mut self, int: usize) -> Result<(), Error>;
+    async fn write_varint(&mut self, int: VarInt) -> Result<(), Error>;
+
+    /// Writes a [`VarLong`] onto this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
+    async fn write_varlong(&mut self, int: VarLong) -> Result<(), Error>;
 
     /// Writes a `String` onto this object as described in the official [protocol documentation][protocol-doc].
     ///
@@ -383,16 +397,17 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
         packet: T,
     ) -> Result<(), Error> {
         // create a new buffer (our packets are very small)
+        // TODO magic number
         let mut buffer = Vec::with_capacity(48);
 
         // write the packet id and the respective packet content
-        buffer.write_varint(T::get_packet_id()).await?;
+        buffer.write_varint(T::get_packet_id() as VarInt).await?;
         packet.write_to_buffer(&mut buffer).await?;
 
         // prepare a final buffer (leaving max 2 bytes for varint (packets never get that big))
         let packet_len = buffer.len();
         let mut final_buffer = Vec::with_capacity(packet_len + 2);
-        final_buffer.write_varint(packet_len).await?;
+        final_buffer.write_varint(packet_len as VarInt).await?;
         final_buffer.extend_from_slice(&buffer);
 
         // send the final buffer into the stream
@@ -401,30 +416,44 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
         Ok(())
     }
 
-    async fn write_varint(&mut self, value: usize) -> Result<(), Error> {
-        let mut int = (value as u64) & 0xFFFF_FFFF;
-        let mut written = 0;
-        let mut buffer = [0; 5];
+    async fn write_varint(&mut self, value: VarInt) -> Result<(), Error> {
+        let mut value = value;
+        let mut buf = [0];
         loop {
-            let temp = (int & 0b0111_1111) as u8;
-            int >>= 7;
-            if int != 0 {
-                buffer[written] = temp | 0b1000_0000;
-            } else {
-                buffer[written] = temp;
+            buf[0] = (value & 0b0111_1111) as u8;
+            value = (value >> 7) & (i32::MAX >> 6);
+            if value != 0 {
+                buf[0] |= 0b1000_0000;
             }
-            written += 1;
-            if int == 0 {
+            self.write(&mut buf).await?;
+
+            if value == 0 {
                 break;
             }
         }
-        self.write_all(&buffer[0..written]).await?;
+        Ok(())
+    }
 
+    async fn write_varlong(&mut self, value: VarLong) -> Result<(), Error> {
+        let mut value = value;
+        let mut buf = [0];
+        loop {
+            buf[0] = (value & 0b0111_1111) as u8;
+            value = (value >> 7) & (i64::MAX >> 6);
+            if value != 0 {
+                buf[0] |= 0b1000_0000;
+            }
+            self.write(&mut buf).await?;
+
+            if value == 0 {
+                break;
+            }
+        }
         Ok(())
     }
 
     async fn write_string(&mut self, string: &str) -> Result<(), Error> {
-        self.write_varint(string.len()).await?;
+        self.write_varint(string.len() as VarInt).await?;
         self.write_all(string.as_bytes()).await?;
 
         Ok(())
@@ -452,7 +481,7 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
     }
 
     async fn write_bytes(&mut self, arr: &[u8]) -> Result<(), Error> {
-        self.write_varint(arr.len()).await?;
+        self.write_varint(arr.len() as VarInt).await?;
         self.write_all(arr).await?;
 
         Ok(())
@@ -471,10 +500,15 @@ pub(crate) trait AsyncReadPacket {
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Packet_format
     async fn read_packet<T: InboundPacket + Send + Sync>(&mut self) -> Result<T, Error>;
 
-    /// Reads a `VarInt` from this object as described in the official [protocol documentation][protocol-doc].
+    /// Reads a [`VarInt`] from this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
-    async fn read_varint(&mut self) -> Result<usize, Error>;
+    async fn read_varint(&mut self) -> Result<VarInt, Error>;
+
+    /// Reads a [`VarLong`] from this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
+    async fn read_varlong(&mut self) -> Result<VarLong, Error>;
 
     /// Reads a `String` from this object as described in the official [protocol documentation][protocol-doc].
     ///
@@ -491,6 +525,11 @@ pub(crate) trait AsyncReadPacket {
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:UUID
     async fn read_uuid(&mut self) -> Result<Uuid, Error>;
 
+    /// Reads a string TextComponent from this object as described in the official [protocol documentation][protocol-doc].
+    ///
+    /// [protocol-doc]: https://minecraft.wiki/w/Java_Edition_protocol#Type:Text_Component
+    async fn read_text_component(&mut self) -> Result<String, Error>;
+
     /// Reads a vec of `u8` from this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Prefixed_Array
@@ -506,7 +545,7 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
         }
 
         // extract the encoded packet id and validate if it is expected
-        let packet_id = self.read_varint().await?;
+        let packet_id = self.read_varint().await? as usize;
         let expected_packet_id = T::get_packet_id();
         if packet_id != expected_packet_id {
             return Err(Error::IllegalPacketId {
@@ -522,25 +561,34 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
         T::new_from_buffer(&mut take).await
     }
 
-    async fn read_varint(&mut self) -> Result<usize, Error> {
-        let mut read = 0;
-        let mut result = 0;
-        loop {
-            let read_value = self.read_u8().await?;
-            let value = read_value & 0b0111_1111;
-            result |= (value as usize) << (7 * read);
-            read += 1;
-            if read > 5 {
-                return Err(Error::InvalidVarInt);
-            }
-            if (read_value & 0b1000_0000) == 0 {
-                return Ok(result);
+    async fn read_varint(&mut self) -> Result<VarInt, Error> {
+        let mut buf = [0];
+        let mut ans = 0;
+        for i in 0..5 {
+            self.read_exact(&mut buf).await?;
+            ans |= ((buf[0] & 0b0111_1111) as i32) << 7 * i;
+            if buf[0] & 0b1000_0000 == 0 {
+                break;
             }
         }
+        Ok(ans)
+    }
+
+    async fn read_varlong(&mut self) -> Result<VarLong, Error> {
+        let mut buf = [0];
+        let mut ans = 0;
+        for i in 0..9 {
+            self.read_exact(&mut buf).await?;
+            ans |= ((buf[0] & 0b0111_1111) as i64) << 7 * i;
+            if buf[0] & 0b1000_0000 == 0 {
+                break;
+            }
+        }
+        Ok(ans)
     }
 
     async fn read_string(&mut self) -> Result<String, Error> {
-        let length = self.read_varint().await?;
+        let length = self.read_varint().await? as usize;
 
         let mut buffer = vec![0; length];
         self.read_exact(&mut buffer).await?;
@@ -559,12 +607,72 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
         Ok(Uuid::from_u128(value))
     }
 
+    async fn read_text_component(&mut self) -> Result<String, Error> {
+        // expect a TAG_String (0x08) TextComponent
+        let _tag = self.read_u8().await?;
+        let len = self.read_u16().await?;
+
+        let mut buffer = vec![0; len as usize];
+        self.read_exact(&mut buffer).await?;
+
+        String::from_utf8(buffer).map_err(|_| Error::InvalidEncoding)
+    }
+
     async fn read_bytes(&mut self) -> Result<Vec<u8>, Error> {
-        let length = self.read_varint().await?;
+        let length = self.read_varint().await? as usize;
 
         let mut buffer = vec![0; length];
         self.read_exact(&mut buffer).await?;
 
         Ok(buffer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::protocol::{InboundPacket, OutboundPacket};
+    use fake::{Dummy, Fake, Faker};
+    use std::fmt::Debug;
+    use std::io::Cursor;
+
+    pub async fn assert_packet<T>(packet_id: usize)
+    where
+        T: PartialEq
+            + Eq
+            + Dummy<Faker>
+            + InboundPacket
+            + OutboundPacket
+            + Send
+            + Sync
+            + Debug
+            + Clone,
+    {
+        // generate_data
+        let expected: T = Faker.fake();
+
+        // write packet
+        let mut writer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+        expected
+            .write_to_buffer(&mut writer)
+            .await
+            .expect("failed to write packet");
+
+        // buffer
+        let buffer = writer.into_inner();
+        println!("packet: {:?}; buffer: {:?}", expected, buffer);
+
+        // read packet
+        let mut reader: Cursor<Vec<u8>> = Cursor::new(buffer);
+        let actual = T::new_from_buffer(&mut reader)
+            .await
+            .expect("failed to read packet");
+
+        assert_eq!(T::get_packet_id(), packet_id, "mismatching packet id");
+        assert_eq!(expected, actual);
+        assert_eq!(
+            reader.position() as usize,
+            reader.get_ref().len(),
+            "there are remaining bytes in the buffer"
+        );
     }
 }
