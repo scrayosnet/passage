@@ -12,6 +12,15 @@ pub struct ServerVersion {
     pub protocol: Protocol,
 }
 
+impl Default for ServerVersion {
+    fn default() -> Self {
+        Self {
+            name: "JustChunks".to_owned(),
+            protocol: 0,
+        }
+    }
+}
+
 /// The information on a single, sampled player entry.
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 pub struct ServerPlayer {
@@ -33,7 +42,7 @@ pub struct ServerPlayers {
 }
 
 /// The self-reported status of a pinged server with all public metadata.
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Default)]
 pub struct ServerStatus {
     /// The version and protocol information of the server.
     pub version: ServerVersion,

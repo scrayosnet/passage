@@ -33,7 +33,7 @@ const MAX_PACKET_LENGTH: VarInt = 10_000;
 macro_rules! handle {
     ($packet_type:ty, $buffer:expr, $self:expr) => {{
         let packet = <$packet_type>::new_from_buffer($buffer).await?;
-        trace!(packet = ?packet, "Read packet");
+        debug!(packet = ?packet, "Read packet");
         packet.handle($self).await
     }}
 }
@@ -415,5 +415,101 @@ where
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.get_mut().stream).poll_read(cx, buf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
+    use crate::adapter::target_selection::none::NoneTargetSelector;
+    use crate::protocol::status::outbound::StatusResponsePacket;
+    use crate::protocol::{State, status};
+    use crate::status::ServerStatus;
+    use async_trait::async_trait;
+    use std::str::FromStr;
+
+    struct NoneStatusSupplier;
+
+    #[async_trait]
+    impl StatusSupplier for NoneStatusSupplier {
+        async fn get_status(
+            &self,
+            _client_addr: &SocketAddr,
+            _server_addr: (&str, u16),
+            protocol: Protocol,
+        ) -> Result<Option<ServerStatus>, Error> {
+            let mut status = ServerStatus::default();
+            status.version.protocol = protocol;
+            Ok(Some(status))
+        }
+    }
+
+    #[tokio::test]
+    async fn simulate_status() {
+        // create stream
+        let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
+        let server_address = SocketAddr::from_str("127.0.0.1:25565").expect("invalid address");
+        let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+
+        // build supplier
+        let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
+        let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector);
+        let resourcepack_supplier: Arc<dyn ResourcepackSupplier> =
+            Arc::new(NoneResourcePackSupplier);
+
+        // build connection
+        let mut server = Connection::new(
+            server_stream,
+            client_address,
+            Arc::clone(&status_supplier),
+            Arc::clone(&target_selector),
+            Arc::clone(&resourcepack_supplier),
+            None,
+        );
+
+        // start server in own thread
+        let server = tokio::spawn(async move {
+            server.listen().await.expect("server listen failed");
+        });
+
+        // simulate client
+        client_stream
+            .write_packet(HandshakePacket {
+                protocol_version: 0,
+                server_address: "".to_string(),
+                server_port: 0,
+                next_state: State::Status,
+            })
+            .await
+            .expect("send handshake failed");
+
+        client_stream
+            .write_packet(StatusRequestPacket)
+            .await
+            .expect("send status request failed");
+
+        let status_response_packet: StatusResponsePacket = client_stream
+            .read_packet()
+            .await
+            .expect("status response packet read failed");
+        assert_eq!(
+            status_response_packet.body,
+            "{\"version\":{\"name\":\"JustChunks\",\"protocol\":0},\"players\":null,\"description\":null,\"favicon\":null,\"enforcesSecureChat\":null}"
+        );
+
+        client_stream
+            .write_packet(PingPacket { payload: 42 })
+            .await
+            .expect("send ping request failed");
+
+        let pong_packet: status::outbound::PongPacket = client_stream
+            .read_packet()
+            .await
+            .expect("pong packet read failed");
+        assert_eq!(pong_packet.payload, 42);
+
+        // wait for server to finish
+        server.await.expect("server run failed");
     }
 }
