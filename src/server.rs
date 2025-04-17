@@ -70,13 +70,11 @@ pub async fn serve(
 
             // handle the client connection
             if let Err(err) = con.listen().await {
-                if !err.is_connection_closed() {
-                    warn!(
-                        cause = err.to_string(),
-                        addr = &addr.to_string(),
-                        "failure communicating with a client"
-                    );
-                }
+                warn!(
+                    cause = err.to_string(),
+                    addr = &addr.to_string(),
+                    "failure communicating with a client"
+                );
             }
 
             // flush connection and shutdown

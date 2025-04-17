@@ -94,6 +94,9 @@ impl Error {
             return false;
         };
         err.kind() == ErrorKind::UnexpectedEof
+            || err.kind() == ErrorKind::ConnectionReset
+            || err.kind() == ErrorKind::ConnectionAborted
+            || err.kind() == ErrorKind::BrokenPipe
     }
 }
 

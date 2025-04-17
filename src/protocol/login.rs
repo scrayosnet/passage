@@ -158,14 +158,10 @@ pub mod outbound {
         where
             S: AsyncRead + Unpin + Send + Sync,
         {
-            println!(".");
             let user_id = buffer.read_uuid().await?;
-            println!(".");
             let user_name = buffer.read_string().await?;
-            println!(".");
             // expect no properties in array
             let _properties = buffer.read_varint().await?;
-            println!(".");
 
             Ok(Self { user_id, user_name })
         }
