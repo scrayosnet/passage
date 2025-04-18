@@ -1,15 +1,12 @@
-use crate::connection::{Connection, Phase, phase};
 use crate::protocol::{
     AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet, State,
 };
 use fake::Dummy;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tracing::debug;
 
 pub mod inbound {
     use super::*;
     use crate::protocol::VarInt;
-    use crate::status::Protocol;
 
     /// The inbound [`HandshakePacket`].
     ///
@@ -66,40 +63,6 @@ pub mod inbound {
                 server_port,
                 next_state,
             })
-        }
-
-        async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
-        where
-            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-        {
-            debug!(packet = debug(&self), "received handshake packet");
-            phase!(con.phase, Phase::Handshake, client_address,);
-
-            // collect information
-            let client_address = *client_address;
-            let protocol_version = self.protocol_version;
-            let server_address = self.server_address.to_string();
-            let server_port = self.server_port;
-            let transfer = self.next_state == State::Transfer;
-
-            // switch to next phase based on state
-            con.phase = match &self.next_state {
-                State::Status => Phase::Status {
-                    client_address,
-                    server_address,
-                    server_port,
-                    protocol_version,
-                },
-                _ => Phase::Login {
-                    client_address,
-                    server_address,
-                    server_port,
-                    protocol_version,
-                    transfer,
-                },
-            };
-
-            Ok(())
         }
     }
 }

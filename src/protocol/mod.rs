@@ -11,17 +11,16 @@
 //! [configuration]: https://minecraft.wiki/w/Java_Edition_protocol#Configuration
 
 use crate::authentication;
-use crate::connection::Connection;
 use fake::Dummy;
 use std::fmt::Debug;
 use std::io::ErrorKind;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
 
-pub(crate) mod configuration;
-pub(crate) mod handshaking;
-pub(crate) mod login;
-pub(crate) mod status;
+pub mod configuration;
+pub mod handshaking;
+pub mod login;
+pub mod status;
 
 pub type VarInt = i32;
 
@@ -334,13 +333,6 @@ pub trait InboundPacket: Packet + Sized {
     async fn new_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
     where
         S: AsyncRead + Unpin + Send + Sync;
-
-    async fn handle<S>(self, _con: &mut Connection<S>) -> Result<(), Error>
-    where
-        S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-    {
-        Ok(())
-    }
 }
 
 /// `AsyncWritePacket` allows writing a specific [`OutboundPacket`] to an [`AsyncWrite`].
@@ -496,7 +488,7 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
 /// Only [`InboundPacket`s](InboundPacket) can be read as only those packets are received. There are additional
 /// methods to read the data that is encoded in a Minecraft-specific manner. Their implementation is analogous to the
 /// [write implementation](AsyncWritePacket).
-pub(crate) trait AsyncReadPacket {
+pub trait AsyncReadPacket {
     /// Reads the supplied [`InboundPacket`] type from this object as described in the official
     /// [protocol documentation][protocol-doc].
     ///
@@ -629,6 +621,12 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
 
         Ok(buffer)
     }
+}
+
+pub trait PacketHandler<T>: Sized {
+    async fn handle(&mut self, packet: T) -> Result<(), Error>
+    where
+        T: Packet;
 }
 
 #[cfg(test)]

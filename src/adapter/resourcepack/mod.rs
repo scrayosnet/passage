@@ -1,5 +1,5 @@
 pub(crate) mod fixed;
-pub(crate) mod none;
+pub mod none;
 
 use crate::protocol::Error;
 use crate::status::Protocol;

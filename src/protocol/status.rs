@@ -1,11 +1,8 @@
-use crate::connection::{Connection, Phase, phase};
 use crate::protocol::{
     AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, OutboundPacket, Packet,
 };
-use crate::status::Protocol;
 use fake::Dummy;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tracing::debug;
 
 pub mod outbound {
     use super::*;
@@ -133,43 +130,6 @@ pub mod inbound {
         {
             Ok(Self)
         }
-
-        async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
-        where
-            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-        {
-            debug!(packet = debug(&self), "received status request packet");
-            phase!(
-                con.phase,
-                Phase::Status,
-                client_address,
-                server_address,
-                server_port,
-                protocol_version,
-            );
-
-            // get status from status supplier
-            let status = con
-                .status_supplier
-                .get_status(
-                    client_address,
-                    (server_address, *server_port),
-                    *protocol_version as Protocol,
-                )
-                .await?;
-
-            // create a new status request packet and send it
-            let json_response = serde_json::to_string(&status)?;
-
-            // create a new status response packet and send it
-            let request = outbound::StatusResponsePacket {
-                body: json_response,
-            };
-            debug!(packet = debug(&request), "sending status response packet");
-            con.write_packet(request).await?;
-
-            Ok(())
-        }
     }
 
     /// The inbound [`PingPacket`].
@@ -207,24 +167,6 @@ pub mod inbound {
             let payload = buffer.read_u64().await?;
 
             Ok(Self { payload })
-        }
-
-        async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
-        where
-            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-        {
-            debug!(packet = debug(&self), "received ping packet");
-            phase!(con.phase, Phase::Status,);
-
-            // create a new pong packet and send it
-            let pong_response = outbound::PongPacket::new(self.payload);
-            debug!(packet = debug(&pong_response), "sending pong packet");
-            con.write_packet(pong_response).await?;
-
-            // close connection
-            con.shutdown();
-
-            Ok(())
         }
     }
 }

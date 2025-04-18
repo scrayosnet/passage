@@ -1,12 +1,9 @@
-use crate::connection::Connection;
-use crate::connection::{Phase, phase};
 use crate::protocol::{
     AsyncReadPacket, AsyncWritePacket, ChatMode, DisplayedSkinParts, Error, InboundPacket,
     MainHand, OutboundPacket, Packet, ParticleStatus, ResourcePackResult,
 };
 use fake::Dummy;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tracing::debug;
 use uuid::Uuid;
 
 pub mod outbound {
@@ -877,20 +874,6 @@ pub mod inbound {
             let id = buffer.read_u64().await?;
             Ok(Self { id })
         }
-
-        async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
-        where
-            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-        {
-            debug!(packet = debug(&self), "received keep alive packet");
-            phase!(con.phase, Phase::Configuration, last_keep_alive,);
-
-            if !last_keep_alive.replace(self.id, 0) {
-                debug!(id = self.id, "keep alive packet id unknown");
-            }
-
-            Ok(())
-        }
     }
 
     /// The inbound [`PongPacket`]. (Placeholder)
@@ -969,55 +952,6 @@ pub mod inbound {
             let result = buffer.read_varint().await?.try_into()?;
 
             Ok(Self { uuid, result })
-        }
-
-        async fn handle<S>(self, con: &mut Connection<S>) -> Result<(), Error>
-        where
-            S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-        {
-            debug!(packet = debug(&self), "received keep alive packet");
-            phase!(con.phase, Phase::Configuration, transit_packs,);
-
-            // check state for any final state in the resource pack loading process
-            let success = match self.result {
-                ResourcePackResult::Success => true,
-                ResourcePackResult::Declined
-                | ResourcePackResult::DownloadFailed
-                | ResourcePackResult::InvalidUrl
-                | ResourcePackResult::ReloadFailed
-                | ResourcePackResult::Discorded => false,
-                _ => {
-                    // pending state, keep waiting
-                    return Ok(());
-                }
-            };
-
-            // pop pack from list (ignoring unknown pack ids)
-            let Some(pos) = transit_packs
-                .iter()
-                .position(|(uuid, _)| uuid == &self.uuid)
-            else {
-                return Ok(());
-            };
-            let (_, forced) = transit_packs.swap_remove(pos);
-
-            // handle pack forced
-            if forced && !success {
-                // TODO write actual reason
-                con.write_packet(outbound::DisconnectPacket {
-                    reason: "".to_string(),
-                })
-                .await?;
-                con.shutdown();
-                return Ok(());
-            }
-
-            // handle all packs transferred
-            if transit_packs.is_empty() {
-                return con.transfer().await;
-            }
-
-            Ok(())
         }
     }
 

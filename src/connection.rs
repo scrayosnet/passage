@@ -2,41 +2,33 @@ use crate::adapter::resourcepack::ResourcepackSupplier;
 use crate::adapter::status::StatusSupplier;
 use crate::adapter::target_selection::TargetSelector;
 use crate::authentication;
-use crate::protocol::configuration::inbound::{
-    AckFinishConfigurationPacket, ClientInformationPacket, KnownPacksPacket, PluginMessagePacket,
-    PongPacket, ResourcePackResponsePacket,
+use crate::protocol::{
+    AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, Packet, PacketHandler,
+    ResourcePackResult, State, VarInt,
 };
-use crate::protocol::configuration::outbound::{DisconnectPacket, TransferPacket};
-use crate::protocol::configuration::{inbound, outbound};
-use crate::protocol::handshaking::inbound::HandshakePacket;
-use crate::protocol::login::inbound::{
-    CookieResponsePacket, EncryptionResponsePacket, LoginAcknowledgedPacket, LoginStartPacket,
-};
-use crate::protocol::status::inbound::{PingPacket, StatusRequestPacket};
-use crate::protocol::{AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, VarInt};
 use crate::status::Protocol;
+use std::fmt::Debug;
 use std::io::Cursor;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, ReadBuf};
 use tokio::sync::mpsc;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 use uuid::Uuid;
+
+use crate::protocol::configuration::inbound as conf_in;
+use crate::protocol::configuration::outbound as conf_out;
+use crate::protocol::handshaking::inbound as hand_in;
+use crate::protocol::login::inbound as login_in;
+use crate::protocol::status::inbound as status_in;
+use crate::protocol::status::outbound as status_out;
 
 /// The max packet length in bytes. Larger packets are rejected.
 const MAX_PACKET_LENGTH: VarInt = 10_000;
-
-macro_rules! handle {
-    ($packet_type:ty, $buffer:expr, $self:expr) => {{
-        let packet = <$packet_type>::new_from_buffer($buffer).await?;
-        debug!(packet = ?packet, "Read packet");
-        packet.handle($self).await
-    }}
-}
 
 #[macro_export]
 macro_rules! phase {
@@ -51,6 +43,8 @@ macro_rules! phase {
 }
 
 use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
+use crate::protocol::login::outbound::CookieRequestPacket;
+use crate::protocol::login::{AUTH_COOKIE_EXPIRY_SECS, AUTH_COOKIE_KEY, AuthCookie};
 use Phase::{Acknowledge, Configuration, Encryption, Handshake, Login, Status, Transfer};
 pub use phase;
 
@@ -174,7 +168,7 @@ impl<S> Connection<S>
 where
     S: AsyncRead + AsyncWrite,
 {
-    pub(crate) fn new(
+    pub fn new(
         stream: S,
         client_address: SocketAddr,
         status_supplier: Arc<dyn StatusSupplier>,
@@ -242,7 +236,7 @@ where
 
         let id = authentication::generate_keep_alive();
         if !last_keep_alive.replace(0, id) {
-            self.write_packet(DisconnectPacket {
+            self.write_packet(conf_out::DisconnectPacket {
                 reason: "Missed Keepalive".to_string(),
             })
             .await?;
@@ -250,7 +244,7 @@ where
             return Ok(());
         }
 
-        let packet = outbound::KeepAlivePacket::new(id);
+        let packet = conf_out::KeepAlivePacket::new(id);
         self.write_packet(packet).await?;
 
         Ok(())
@@ -276,36 +270,79 @@ where
             "Handling packet"
         );
 
-        // split a separate reader from stream and read packet bytes (advancing stream)
+        // split a separate reader from the stream and read packet bytes (advancing stream)
         let mut buffer = vec![];
         self.take(length as u64 - 1)
             .read_to_end(&mut buffer)
             .await?;
-        let buf = &mut Cursor::new(&buffer);
+        let buf = &mut Cursor::new(&mut buffer);
 
-        // deserialize and handle packet based on packet id and phase
+        // deserialize and handle the packet based on its packet id and phase
         match (packet_id, &self.phase) {
-            (0x00, Handshake { .. }) => handle!(HandshakePacket, buf, self),
-            (0x00, Status { .. }) => handle!(StatusRequestPacket, buf, self),
-            // TODO move to separate phase such that order is enforced?
-            (0x01, Status { .. }) => handle!(PingPacket, buf, self),
-            (0x00, Login { .. }) => handle!(LoginStartPacket, buf, self),
-            (0x04, Transfer { .. }) => handle!(CookieResponsePacket, buf, self),
-            (0x01, Encryption { .. }) => handle!(EncryptionResponsePacket, buf, self),
-            //(0x02, Phase::Login { .. }) => handle!(LoginPluginResponsePacket, cursor, self),
-            (0x03, Acknowledge { .. }) => handle!(LoginAcknowledgedPacket, buf, self),
-            (0x00, Configuration { .. }) => handle!(ClientInformationPacket, buf, self),
-            (0x01, Configuration { .. }) => handle!(CookieResponsePacket, buf, self),
-            (0x02, Configuration { .. }) => handle!(PluginMessagePacket, buf, self),
+            (0x00, Handshake { .. }) => {
+                self.handle(hand_in::HandshakePacket::new_from_buffer(buf).await?)
+                    .await
+            }
+            (0x00, Status { .. }) => {
+                self.handle(status_in::StatusRequestPacket::new_from_buffer(buf).await?)
+                    .await
+            }
+            (0x01, Status { .. }) => {
+                self.handle(status_in::PingPacket::new_from_buffer(buf).await?)
+                    .await
+            }
+            (0x00, Login { .. }) => {
+                self.handle(login_in::LoginStartPacket::new_from_buffer(buf).await?)
+                    .await
+            }
+            (0x04, Transfer { .. }) => {
+                self.handle(login_in::CookieResponsePacket::new_from_buffer(buf).await?)
+                    .await
+            }
+            (0x01, Encryption { .. }) => {
+                self.handle(login_in::EncryptionResponsePacket::new_from_buffer(buf).await?)
+                    .await
+            }
+            (0x02, Acknowledge { .. }) => {
+                self.handle(login_in::LoginPluginResponsePacket::new_from_buffer(buf).await?)
+                    .await
+            }
+            (0x03, Acknowledge { .. }) => {
+                self.handle(login_in::LoginAcknowledgedPacket::new_from_buffer(buf).await?)
+                    .await
+            }
+            (0x00, Configuration { .. }) => {
+                self.handle(conf_in::ClientInformationPacket::new_from_buffer(buf).await?)
+                    .await
+            }
+            (0x01, Configuration { .. }) => {
+                self.handle(conf_in::CookieResponsePacket::new_from_buffer(buf).await?)
+                    .await
+            }
+            (0x02, Configuration { .. }) => {
+                self.handle(conf_in::PluginMessagePacket::new_from_buffer(buf).await?)
+                    .await
+            }
             (0x03, Configuration { .. }) => {
-                handle!(AckFinishConfigurationPacket, buf, self)
+                self.handle(conf_in::AckFinishConfigurationPacket::new_from_buffer(buf).await?)
+                    .await
             }
-            (0x04, Configuration { .. }) => handle!(inbound::KeepAlivePacket, buf, self),
-            (0x05, Configuration { .. }) => handle!(PongPacket, buf, self),
+            (0x04, Configuration { .. }) => {
+                self.handle(conf_in::KeepAlivePacket::new_from_buffer(buf).await?)
+                    .await
+            }
+            (0x05, Configuration { .. }) => {
+                self.handle(conf_in::PongPacket::new_from_buffer(buf).await?)
+                    .await
+            }
             (0x06, Configuration { .. }) => {
-                handle!(ResourcePackResponsePacket, buf, self)
+                self.handle(conf_in::ResourcePackResponsePacket::new_from_buffer(buf).await?)
+                    .await
             }
-            (0x07, Configuration { .. }) => handle!(KnownPacksPacket, buf, self),
+            (0x07, Configuration { .. }) => {
+                self.handle(conf_in::KnownPacksPacket::new_from_buffer(buf).await?)
+                    .await
+            }
             // otherwise
             _ => {
                 debug!(
@@ -368,7 +405,7 @@ where
         // disconnect if not target found
         let Some(target) = target else {
             // TODO write actual message
-            self.write_packet(DisconnectPacket {
+            self.write_packet(conf_out::DisconnectPacket {
                 reason: "".to_string(),
             })
             .await?;
@@ -377,7 +414,7 @@ where
         };
 
         // create a new transfer packet and send it
-        let transfer = TransferPacket {
+        let transfer = conf_out::TransferPacket {
             host: target.ip().to_string(),
             port: target.port(),
         };
@@ -425,6 +462,603 @@ where
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.get_mut().stream).poll_read(cx, buf)
+    }
+}
+
+impl<S> PacketHandler<hand_in::HandshakePacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, packet: hand_in::HandshakePacket) -> Result<(), Error>
+    where
+        hand_in::HandshakePacket: Packet,
+    {
+        debug!(packet = ?packet, "received handshake packet");
+        phase!(self.phase, Handshake, client_address,);
+
+        // collect information
+        let client_address = *client_address;
+        let protocol_version = packet.protocol_version;
+        let server_address = packet.server_address.to_string();
+        let server_port = packet.server_port;
+        let transfer = packet.next_state == State::Transfer;
+
+        // switch to the next phase based on state
+        self.phase = match &packet.next_state {
+            State::Status => Status {
+                client_address,
+                server_address,
+                server_port,
+                protocol_version,
+            },
+            _ => Login {
+                client_address,
+                server_address,
+                server_port,
+                protocol_version,
+                transfer,
+            },
+        };
+
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<status_in::StatusRequestPacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, packet: status_in::StatusRequestPacket) -> Result<(), Error>
+    where
+        status_in::StatusRequestPacket: Packet,
+    {
+        debug!(packet = ?packet, "received status request packet");
+        phase!(
+            self.phase,
+            Status,
+            client_address,
+            server_address,
+            server_port,
+            protocol_version,
+        );
+
+        // get status from status supplier
+        let status = self
+            .status_supplier
+            .get_status(
+                client_address,
+                (server_address, *server_port),
+                *protocol_version as Protocol,
+            )
+            .await?;
+
+        // create a new status request packet and send it
+        let json_response = serde_json::to_string(&status)?;
+
+        // create a new status response packet and send it
+        let request = crate::protocol::status::outbound::StatusResponsePacket {
+            body: json_response,
+        };
+        debug!(packet = debug(&request), "sending status response packet");
+        self.write_packet(request).await?;
+
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<status_in::PingPacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, packet: status_in::PingPacket) -> Result<(), Error>
+    where
+        status_in::PingPacket: Packet,
+    {
+        debug!(packet = ?packet, "received ping packet");
+        phase!(self.phase, Status,);
+
+        // create a new pong packet and send it
+        let pong_response = status_out::PongPacket::new(packet.payload);
+        debug!(packet = debug(&pong_response), "sending pong packet");
+        self.write_packet(pong_response).await?;
+
+        // close connection
+        self.shutdown();
+
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<login_in::LoginStartPacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, packet: login_in::LoginStartPacket) -> Result<(), Error>
+    where
+        login_in::LoginStartPacket: Packet,
+    {
+        debug!(packet = ?packet, "received login start packet");
+        phase!(
+            self.phase,
+            Phase::Login,
+            client_address,
+            protocol_version,
+            server_address,
+            server_port,
+            transfer,
+        );
+
+        // handle transfer
+        if *transfer && self.auth_secret.is_some() {
+            // update phase and wait for cookie
+            self.phase = Phase::Transfer {
+                client_address: *client_address,
+                protocol_version: *protocol_version,
+                server_address: server_address.clone(),
+                server_port: *server_port,
+                user_name: packet.user_name.clone(),
+                user_id: packet.user_id,
+            };
+            self.write_packet(CookieRequestPacket {
+                key: AUTH_COOKIE_KEY.to_string(),
+            })
+            .await?;
+            return Ok(());
+        }
+
+        // encode public key and generate verify token
+        let verify_token = authentication::generate_token()?;
+
+        // switch phase to accept encryption response
+        self.phase = Phase::Encryption {
+            client_address: *client_address,
+            protocol_version: *protocol_version,
+            server_address: server_address.clone(),
+            server_port: *server_port,
+            user_name: packet.user_name.clone(),
+            user_id: packet.user_id,
+            verify_token,
+            should_authenticate: true,
+        };
+
+        // create a new encryption request and send it
+        let encryption_request = crate::protocol::login::outbound::EncryptionRequestPacket {
+            server_id: "".to_owned(),
+            public_key: authentication::ENCODED_PUB.clone(),
+            verify_token,
+            should_authenticate: true,
+        };
+        debug!(
+            packet = debug(&encryption_request),
+            "sending encryption request packet"
+        );
+        self.write_packet(encryption_request).await?;
+
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<login_in::CookieResponsePacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, packet: login_in::CookieResponsePacket) -> Result<(), Error>
+    where
+        login_in::CookieResponsePacket: Packet,
+    {
+        debug!(packet = ?packet, "received cookie response packet");
+
+        // only supports auth cookie
+        if packet.key != AUTH_COOKIE_KEY {
+            return Ok(());
+        }
+
+        // get auth cookie secret
+        let Some(secret) = &self.auth_secret else {
+            return Ok(());
+        };
+
+        phase!(
+            self.phase,
+            Phase::Transfer,
+            client_address,
+            protocol_version,
+            server_address,
+            server_port,
+            user_name,
+            user_id,
+        );
+
+        // verify token
+        let mut should_authenticate = true;
+        if let Some(message) = packet.payload {
+            let (ok, message) = authentication::check_sign(&message, secret);
+            if ok {
+                let cookie = serde_json::from_slice::<AuthCookie>(message)?;
+                let expires_at = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("time error")
+                    .as_secs()
+                    + AUTH_COOKIE_EXPIRY_SECS;
+                if cookie.client_addr.ip() == client_address.ip() && cookie.timestamp < expires_at {
+                    should_authenticate = false;
+
+                    // update state by token
+                    *user_name = cookie.user_name;
+                    *user_id = cookie.user_id;
+                }
+            }
+        }
+
+        // encode public key and generate verify token
+        let verify_token = authentication::generate_token()?;
+
+        // switch phase to accept encryption response
+        self.phase = Phase::Encryption {
+            client_address: *client_address,
+            protocol_version: *protocol_version,
+            server_address: server_address.clone(),
+            server_port: *server_port,
+            user_name: user_name.clone(),
+            user_id: *user_id,
+            verify_token,
+            should_authenticate,
+        };
+
+        // create a new encryption request and send it
+        let encryption_request = crate::protocol::login::outbound::EncryptionRequestPacket {
+            server_id: "".to_owned(),
+            public_key: authentication::ENCODED_PUB.clone(),
+            verify_token,
+            should_authenticate,
+        };
+        debug!(
+            packet = debug(&encryption_request),
+            "sending encryption request packet"
+        );
+        self.write_packet(encryption_request).await?;
+
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<login_in::EncryptionResponsePacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, packet: login_in::EncryptionResponsePacket) -> Result<(), Error>
+    where
+        login_in::EncryptionResponsePacket: Packet,
+    {
+        debug!(packet = ?packet, "received encryption response packet");
+        phase!(
+            self.phase,
+            Phase::Encryption,
+            client_address,
+            protocol_version,
+            server_address,
+            server_port,
+            user_name,
+            user_id,
+            verify_token,
+            should_authenticate,
+        );
+
+        // decrypt the shared secret and verify token
+        let shared_secret =
+            authentication::decrypt(&authentication::KEY_PAIR.0, &packet.shared_secret)?;
+        let decrypted_verify_token =
+            authentication::decrypt(&authentication::KEY_PAIR.0, &packet.verify_token)?;
+
+        // verify the token is correct
+        authentication::verify_token(*verify_token, &decrypted_verify_token)?;
+
+        // handle mojang auth if not handled by cookie
+        if *should_authenticate {
+            // get the data for login success
+            let auth_response = authentication::authenticate_mojang(
+                user_name,
+                &shared_secret,
+                &authentication::ENCODED_PUB,
+            )
+            .await;
+
+            let auth_response = match auth_response {
+                Ok(inner) => inner,
+                Err(err) => {
+                    warn!(err = ?err, "mojang auth failed");
+                    // TODO write actual reason
+                    self.write_packet(crate::protocol::login::outbound::DisconnectPacket {
+                        reason: "".to_string(),
+                    })
+                    .await?;
+                    self.shutdown();
+                    return Ok(());
+                }
+            };
+
+            // update state for actual use info
+            *user_name = auth_response.name;
+            *user_id = auth_response.id;
+        }
+
+        // build response packet
+        let login_success = crate::protocol::login::outbound::LoginSuccessPacket {
+            user_name: user_name.clone(),
+            user_id: *user_id,
+        };
+
+        // switch to login-acknowledge phase
+        self.phase = Phase::Acknowledge {
+            client_address: *client_address,
+            protocol_version: *protocol_version,
+            server_address: server_address.clone(),
+            server_port: *server_port,
+            user_name: user_name.clone(),
+            user_id: *user_id,
+            should_write_auth_cookie: *should_authenticate,
+        };
+
+        // enable encryption for the selfnection using the shared secret
+        self.apply_encryption(&shared_secret)?;
+
+        // create a new login success packet and send it
+        debug!(
+            packet = debug(&login_success),
+            "sending login success packet"
+        );
+        self.write_packet(login_success).await?;
+
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<login_in::LoginPluginResponsePacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, _packet: login_in::LoginPluginResponsePacket) -> Result<(), Error>
+    where
+        login_in::LoginPluginResponsePacket: Packet,
+    {
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<login_in::LoginAcknowledgedPacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, packet: login_in::LoginAcknowledgedPacket) -> Result<(), Error>
+    where
+        login_in::LoginAcknowledgedPacket: Packet,
+    {
+        debug!(packet = ?packet, "received login acknowledged packet");
+        phase!(
+            self.phase,
+            Phase::Acknowledge,
+            client_address,
+            protocol_version,
+            server_address,
+            server_port,
+            user_name,
+            user_id,
+            should_write_auth_cookie,
+        );
+        let should_write_auth_cookie = *should_write_auth_cookie;
+
+        // generate auth cookie payload
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time error")
+            .as_secs();
+        let auth_payload = serde_json::to_vec(&AuthCookie {
+            timestamp: now_secs,
+            client_addr: *client_address,
+            user_name: user_name.clone(),
+            user_id: *user_id,
+        })?;
+
+        // get resource packs to load
+        let packs = self
+            .resourcepack_supplier
+            .get_resourcepacks(
+                client_address,
+                (server_address, *server_port),
+                *protocol_version as Protocol,
+                user_name,
+                user_id,
+            )
+            .await?;
+        let pack_ids = packs.iter().map(|pack| (pack.uuid, pack.forced)).collect();
+
+        // switch to configuration phase
+        self.phase = Phase::Configuration {
+            client_address: *client_address,
+            protocol_version: *protocol_version,
+            server_address: server_address.clone(),
+            server_port: *server_port,
+            user_name: user_name.clone(),
+            user_id: *user_id,
+            transit_packs: pack_ids,
+            last_keep_alive: KeepAlive::empty(),
+        };
+
+        // store auth cookie
+        if should_write_auth_cookie {
+            if let Some(secret) = &self.auth_secret {
+                self.write_packet(conf_out::StoreCookiePacket {
+                    key: AUTH_COOKIE_KEY.to_string(),
+                    payload: authentication::sign(&auth_payload, secret),
+                })
+                .await?;
+            }
+        }
+
+        // handle no resource packs to send
+        if packs.is_empty() {
+            return self.transfer().await;
+        }
+
+        // send resource packs
+        for pack in packs {
+            let packet = conf_out::AddResourcePackPacket {
+                uuid: pack.uuid,
+                url: pack.url,
+                hash: pack.hash,
+                forced: pack.forced,
+                prompt_message: pack.prompt_message,
+            };
+            self.write_packet(packet).await?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<conf_in::ClientInformationPacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, _packet: conf_in::ClientInformationPacket) -> Result<(), Error>
+    where
+        conf_in::ClientInformationPacket: Packet,
+    {
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<conf_in::CookieResponsePacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, _packet: conf_in::CookieResponsePacket) -> Result<(), Error>
+    where
+        conf_in::CookieResponsePacket: Packet,
+    {
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<conf_in::PluginMessagePacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, _packet: conf_in::PluginMessagePacket) -> Result<(), Error>
+    where
+        conf_in::PluginMessagePacket: Packet,
+    {
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<conf_in::AckFinishConfigurationPacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, _packet: conf_in::AckFinishConfigurationPacket) -> Result<(), Error>
+    where
+        conf_in::AckFinishConfigurationPacket: Packet,
+    {
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<conf_in::KeepAlivePacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, packet: conf_in::KeepAlivePacket) -> Result<(), Error>
+    where
+        conf_in::KeepAlivePacket: Packet,
+    {
+        debug!(packet = ?packet, "received keep alive packet");
+        phase!(self.phase, Phase::Configuration, last_keep_alive,);
+
+        if !last_keep_alive.replace(packet.id, 0) {
+            debug!(id = packet.id, "keep alive packet id unknown");
+        }
+
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<conf_in::PongPacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, _packet: conf_in::PongPacket) -> Result<(), Error>
+    where
+        conf_in::PongPacket: Packet,
+    {
+        // TODO implement me?
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<conf_in::ResourcePackResponsePacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, packet: conf_in::ResourcePackResponsePacket) -> Result<(), Error>
+    where
+        conf_in::ResourcePackResponsePacket: Packet,
+    {
+        debug!(packet = ?packet, "received keep alive packet");
+        phase!(self.phase, Phase::Configuration, transit_packs,);
+
+        // check the state for any final state in the resource pack loading process
+        let success = match packet.result {
+            ResourcePackResult::Success => true,
+            ResourcePackResult::Declined
+            | ResourcePackResult::DownloadFailed
+            | ResourcePackResult::InvalidUrl
+            | ResourcePackResult::ReloadFailed
+            | ResourcePackResult::Discorded => false,
+            _ => {
+                // pending state, keep waiting
+                return Ok(());
+            }
+        };
+
+        // pop pack from the list (ignoring unknown pack ids)
+        let Some(pos) = transit_packs
+            .iter()
+            .position(|(uuid, _)| uuid == &packet.uuid)
+        else {
+            return Ok(());
+        };
+        let (_, forced) = transit_packs.swap_remove(pos);
+
+        // handle pack forced
+        if forced && !success {
+            // TODO write actual reason
+            self.write_packet(conf_out::DisconnectPacket {
+                reason: "".to_string(),
+            })
+            .await?;
+            self.shutdown();
+            return Ok(());
+        }
+
+        // handle all packs transferred
+        if transit_packs.is_empty() {
+            return self.transfer().await;
+        }
+
+        Ok(())
+    }
+}
+
+impl<S> PacketHandler<conf_in::KnownPacksPacket> for Connection<S>
+where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+    async fn handle(&mut self, _packet: conf_in::KnownPacksPacket) -> Result<(), Error>
+    where
+        conf_in::KnownPacksPacket: Packet,
+    {
+        Ok(())
     }
 }
 
@@ -499,7 +1133,7 @@ mod tests {
 
         // simulate client
         client_stream
-            .write_packet(HandshakePacket {
+            .write_packet(hand_in::HandshakePacket {
                 protocol_version: 0,
                 server_address: "".to_string(),
                 server_port: 0,
@@ -545,7 +1179,7 @@ mod tests {
 
         // simulate client
         client_stream
-            .write_packet(HandshakePacket {
+            .write_packet(hand_in::HandshakePacket {
                 protocol_version: 0,
                 server_address: "".to_string(),
                 server_port: 0,
@@ -555,7 +1189,7 @@ mod tests {
             .expect("send handshake failed");
 
         client_stream
-            .write_packet(StatusRequestPacket)
+            .write_packet(status_in::StatusRequestPacket)
             .await
             .expect("send status request failed");
 
@@ -569,7 +1203,7 @@ mod tests {
         );
 
         client_stream
-            .write_packet(PingPacket { payload: 42 })
+            .write_packet(status_in::PingPacket { payload: 42 })
             .await
             .expect("send ping request failed");
 
@@ -618,7 +1252,7 @@ mod tests {
 
         // simulate client
         client_stream
-            .write_packet(HandshakePacket {
+            .write_packet(hand_in::HandshakePacket {
                 protocol_version: 0,
                 server_address: "".to_string(),
                 server_port: 0,
@@ -628,7 +1262,7 @@ mod tests {
             .expect("send handshake failed");
 
         client_stream
-            .write_packet(LoginStartPacket {
+            .write_packet(login_in::LoginStartPacket {
                 user_name: user_name.clone(),
                 user_id,
             })
@@ -654,7 +1288,7 @@ mod tests {
         .expect("auth cookie serialization failed");
 
         client_stream
-            .write_packet(CookieResponsePacket {
+            .write_packet(login_in::CookieResponsePacket {
                 key: cookie_request_packet.key,
                 payload: Some(authentication::sign(&auth_payload, &auth_secret)),
             })
@@ -672,7 +1306,7 @@ mod tests {
         let enc_shared_secret = encrypt(&pub_key, shared_secret);
         let enc_verify_token = encrypt(&pub_key, &encryption_request_packet.verify_token);
         client_stream
-            .write_packet(EncryptionResponsePacket {
+            .write_packet(login_in::EncryptionResponsePacket {
                 shared_secret: enc_shared_secret,
                 verify_token: enc_verify_token,
             })
@@ -691,12 +1325,12 @@ mod tests {
         assert_eq!(login_success_packet.user_id, user_id);
 
         client_stream
-            .write_packet(LoginAcknowledgedPacket)
+            .write_packet(login_in::LoginAcknowledgedPacket)
             .await
             .expect("send login acknowledged packet failed");
 
         // disconnect as no target configured
-        let _disconnect_packet: DisconnectPacket = client_stream
+        let _disconnect_packet: conf_out::DisconnectPacket = client_stream
             .read_packet()
             .await
             .expect("disconnect packet read failed");

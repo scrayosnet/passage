@@ -1,15 +1,15 @@
 #![deny(clippy::all)]
 #![forbid(unsafe_code)]
 
-mod adapter;
+pub mod adapter;
 pub mod authentication;
-mod cipher_stream;
+pub mod cipher_stream;
 pub mod config;
-mod connection;
-mod protocol;
-mod rate_limiter;
-mod server;
-mod status;
+pub mod connection;
+pub mod protocol;
+pub mod rate_limiter;
+pub mod server;
+pub mod status;
 
 use crate::adapter::target_selection::Target;
 use crate::adapter::target_selection::fixed::FixedTargetSelector;
