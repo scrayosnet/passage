@@ -33,7 +33,7 @@ where
             return false;
         }
 
-        // check whether client is already registered, otherwise add
+        // check whether key is already registered, otherwise add
         let Some(value) = self.entries.get_mut(key) else {
             self.entries
                 .insert(*key, VecDeque::from_iter([Instant::now()]));
@@ -50,7 +50,7 @@ where
             self.size -= 1;
         }
 
-        // check number of recent entries
+        // check the number of recent entries
         if value.len() > self.entry_max_size {
             return false;
         }
@@ -67,7 +67,7 @@ where
         true
     }
 
-    /// Removes all expired timestamps from the entries map.
+    /// Removes all expired timestamps from the entry map.
     fn cleanup(&mut self) {
         let mut expired = vec![];
 

@@ -1,18 +1,18 @@
-use crate::adapter::status::StatusSupplier;
+use crate::adapter::status::{Protocol, ServerStatus, ServerVersion, StatusSupplier};
+use crate::config::ProtocolRange;
 use crate::connection::Error;
-use crate::status::{Protocol, ServerStatus, ServerVersion};
 use async_trait::async_trait;
 use serde_json::value::RawValue;
 use std::net::SocketAddr;
 
 #[derive(Default)]
 pub struct FixedStatusSupplier {
-    protocol: crate::config::Protocol,
+    protocol: ProtocolRange,
     status: Option<ServerStatus>,
 }
 
 impl FixedStatusSupplier {
-    pub fn new(protocol: crate::config::Protocol, status: crate::config::FixedStatus) -> Self {
+    pub fn new(protocol: ProtocolRange, status: crate::config::FixedStatus) -> Self {
         let description = status
             .description
             .and_then(|str| RawValue::from_string(str).ok());

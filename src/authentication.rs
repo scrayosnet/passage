@@ -4,6 +4,7 @@ use cfb8::cipher::KeyIvInit;
 use hmac::{Hmac, Mac};
 use lazy_static::lazy_static;
 use num_bigint::BigInt;
+use packets::VerifyToken;
 use rand::rngs::OsRng;
 use rand::{Rng, RngCore};
 use rsa::pkcs8::EncodePublicKey;
@@ -104,8 +105,6 @@ pub fn encode_public_key(key: &RsaPublicKey) -> Result<Vec<u8>, Error> {
 pub fn decrypt(key: &RsaPrivateKey, value: &[u8]) -> Result<Vec<u8>, Error> {
     Ok(key.decrypt(Pkcs1v15Encrypt, value)?)
 }
-
-pub type VerifyToken = [u8; 32];
 
 pub fn generate_token() -> Result<VerifyToken, Error> {
     // retrieve a new mutable instance of an OS RNG

@@ -40,7 +40,8 @@
 //! let config: Config = Config::new()?;
 //! ```
 
-use crate::status;
+use crate::adapter;
+use adapter::status::Protocol;
 use config::{
     ConfigError, Environment, File, FileFormat, FileStoredFormat, Format, Map, Value, ValueKind,
 };
@@ -96,12 +97,12 @@ pub struct RateLimiter {
     pub size: usize,
 }
 
-/// [Protocol] hold the protocol limitation and
+/// [ProtocolRange] hold the protocol limitation and
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct Protocol {
-    pub preferred: status::Protocol,
-    pub min: status::Protocol,
-    pub max: status::Protocol,
+pub struct ProtocolRange {
+    pub preferred: Protocol,
+    pub min: Protocol,
+    pub max: Protocol,
 }
 
 /// [Status] hold the status (ping) configuration.
@@ -188,7 +189,7 @@ pub struct Config {
     pub auth_secret: Option<String>,
 
     /// The supported protocol version.
-    pub protocol: Protocol,
+    pub protocol: ProtocolRange,
 
     /// The status (ping) configuration.
     pub status: Status,

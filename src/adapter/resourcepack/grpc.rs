@@ -1,14 +1,15 @@
 use crate::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
+use crate::adapter::status::Protocol;
 use crate::connection::Error;
-use crate::status::Protocol;
 use async_trait::async_trait;
+use std::net::SocketAddr;
 use uuid::Uuid;
 
 #[derive(Default)]
-pub struct NoneResourcePackSupplier;
+pub struct GrpcResourcePackSupplier;
 
 #[async_trait]
-impl ResourcepackSupplier for NoneResourcePackSupplier {
+impl ResourcepackSupplier for GrpcResourcePackSupplier {
     async fn get_resourcepacks(
         &self,
         _client_addr: &SocketAddr,

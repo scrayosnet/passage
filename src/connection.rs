@@ -1,9 +1,8 @@
 use crate::adapter::resourcepack::ResourcepackSupplier;
-use crate::adapter::status::StatusSupplier;
+use crate::adapter::status::{Protocol, StatusSupplier};
 use crate::adapter::target_selection::TargetSelector;
 use crate::authentication;
 use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
-use crate::status::Protocol;
 use Phase::{Acknowledge, Configuration, Encryption, Handshake, Login, Status, Transfer};
 use packets::{
     AsyncReadPacket, AsyncWritePacket, Packet, ReadPacket, ResourcePackResult, State, VarInt,
@@ -1108,8 +1107,8 @@ where
 mod tests {
     use super::*;
     use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
+    use crate::adapter::status::ServerStatus;
     use crate::adapter::target_selection::none::NoneTargetSelector;
-    use crate::status::ServerStatus;
     use async_trait::async_trait;
     use rand::rngs::OsRng;
     use rsa::pkcs8::DecodePublicKey;

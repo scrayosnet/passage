@@ -1,8 +1,8 @@
 pub mod fixed;
 pub mod none;
 
+use crate::adapter::status::Protocol;
 use crate::connection::Error;
-use crate::status::Protocol;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::net::SocketAddr;

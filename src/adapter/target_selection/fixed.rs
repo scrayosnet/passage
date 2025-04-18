@@ -1,7 +1,7 @@
+use crate::adapter::status::Protocol;
 use crate::adapter::target_selection::{Target, TargetSelector};
 use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::connection::Error;
-use crate::status::Protocol;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 use std::sync::Arc;

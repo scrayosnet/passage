@@ -1,13 +1,13 @@
-use crate::adapter::status::StatusSupplier;
+use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
 use crate::connection::Error;
-use crate::status::{Protocol, ServerStatus};
 use async_trait::async_trait;
+use std::net::SocketAddr;
 
 #[derive(Default)]
-pub struct HiddenStatusSupplier;
+pub struct GrpcStatusSupplier;
 
 #[async_trait]
-impl StatusSupplier for HiddenStatusSupplier {
+impl StatusSupplier for GrpcStatusSupplier {
     async fn get_status(
         &self,
         _client_addr: &SocketAddr,
