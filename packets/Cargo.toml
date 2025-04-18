@@ -1,5 +1,5 @@
 [package]
-name = "passage-packets"
+name = "packets"
 description = "Minecraft Server Packets for Passage"
 version = "0.1.0"
 authors = [

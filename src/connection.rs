@@ -2,11 +2,13 @@ use crate::adapter::resourcepack::ResourcepackSupplier;
 use crate::adapter::status::StatusSupplier;
 use crate::adapter::target_selection::TargetSelector;
 use crate::authentication;
-use crate::protocol::{
-    AsyncReadPacket, AsyncWritePacket, Error, InboundPacket, Packet, PacketHandler,
-    ResourcePackResult, State, VarInt,
-};
+use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
 use crate::status::Protocol;
+use Phase::{Acknowledge, Configuration, Encryption, Handshake, Login, Status, Transfer};
+use packets::{
+    AsyncReadPacket, AsyncWritePacket, Packet, ReadPacket, ResourcePackResult, State, VarInt,
+};
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::net::SocketAddr;
@@ -20,15 +22,59 @@ use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
-use crate::protocol::configuration::inbound as conf_in;
-use crate::protocol::configuration::outbound as conf_out;
-use crate::protocol::handshaking::inbound as hand_in;
-use crate::protocol::login::inbound as login_in;
-use crate::protocol::status::inbound as status_in;
-use crate::protocol::status::outbound as status_out;
+use packets::configuration::clientbound as conf_out;
+use packets::configuration::serverbound as conf_in;
+use packets::handshake::serverbound as hand_in;
+use packets::login::clientbound as login_out;
+use packets::login::serverbound as login_in;
+use packets::status::clientbound as status_out;
+use packets::status::serverbound as status_in;
 
 /// The max packet length in bytes. Larger packets are rejected.
 const MAX_PACKET_LENGTH: VarInt = 10_000;
+
+pub const AUTH_COOKIE_KEY: &str = "passage:authentication";
+pub const AUTH_COOKIE_EXPIRY_SECS: u64 = 6 * 60 * 60; // 6 hours
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    /// An error occurred while reading or writing to the underlying byte stream.
+    #[error("error reading or writing data: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// The JSON version of a packet content could not be encoded.
+    #[error("invalid struct for JSON (encoding problem)")]
+    EncodingFail(#[from] serde_json::Error),
+
+    /// Some crypto/authentication request failed.
+    #[error("could not encrypt connection: {0}")]
+    CryptographyFailed(#[from] authentication::Error),
+
+    /// Some packet error.
+    #[error("{0}")]
+    PacketError(#[from] packets::Error),
+
+    /// The packet handle was called while in an unexpected phase.
+    #[error("invalid state: {actual} (expected {expected})")]
+    InvalidState {
+        expected: &'static str,
+        actual: &'static str,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AuthCookie {
+    pub timestamp: u64,
+    pub client_addr: SocketAddr,
+    pub user_name: String,
+    pub user_id: Uuid,
+}
+
+trait PacketHandler<T>: Sized {
+    async fn handle(&mut self, packet: T) -> Result<(), Error>
+    where
+        T: Packet;
+}
 
 #[macro_export]
 macro_rules! phase {
@@ -41,12 +87,6 @@ macro_rules! phase {
         };
     }
 }
-
-use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
-use crate::protocol::login::outbound::CookieRequestPacket;
-use crate::protocol::login::{AUTH_COOKIE_EXPIRY_SECS, AUTH_COOKIE_KEY, AuthCookie};
-use Phase::{Acknowledge, Configuration, Encryption, Handshake, Login, Status, Transfer};
-pub use phase;
 
 #[derive(Debug)]
 pub enum Phase {
@@ -217,7 +257,7 @@ where
                         if err.is_connection_closed() {
                             break
                         }
-                        return Err(err);
+                        return Err(Error::PacketError(err));
                     }
                 },
             }
@@ -257,7 +297,7 @@ where
                 length,
                 "packet length should be between 0 and {MAX_PACKET_LENGTH}"
             );
-            return Err(Error::IllegalPacketLength);
+            return Err(Error::PacketError(packets::Error::IllegalPacketLength));
         }
 
         // extract the encoded packet id
@@ -280,67 +320,67 @@ where
         // deserialize and handle the packet based on its packet id and phase
         match (packet_id, &self.phase) {
             (0x00, Handshake { .. }) => {
-                self.handle(hand_in::HandshakePacket::new_from_buffer(buf).await?)
+                self.handle(hand_in::HandshakePacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x00, Status { .. }) => {
-                self.handle(status_in::StatusRequestPacket::new_from_buffer(buf).await?)
+                self.handle(status_in::StatusRequestPacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x01, Status { .. }) => {
-                self.handle(status_in::PingPacket::new_from_buffer(buf).await?)
+                self.handle(status_in::PingPacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x00, Login { .. }) => {
-                self.handle(login_in::LoginStartPacket::new_from_buffer(buf).await?)
+                self.handle(login_in::LoginStartPacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x04, Transfer { .. }) => {
-                self.handle(login_in::CookieResponsePacket::new_from_buffer(buf).await?)
+                self.handle(login_in::CookieResponsePacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x01, Encryption { .. }) => {
-                self.handle(login_in::EncryptionResponsePacket::new_from_buffer(buf).await?)
+                self.handle(login_in::EncryptionResponsePacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x02, Acknowledge { .. }) => {
-                self.handle(login_in::LoginPluginResponsePacket::new_from_buffer(buf).await?)
+                self.handle(login_in::LoginPluginResponsePacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x03, Acknowledge { .. }) => {
-                self.handle(login_in::LoginAcknowledgedPacket::new_from_buffer(buf).await?)
+                self.handle(login_in::LoginAcknowledgedPacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x00, Configuration { .. }) => {
-                self.handle(conf_in::ClientInformationPacket::new_from_buffer(buf).await?)
+                self.handle(conf_in::ClientInformationPacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x01, Configuration { .. }) => {
-                self.handle(conf_in::CookieResponsePacket::new_from_buffer(buf).await?)
+                self.handle(conf_in::CookieResponsePacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x02, Configuration { .. }) => {
-                self.handle(conf_in::PluginMessagePacket::new_from_buffer(buf).await?)
+                self.handle(conf_in::PluginMessagePacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x03, Configuration { .. }) => {
-                self.handle(conf_in::AckFinishConfigurationPacket::new_from_buffer(buf).await?)
+                self.handle(conf_in::AckFinishConfigurationPacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x04, Configuration { .. }) => {
-                self.handle(conf_in::KeepAlivePacket::new_from_buffer(buf).await?)
+                self.handle(conf_in::KeepAlivePacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x05, Configuration { .. }) => {
-                self.handle(conf_in::PongPacket::new_from_buffer(buf).await?)
+                self.handle(conf_in::PongPacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x06, Configuration { .. }) => {
-                self.handle(conf_in::ResourcePackResponsePacket::new_from_buffer(buf).await?)
+                self.handle(conf_in::ResourcePackResponsePacket::read_from_buffer(buf).await?)
                     .await
             }
             (0x07, Configuration { .. }) => {
-                self.handle(conf_in::KnownPacksPacket::new_from_buffer(buf).await?)
+                self.handle(conf_in::KnownPacksPacket::read_from_buffer(buf).await?)
                     .await
             }
             // otherwise
@@ -421,7 +461,7 @@ where
         debug!(packet = debug(&transfer), "sending transfer packet");
         self.write_packet(transfer).await?;
 
-        // start graceful shutdown
+        // graceful shutdown
         self.shutdown();
 
         Ok(())
@@ -536,7 +576,7 @@ where
         let json_response = serde_json::to_string(&status)?;
 
         // create a new status response packet and send it
-        let request = crate::protocol::status::outbound::StatusResponsePacket {
+        let request = status_out::StatusResponsePacket {
             body: json_response,
         };
         debug!(packet = debug(&request), "sending status response packet");
@@ -558,7 +598,9 @@ where
         phase!(self.phase, Status,);
 
         // create a new pong packet and send it
-        let pong_response = status_out::PongPacket::new(packet.payload);
+        let pong_response = status_out::PongPacket {
+            payload: packet.payload,
+        };
         debug!(packet = debug(&pong_response), "sending pong packet");
         self.write_packet(pong_response).await?;
 
@@ -599,7 +641,7 @@ where
                 user_name: packet.user_name.clone(),
                 user_id: packet.user_id,
             };
-            self.write_packet(CookieRequestPacket {
+            self.write_packet(login_out::CookieRequestPacket {
                 key: AUTH_COOKIE_KEY.to_string(),
             })
             .await?;
@@ -622,7 +664,7 @@ where
         };
 
         // create a new encryption request and send it
-        let encryption_request = crate::protocol::login::outbound::EncryptionRequestPacket {
+        let encryption_request = login_out::EncryptionRequestPacket {
             server_id: "".to_owned(),
             public_key: authentication::ENCODED_PUB.clone(),
             verify_token,
@@ -706,7 +748,7 @@ where
         };
 
         // create a new encryption request and send it
-        let encryption_request = crate::protocol::login::outbound::EncryptionRequestPacket {
+        let encryption_request = login_out::EncryptionRequestPacket {
             server_id: "".to_owned(),
             public_key: authentication::ENCODED_PUB.clone(),
             verify_token,
@@ -768,7 +810,7 @@ where
                 Err(err) => {
                     warn!(err = ?err, "mojang auth failed");
                     // TODO write actual reason
-                    self.write_packet(crate::protocol::login::outbound::DisconnectPacket {
+                    self.write_packet(login_out::DisconnectPacket {
                         reason: "".to_string(),
                     })
                     .await?;
@@ -783,7 +825,7 @@ where
         }
 
         // build response packet
-        let login_success = crate::protocol::login::outbound::LoginSuccessPacket {
+        let login_success = login_out::LoginSuccessPacket {
             user_name: user_name.clone(),
             user_id: *user_id,
         };
@@ -1067,12 +1109,6 @@ mod tests {
     use super::*;
     use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
     use crate::adapter::target_selection::none::NoneTargetSelector;
-    use crate::protocol::login::outbound::{
-        CookieRequestPacket, EncryptionRequestPacket, LoginSuccessPacket,
-    };
-    use crate::protocol::login::{AUTH_COOKIE_KEY, AuthCookie};
-    use crate::protocol::status::outbound::StatusResponsePacket;
-    use crate::protocol::{State, status};
     use crate::status::ServerStatus;
     use async_trait::async_trait;
     use rand::rngs::OsRng;
@@ -1193,7 +1229,7 @@ mod tests {
             .await
             .expect("send status request failed");
 
-        let status_response_packet: StatusResponsePacket = client_stream
+        let status_response_packet: status_out::StatusResponsePacket = client_stream
             .read_packet()
             .await
             .expect("status response packet read failed");
@@ -1207,7 +1243,7 @@ mod tests {
             .await
             .expect("send ping request failed");
 
-        let pong_packet: status::outbound::PongPacket = client_stream
+        let pong_packet: status_out::PongPacket = client_stream
             .read_packet()
             .await
             .expect("pong packet read failed");
@@ -1269,7 +1305,7 @@ mod tests {
             .await
             .expect("send login start failed");
 
-        let cookie_request_packet: CookieRequestPacket = client_stream
+        let cookie_request_packet: login_out::CookieRequestPacket = client_stream
             .read_packet()
             .await
             .expect("cookie request packet read failed");
@@ -1295,7 +1331,7 @@ mod tests {
             .await
             .expect("send cookie response failed");
 
-        let encryption_request_packet: EncryptionRequestPacket = client_stream
+        let encryption_request_packet: login_out::EncryptionRequestPacket = client_stream
             .read_packet()
             .await
             .expect("encryption request packet read failed");
@@ -1317,7 +1353,7 @@ mod tests {
             authentication::create_ciphers(shared_secret).expect("create ciphers failed");
         let mut client_stream = CipherStream::new(client_stream, Some(encryptor), Some(decryptor));
 
-        let login_success_packet: LoginSuccessPacket = client_stream
+        let login_success_packet: login_out::LoginSuccessPacket = client_stream
             .read_packet()
             .await
             .expect("login success packet read failed");

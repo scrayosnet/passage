@@ -97,7 +97,7 @@ pub mod clientbound {
     #[cfg_attr(test, derive(Dummy))]
     pub struct DisconnectPacket {
         /// The text component containing the reason of the disconnect.
-        pub(crate) reason: String,
+        pub reason: String,
     }
 
     impl Packet for DisconnectPacket {

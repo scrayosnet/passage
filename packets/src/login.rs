@@ -24,7 +24,7 @@ pub mod clientbound {
     #[cfg_attr(test, derive(Dummy))]
     pub struct DisconnectPacket {
         /// The JSON text component containing the reason of the disconnect.
-        pub(crate) reason: String,
+        pub reason: String,
     }
 
     impl Packet for DisconnectPacket {
@@ -283,7 +283,6 @@ pub mod clientbound {
 
 pub mod serverbound {
     use super::*;
-    use crate::VerifyToken;
     #[cfg(feature = "server")]
     use crate::{AsyncReadPacket, ReadPacket};
     #[cfg(feature = "client")]
@@ -346,7 +345,7 @@ pub mod serverbound {
     #[cfg_attr(test, derive(Dummy))]
     pub struct EncryptionResponsePacket {
         pub shared_secret: Vec<u8>,
-        pub verify_token: VerifyToken,
+        pub verify_token: Vec<u8>,
     }
 
     impl Packet for EncryptionResponsePacket {
@@ -375,11 +374,7 @@ pub mod serverbound {
             S: AsyncRead + Unpin + Send + Sync,
         {
             let shared_secret = reader.read_bytes().await?;
-            let verify_token = reader
-                .read_bytes()
-                .await?
-                .try_into()
-                .map_err(|_| Error::ArrayConversionFailed)?;
+            let verify_token = reader.read_bytes().await?;
 
             Ok(Self {
                 shared_secret,

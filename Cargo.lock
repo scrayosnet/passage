@@ -1079,6 +1079,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
+name = "packets"
+version = "0.1.0"
+dependencies = [
+ "fake",
+ "thiserror 2.0.11",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "passage"
 version = "0.1.0"
 dependencies = [
@@ -1090,6 +1100,7 @@ dependencies = [
  "hmac",
  "lazy_static",
  "num-bigint",
+ "packets",
  "rand 0.8.5",
  "reqwest",
  "rsa",
@@ -1103,16 +1114,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "passage-packets"
-version = "0.1.0"
-dependencies = [
- "fake",
- "thiserror 2.0.11",
- "tokio",
  "uuid",
 ]
 

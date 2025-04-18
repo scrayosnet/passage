@@ -1,6 +1,7 @@
 #[cfg(test)]
 use fake::Dummy;
 use std::fmt::Debug;
+use std::io::ErrorKind;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
@@ -59,6 +60,18 @@ pub enum Error {
     /// Some array conversion failed.
     #[error("could not convert into array")]
     ArrayConversionFailed,
+}
+
+impl Error {
+    pub fn is_connection_closed(&self) -> bool {
+        let Error::Io(err) = self else {
+            return false;
+        };
+        err.kind() == ErrorKind::UnexpectedEof
+            || err.kind() == ErrorKind::ConnectionReset
+            || err.kind() == ErrorKind::ConnectionAborted
+            || err.kind() == ErrorKind::BrokenPipe
+    }
 }
 
 /// State is the desired state that the connection should be in after the initial handshake.
@@ -290,7 +303,7 @@ pub trait Packet {
 /// `WritePacket`s are packets that can be written to a buffer.
 pub trait WritePacket: Packet {
     /// Writes the data from this packet into the supplied [`S`].
-    fn write_to_buffer<S>(&self, buffer: &mut S) -> impl Future<Output=Result<(), Error>>
+    fn write_to_buffer<S>(&self, buffer: &mut S) -> impl Future<Output = Result<(), Error>>
     where
         S: AsyncWrite + Unpin + Send + Sync;
 }
@@ -298,7 +311,7 @@ pub trait WritePacket: Packet {
 /// `ReadPacket`s are packets that can be read from a buffer.
 pub trait ReadPacket: Packet + Sized {
     /// Creates a new instance of this packet with the data from the buffer.
-    fn read_from_buffer<S>(buffer: &mut S) -> impl Future<Output=Result<Self, Error>>
+    fn read_from_buffer<S>(buffer: &mut S) -> impl Future<Output = Result<Self, Error>>
     where
         S: AsyncRead + Unpin + Send + Sync;
 }
@@ -315,42 +328,42 @@ pub trait AsyncWritePacket {
     fn write_packet<T: WritePacket + Send + Sync + Debug>(
         &mut self,
         packet: T,
-    ) -> impl Future<Output=Result<(), Error>>;
+    ) -> impl Future<Output = Result<(), Error>>;
 
     /// Writes a [`VarInt`] onto this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
-    fn write_varint(&mut self, int: VarInt) -> impl Future<Output=Result<(), Error>>;
+    fn write_varint(&mut self, int: VarInt) -> impl Future<Output = Result<(), Error>>;
 
     /// Writes a [`VarLong`] onto this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
-    fn write_varlong(&mut self, int: VarLong) -> impl Future<Output=Result<(), Error>>;
+    fn write_varlong(&mut self, int: VarLong) -> impl Future<Output = Result<(), Error>>;
 
     /// Writes a `String` onto this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:String
-    fn write_string(&mut self, string: &str) -> impl Future<Output=Result<(), Error>>;
+    fn write_string(&mut self, string: &str) -> impl Future<Output = Result<(), Error>>;
 
     /// Writes a `Uuid` onto this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:UUID
-    fn write_uuid(&mut self, uuid: &Uuid) -> impl Future<Output=Result<(), Error>>;
+    fn write_uuid(&mut self, uuid: &Uuid) -> impl Future<Output = Result<(), Error>>;
 
     /// Writes a `bool` onto this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Boolean
-    fn write_bool(&mut self, bool: bool) -> impl Future<Output=Result<(), Error>>;
+    fn write_bool(&mut self, bool: bool) -> impl Future<Output = Result<(), Error>>;
 
     /// Writes a string TextComponent onto this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Java_Edition_protocol#Type:Text_Component
-    fn write_text_component(&mut self, str: &str) -> impl Future<Output=Result<(), Error>>;
+    fn write_text_component(&mut self, str: &str) -> impl Future<Output = Result<(), Error>>;
 
     /// Writes a vec of `u8` onto this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Prefixed_Array
-    fn write_bytes(&mut self, arr: &[u8]) -> impl Future<Output=Result<(), Error>>;
+    fn write_bytes(&mut self, arr: &[u8]) -> impl Future<Output = Result<(), Error>>;
 }
 
 /// `AsyncReadPacket` allows reading a specific [`ReadPacket`] from an [`AsyncWrite`].
@@ -365,42 +378,42 @@ pub trait AsyncReadPacket {
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Packet_format
     fn read_packet<T: ReadPacket + Send + Sync>(
         &mut self,
-    ) -> impl Future<Output=Result<T, Error>>;
+    ) -> impl Future<Output = Result<T, Error>>;
 
     /// Reads a [`VarInt`] from this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
-    fn read_varint(&mut self) -> impl Future<Output=Result<VarInt, Error>>;
+    fn read_varint(&mut self) -> impl Future<Output = Result<VarInt, Error>>;
 
     /// Reads a [`VarLong`] from this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
-    fn read_varlong(&mut self) -> impl Future<Output=Result<VarLong, Error>>;
+    fn read_varlong(&mut self) -> impl Future<Output = Result<VarLong, Error>>;
 
     /// Reads a `String` from this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:String
-    fn read_string(&mut self) -> impl Future<Output=Result<String, Error>>;
+    fn read_string(&mut self) -> impl Future<Output = Result<String, Error>>;
 
     /// Reads a `bool` from this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Boolean
-    fn read_bool(&mut self) -> impl Future<Output=Result<bool, Error>>;
+    fn read_bool(&mut self) -> impl Future<Output = Result<bool, Error>>;
 
     /// Reads a `Uuid` from this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:UUID
-    fn read_uuid(&mut self) -> impl Future<Output=Result<Uuid, Error>>;
+    fn read_uuid(&mut self) -> impl Future<Output = Result<Uuid, Error>>;
 
     /// Reads a string TextComponent from this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Java_Edition_protocol#Type:Text_Component
-    fn read_text_component(&mut self) -> impl Future<Output=Result<String, Error>>;
+    fn read_text_component(&mut self) -> impl Future<Output = Result<String, Error>>;
 
     /// Reads a vec of `u8` from this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Prefixed_Array
-    fn read_bytes(&mut self) -> impl Future<Output=Result<Vec<u8>, Error>>;
+    fn read_bytes(&mut self) -> impl Future<Output = Result<Vec<u8>, Error>>;
 }
 
 #[cfg(test)]

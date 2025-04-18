@@ -6,7 +6,6 @@ pub mod authentication;
 pub mod cipher_stream;
 pub mod config;
 pub mod connection;
-pub mod protocol;
 pub mod rate_limiter;
 pub mod server;
 pub mod status;

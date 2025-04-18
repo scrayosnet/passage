@@ -109,6 +109,7 @@ pub mod serverbound {
     use tokio::io::AsyncRead;
     #[cfg(feature = "client")]
     use tokio::io::AsyncWrite;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     /// The [`StatusRequestPacket`].
     ///
@@ -143,6 +144,46 @@ pub mod serverbound {
             S: AsyncRead + Unpin + Send + Sync,
         {
             Ok(Self)
+        }
+    }
+
+    /// The [`PingPacket`].
+    ///
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Ping_Request_(status))
+    #[derive(Debug, Clone, Eq, PartialEq)]
+    #[cfg_attr(test, derive(Dummy))]
+    pub struct PingPacket {
+        /// The arbitrary payload that will be returned from the server (to identify the corresponding request).
+        pub payload: u64,
+    }
+
+    impl Packet for PingPacket {
+        fn get_packet_id() -> usize {
+            0x01
+        }
+    }
+
+    #[cfg(feature = "client")]
+    impl WritePacket for PingPacket {
+        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
+        where
+            S: AsyncWrite + Unpin + Send + Sync,
+        {
+            buffer.write_u64(self.payload).await?;
+
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "server")]
+    impl ReadPacket for PingPacket {
+        async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
+        where
+            S: AsyncRead + Unpin + Send + Sync,
+        {
+            let payload = buffer.read_u64().await?;
+
+            Ok(Self { payload })
         }
     }
 }

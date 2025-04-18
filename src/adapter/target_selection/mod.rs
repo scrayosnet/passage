@@ -1,7 +1,7 @@
 pub mod fixed;
 pub mod none;
 
-use crate::protocol::Error;
+use crate::connection::Error;
 use crate::status::Protocol;
 use async_trait::async_trait;
 use std::collections::HashMap;

@@ -1,5 +1,5 @@
 use crate::adapter::status::StatusSupplier;
-use crate::protocol::Error;
+use crate::connection::Error;
 use crate::status::{Protocol, ServerStatus};
 use async_trait::async_trait;
 
