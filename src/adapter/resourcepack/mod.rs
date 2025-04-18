@@ -4,7 +4,7 @@ pub mod none;
 use crate::connection::Error;
 use crate::status::Protocol;
 use async_trait::async_trait;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use uuid::Uuid;
 
@@ -20,7 +20,7 @@ pub trait ResourcepackSupplier: Send + Sync {
     ) -> Result<Vec<Resourcepack>, Error>;
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Resourcepack {
     pub uuid: Uuid,
     pub url: String,

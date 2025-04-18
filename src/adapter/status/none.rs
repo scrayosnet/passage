@@ -5,10 +5,10 @@ use async_trait::async_trait;
 use std::net::SocketAddr;
 
 #[derive(Default)]
-pub struct HiddenStatusSupplier;
+pub struct NoneStatusSupplier;
 
 #[async_trait]
-impl StatusSupplier for HiddenStatusSupplier {
+impl StatusSupplier for NoneStatusSupplier {
     async fn get_status(
         &self,
         _client_addr: &SocketAddr,

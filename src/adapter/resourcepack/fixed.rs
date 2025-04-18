@@ -3,10 +3,18 @@ use crate::connection::Error;
 use crate::status::Protocol;
 use async_trait::async_trait;
 use std::net::SocketAddr;
-use uuid::{Uuid, uuid};
+use uuid::Uuid;
 
 #[derive(Default)]
-pub struct FixedResourcePackSupplier;
+pub struct FixedResourcePackSupplier {
+    pub packs: Vec<Resourcepack>,
+}
+
+impl FixedResourcePackSupplier {
+    pub fn new(packs: Vec<Resourcepack>) -> Self {
+        Self { packs }
+    }
+}
 
 #[async_trait]
 impl ResourcepackSupplier for FixedResourcePackSupplier {
@@ -18,12 +26,6 @@ impl ResourcepackSupplier for FixedResourcePackSupplier {
         _username: &str,
         _user_id: &Uuid,
     ) -> Result<Vec<Resourcepack>, Error> {
-        Ok(vec![Resourcepack {
-            uuid: uuid!("9c09eef4-f68d-4387-9751-72bbff53d5a0"),
-            url: "https://impackable.justchunks.net/download/67e3e6e8704c701ec3cf5f8b".to_string(),
-            hash: "c7affa49facf2b14238f1d2f7f04d7d0360bdb1d".to_string(),
-            forced: true,
-            prompt_message: Some("Please install!".to_string()),
-        }])
+        Ok(self.packs.clone())
     }
 }

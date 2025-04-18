@@ -1,7 +1,8 @@
+use packets::VarInt;
 use serde::Serialize;
 use serde_json::value::RawValue;
 
-pub type Protocol = i32;
+pub type Protocol = VarInt;
 
 /// The information on the protocol version of a server.
 #[derive(Debug, Serialize, Clone)]

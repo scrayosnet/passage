@@ -109,6 +109,18 @@ pub struct Protocol {
 pub struct Status {
     /// Adapter to retrieve the results.
     pub adapter: String,
+
+    /// The config for the fixed status.
+    pub fixed: Option<FixedStatus>,
+}
+
+/// [FixedStatus] hold the fixed status (ping) configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FixedStatus {
+    pub name: String,
+    pub description: Option<String>,
+    pub favicon: Option<String>,
+    pub enforces_secure_chat: Option<bool>,
 }
 
 /// [Resourcepack] hold the resourcepack configuration.
@@ -116,6 +128,15 @@ pub struct Status {
 pub struct Resourcepack {
     /// Adapter to retrieve the results.
     pub adapter: String,
+
+    pub fixed: Option<FixedResourcepack>,
+}
+
+/// [Resourcepack] hold the resourcepack configuration for a fixed set of packs.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FixedResourcepack {
+    /// Adapter to retrieve the results.
+    pub packs: Vec<crate::adapter::resourcepack::Resourcepack>,
 }
 
 /// [Target] hold the target discovery configuration.
@@ -123,6 +144,15 @@ pub struct Resourcepack {
 pub struct Target {
     /// Adapter to retrieve the results.
     pub adapter: String,
+
+    pub fixed: Option<FixedTarget>,
+}
+
+/// [FixedTarget] hold the target discovery configuration for a fixed target.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FixedTarget {
+    pub identifier: String,
+    pub address: SocketAddr,
 }
 
 /// [TargetStrategy] hold the target strategy configuration.

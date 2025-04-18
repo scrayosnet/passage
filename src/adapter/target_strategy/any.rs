@@ -6,27 +6,7 @@ use async_trait::async_trait;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-pub struct AnyTargetSelectorStrategy {
-    target: Option<SocketAddr>,
-}
-
-impl Default for AnyTargetSelectorStrategy {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl AnyTargetSelectorStrategy {
-    pub fn new() -> Self {
-        Self { target: None }
-    }
-
-    pub fn from_target(target: impl Into<SocketAddr>) -> Self {
-        Self {
-            target: Some(target.into()),
-        }
-    }
-}
+pub struct AnyTargetSelectorStrategy;
 
 #[async_trait]
 impl TargetSelectorStrategy for AnyTargetSelectorStrategy {

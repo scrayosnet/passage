@@ -4,9 +4,9 @@ address = "0.0.0.0:25565"
 timeout = 120
 
 [protocol]
-preferred = 0
+preferred = 769
 min = 0
-max = 0
+max = 1_000
 
 [sentry]
 enabled = false
@@ -25,17 +25,30 @@ enabled = true
 duration = 60
 size = 60
 
-[resourcepack]
-adapter = "none"
-
 [status]
-adapter = "none"
+adapter = "fixed"
 
-[target]
-adapter = "none"
-
-[target.fixed]
-target = "116.202.130.184:26426"
+[status.fixed]
+name = "Passage"
+description = "Minecraft Server Transfer Router"
+enforces_secure_chat = true
 
 [target_strategy]
-adapter = "none"
+adapter = "any"
+
+[target]
+adapter = "fixed"
+
+[target.fixed]
+identifier = "passage-test"
+address = "116.202.130.184:26426"
+
+[resourcepack]
+adapter = "fixed"
+
+[[resourcepack.fixed.packs]]
+uuid = "9c09eef4-f68d-4387-9751-72bbff53d5a0"
+url = "https://impackable.justchunks.net/download/67e3e6e8704c701ec3cf5f8b"
+hash = "c7affa49facf2b14238f1d2f7f04d7d0360bdb1d"
+forced = true
+prompt_message = "Please install!"

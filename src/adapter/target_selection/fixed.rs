@@ -1,6 +1,5 @@
 use crate::adapter::target_selection::{Target, TargetSelector};
 use crate::adapter::target_strategy::TargetSelectorStrategy;
-use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use crate::connection::Error;
 use crate::status::Protocol;
 use async_trait::async_trait;
@@ -13,24 +12,8 @@ pub struct FixedTargetSelector {
     targets: Vec<Target>,
 }
 
-impl Default for FixedTargetSelector {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl FixedTargetSelector {
-    pub fn new() -> Self {
-        Self {
-            strategy: Arc::new(NoneTargetSelectorStrategy),
-            targets: vec![],
-        }
-    }
-
-    pub fn from_targets(
-        strategy: Arc<dyn TargetSelectorStrategy>,
-        targets: impl Into<Vec<Target>>,
-    ) -> Self {
+    pub fn new(strategy: Arc<dyn TargetSelectorStrategy>, targets: impl Into<Vec<Target>>) -> Self {
         Self {
             strategy,
             targets: targets.into(),

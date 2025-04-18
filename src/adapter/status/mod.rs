@@ -1,5 +1,5 @@
+pub mod fixed;
 pub mod none;
-pub mod simple;
 
 use crate::connection::Error;
 use crate::status::{Protocol, ServerStatus};

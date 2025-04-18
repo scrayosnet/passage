@@ -7,23 +7,30 @@ pub mod cipher_stream;
 pub mod config;
 pub mod connection;
 pub mod rate_limiter;
-pub mod server;
 pub mod status;
 
-use crate::adapter::target_selection::Target;
+use crate::adapter::resourcepack::ResourcepackSupplier;
+use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
+use crate::adapter::status::StatusSupplier;
+use crate::adapter::status::none::NoneStatusSupplier;
 use crate::adapter::target_selection::fixed::FixedTargetSelector;
+use crate::adapter::target_selection::none::NoneTargetSelector;
+use crate::adapter::target_selection::{Target, TargetSelector};
+use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::adapter::target_strategy::any::AnyTargetSelectorStrategy;
+use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use crate::config::Config;
-use crate::status::{ServerPlayers, ServerStatus, ServerVersion};
+use crate::connection::Connection;
+use crate::rate_limiter::RateLimiter;
 use adapter::resourcepack::fixed::FixedResourcePackSupplier;
-use adapter::status::simple::SimpleStatusSupplier;
-use serde_json::value::RawValue;
+use adapter::status::fixed::FixedStatusSupplier;
 use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tracing::info;
+use tokio::time::timeout;
+use tracing::{debug, info, warn};
 
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
 ///
@@ -36,49 +43,129 @@ use tracing::info;
 /// Will return an appropriate error if the socket cannot be bound to the supplied address, or the TCP server cannot be
 /// properly initialized.
 pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+    // retrieve config params
+    let timeout_duration = Duration::from_secs(config.timeout);
+    let auth_secret = config.auth_secret.map(|str| str.into_bytes());
+
+    // initialize status supplier
+    let status_supplier = match config.status.adapter.as_str() {
+        "none" => Arc::new(NoneStatusSupplier) as Arc<dyn StatusSupplier>,
+        "fixed" => {
+            let Some(fixed) = config.status.fixed.clone() else {
+                return Err("fixed status adapter requires a configuration".into());
+            };
+            Arc::new(FixedStatusSupplier::new(config.protocol.clone(), fixed))
+        }
+        _ => return Err("unknown status supplier configured".into()),
+    };
+
+    // initialize target selector strategy
+    let target_strategy = match config.target_strategy.adapter.as_str() {
+        "none" => Arc::new(NoneTargetSelectorStrategy) as Arc<dyn TargetSelectorStrategy>,
+        "any" => Arc::new(AnyTargetSelectorStrategy),
+        _ => return Err("unknown target selector strategy configured".into()),
+    };
+
+    // initialize target selector
+    let target_selector = match config.target.adapter.as_str() {
+        "none" => Arc::new(NoneTargetSelector) as Arc<dyn TargetSelector>,
+        "fixed" => {
+            let Some(fixed) = config.target.fixed.clone() else {
+                return Err("".into());
+            };
+            let target = Target {
+                identifier: fixed.identifier,
+                address: fixed.address,
+                meta: HashMap::<String, String>::default(),
+            };
+            Arc::new(FixedTargetSelector::new(target_strategy, vec![target]))
+        }
+        _ => return Err("unknown target selector strategy configured".into()),
+    };
+
+    // initialize resourcepack supplier
+    let resourcepack_supplier = match config.resourcepack.adapter.as_str() {
+        "none" => Arc::new(NoneResourcePackSupplier) as Arc<dyn ResourcepackSupplier>,
+        "fixed" => {
+            let Some(fixed) = config.resourcepack.fixed.clone() else {
+                return Err("fixed resourcepack adapter requires a configuration".into());
+            };
+            Arc::new(FixedResourcePackSupplier::new(fixed.packs))
+        }
+        _ => return Err("unknown target selector strategy configured".into()),
+    };
+
     // bind the socket address on all interfaces
     info!(addr = config.address.to_string(), "binding socket address");
     let listener = TcpListener::bind(&config.address).await?;
 
-    // initialize services
-    let status_supplier = SimpleStatusSupplier::from_status(
-        config.protocol.clone(),
-        ServerStatus {
-            version: ServerVersion {
-                name: "JustChunks 2025".to_owned(),
-                protocol: 0,
-            },
-            players: Some(ServerPlayers {
-                online: 5,
-                max: 10,
-                sample: None,
-            }),
-            description: Some(RawValue::from_string(
-                r#"{"text":"PASSAGE IS RUNNING","color":"gold"}"#.to_string(),
-            )?),
-            favicon: None,
-            enforces_secure_chat: Some(true),
-        },
+    // setup rate limiting and timeout
+    let rate_limiter_enabled = config.rate_limiter.enabled;
+    let mut rate_limiter = RateLimiter::new(
+        Duration::from_secs(config.rate_limiter.duration),
+        config.rate_limiter.size,
     );
-    let target = Target {
-        identifier: "test".to_string(),
-        address: SocketAddr::from_str("116.202.130.184:26426")?,
-        meta: HashMap::<String, String>::default(),
-    };
-    let target_strategy = AnyTargetSelectorStrategy::new();
-    let target_selector =
-        FixedTargetSelector::from_targets(Arc::new(target_strategy), vec![target]);
-    let resourcepack_supplier = FixedResourcePackSupplier;
 
-    // serve the router service on the bound socket address
-    server::serve(
-        config,
-        listener,
-        Arc::new(status_supplier),
-        Arc::new(target_selector),
-        Arc::new(resourcepack_supplier),
-    )
-    .await?;
+    loop {
+        // accept the next incoming connection
+        let (mut stream, addr) = tokio::select! {
+            accepted = listener.accept() => accepted?,
+            _ = tokio::signal::ctrl_c() => {
+                break;
+            },
+        };
+
+        // check rate limiter
+        if rate_limiter_enabled && !rate_limiter.enqueue(&addr.ip()) {
+            debug!(addr = addr.to_string(), "rate limited client");
+            if let Err(e) = stream.shutdown().await {
+                debug!(
+                    cause = e.to_string(),
+                    addr = &addr.to_string(),
+                    "failed to close a client connection"
+                );
+            }
+            continue;
+        }
+
+        // clone values to be moved
+        let status_supplier = Arc::clone(&status_supplier);
+        let target_selector = Arc::clone(&target_selector);
+        let resourcepack_supplier = Arc::clone(&resourcepack_supplier);
+        let auth_secret = auth_secret.clone();
+
+        tokio::spawn(timeout(timeout_duration, async move {
+            // build connection wrapper for stream
+            let mut con = Connection::new(
+                &mut stream,
+                addr,
+                Arc::clone(&status_supplier),
+                Arc::clone(&target_selector),
+                Arc::clone(&resourcepack_supplier),
+                auth_secret,
+            );
+
+            // handle the client connection
+            if let Err(err) = con.listen().await {
+                warn!(
+                    cause = err.to_string(),
+                    addr = &addr.to_string(),
+                    "failure communicating with a client"
+                );
+            }
+
+            // flush connection and shutdown
+            if let Err(err) = stream.shutdown().await {
+                debug!(
+                    cause = err.to_string(),
+                    addr = &addr.to_string(),
+                    "failed to close a client connection"
+                );
+            }
+
+            debug!(addr = &addr.to_string(), "closed connection with a client");
+        }));
+    }
 
     info!("protocol server stopped successfully");
     Ok(())
