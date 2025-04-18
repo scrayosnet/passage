@@ -1,3 +1,6 @@
+[workspace]
+members = ['packets']
+
 [package]
 name = "passage"
 description = "Minecraft Server Transfer Router"

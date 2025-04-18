@@ -1,0 +1,31 @@
+[package]
+name = "passage-packets"
+description = "Minecraft Server Packets for Passage"
+version = "0.1.0"
+authors = [
+    "Joshua Dean Küpper <admin@joshua-kuepper.de>",
+    "Paul Wagner <contact@paulwagner.dev>",
+]
+license = "MIT"
+repository = "https://github.com/scrayosnet/passage"
+readme = "../README.md"
+documentation = "https://passage.scrayos.net/docs"
+homepage = "https://passage.scrayos.net"
+keywords = ["minecraft"]
+categories = ["emulators", "network-programming"]
+edition = "2024"
+rust-version = "1.85.0"
+
+[dependencies]
+tokio = { version = "1.44", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal"] }
+thiserror = "2.0"
+uuid = { version = "1.16", features = ["v4", "serde"] }
+fake = { version = "4.3.0", features = ["derive", "uuid"] }
+
+[dev-dependencies]
+fake = { version = "4.3.0", features = ["derive", "uuid"] }
+
+[features]
+default = ["client", "server"]
+client = []
+server = []
