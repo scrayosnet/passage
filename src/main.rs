@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if config.auth_secret.is_some() {
-        info!("auth cookie is enabled")
+        info!("auth cookie is enabled");
     }
 
     // run passage blocking

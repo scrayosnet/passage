@@ -61,7 +61,7 @@ where
 
         // cleanup if not recent (expect up to 100 full connections)
         if self.size > self.entry_max_size * 100 {
-            self.cleanup()
+            self.cleanup();
         }
 
         true

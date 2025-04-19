@@ -35,7 +35,7 @@ pub mod serverbound {
     }
 
     impl Packet for HandshakePacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x00
         }
     }

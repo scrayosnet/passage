@@ -28,7 +28,7 @@ pub mod clientbound {
     pub struct CookieRequestPacket;
 
     impl Packet for CookieRequestPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x00
         }
     }
@@ -65,7 +65,7 @@ pub mod clientbound {
     pub struct PluginMessagePacket;
 
     impl Packet for PluginMessagePacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x01
         }
     }
@@ -101,7 +101,7 @@ pub mod clientbound {
     }
 
     impl Packet for DisconnectPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x02
         }
     }
@@ -137,7 +137,7 @@ pub mod clientbound {
     pub struct FinishConfigurationPacket;
 
     impl Packet for FinishConfigurationPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x03
         }
     }
@@ -174,7 +174,7 @@ pub mod clientbound {
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct KeepAlivePacket {
-        id: u64,
+        pub id: u64,
     }
 
     impl KeepAlivePacket {
@@ -184,7 +184,7 @@ pub mod clientbound {
     }
 
     impl Packet for KeepAlivePacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x04
         }
     }
@@ -226,7 +226,7 @@ pub mod clientbound {
     }
 
     impl Packet for PingPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x05
         }
     }
@@ -263,7 +263,7 @@ pub mod clientbound {
     pub struct ResetChatPacket;
 
     impl Packet for ResetChatPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x06
         }
     }
@@ -299,7 +299,7 @@ pub mod clientbound {
     pub struct RegistryDataPacket;
 
     impl Packet for RegistryDataPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x07
         }
     }
@@ -332,7 +332,7 @@ pub mod clientbound {
     pub struct RemoveResourcePackPacket;
 
     impl Packet for RemoveResourcePackPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x08
         }
     }
@@ -372,7 +372,7 @@ pub mod clientbound {
     }
 
     impl Packet for AddResourcePackPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x09
         }
     }
@@ -437,7 +437,7 @@ pub mod clientbound {
     }
 
     impl Packet for StoreCookiePacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x0A
         }
     }
@@ -482,7 +482,7 @@ pub mod clientbound {
     }
 
     impl Packet for TransferPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x0B
         }
     }
@@ -523,7 +523,7 @@ pub mod clientbound {
     pub struct FeatureFlagsPacket;
 
     impl Packet for FeatureFlagsPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x0C
         }
     }
@@ -556,7 +556,7 @@ pub mod clientbound {
     pub struct UpdateTagsPacket;
 
     impl Packet for UpdateTagsPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x0D
         }
     }
@@ -594,7 +594,7 @@ pub mod clientbound {
     pub struct KnownPacksPacket;
 
     impl Packet for KnownPacksPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x0E
         }
     }
@@ -630,7 +630,7 @@ pub mod clientbound {
     pub struct CustomReportDetailsPacket;
 
     impl Packet for CustomReportDetailsPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x0F
         }
     }
@@ -666,7 +666,7 @@ pub mod clientbound {
     pub struct ServerLinksPacket;
 
     impl Packet for ServerLinksPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x10
         }
     }
@@ -723,7 +723,7 @@ pub mod serverbound {
     }
 
     impl Packet for ClientInformationPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x00
         }
     }
@@ -789,7 +789,7 @@ pub mod serverbound {
     pub struct CookieResponsePacket;
 
     impl Packet for CookieResponsePacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x01
         }
     }
@@ -818,7 +818,7 @@ pub mod serverbound {
     ///
     /// Mods and plugins can use this to send their data. Minecraft itself uses some plugin channels.
     /// These internal channels are in the minecraft namespace. More documentation on this:
-    /// https://dinnerbone.com/blog/2012/01/13/minecraft-plugin-channels-messaging/
+    /// <https://dinnerbone.com/blog/2012/01/13/minecraft-plugin-channels-messaging/>
     ///
     /// Note that the length of Data is known only from the packet length, since the packet has no length
     /// field of any kind.
@@ -829,7 +829,7 @@ pub mod serverbound {
     pub struct PluginMessagePacket;
 
     impl Packet for PluginMessagePacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x02
         }
     }
@@ -865,7 +865,7 @@ pub mod serverbound {
     pub struct AckFinishConfigurationPacket;
 
     impl Packet for AckFinishConfigurationPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x03
         }
     }
@@ -906,7 +906,7 @@ pub mod serverbound {
     }
 
     impl Packet for KeepAlivePacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x04
         }
     }
@@ -946,7 +946,7 @@ pub mod serverbound {
     }
 
     impl Packet for PongPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x05
         }
     }
@@ -986,7 +986,7 @@ pub mod serverbound {
     }
 
     impl Packet for ResourcePackResponsePacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x06
         }
     }
@@ -1029,7 +1029,7 @@ pub mod serverbound {
     pub struct KnownPacksPacket;
 
     impl Packet for KnownPacksPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x07
         }
     }

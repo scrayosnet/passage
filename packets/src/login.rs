@@ -1,6 +1,7 @@
 #[cfg(any(feature = "server", feature = "client"))]
 use crate::Error;
 use crate::Packet;
+use crate::VarInt;
 #[cfg(test)]
 use fake::Dummy;
 use uuid::Uuid;
@@ -28,7 +29,7 @@ pub mod clientbound {
     }
 
     impl Packet for DisconnectPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x00
         }
     }
@@ -71,7 +72,7 @@ pub mod clientbound {
     }
 
     impl Packet for EncryptionRequestPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x01
         }
     }
@@ -127,7 +128,7 @@ pub mod clientbound {
     }
 
     impl Packet for LoginSuccessPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x02
         }
     }
@@ -176,7 +177,7 @@ pub mod clientbound {
     pub struct SetCompressionPacket;
 
     impl Packet for SetCompressionPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x03
         }
     }
@@ -214,7 +215,7 @@ pub mod clientbound {
     pub struct LoginPluginRequestPacket;
 
     impl Packet for LoginPluginRequestPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x04
         }
     }
@@ -251,7 +252,7 @@ pub mod clientbound {
     }
 
     impl Packet for CookieRequestPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x05
         }
     }
@@ -304,7 +305,7 @@ pub mod serverbound {
     }
 
     impl Packet for LoginStartPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x00
         }
     }
@@ -349,7 +350,7 @@ pub mod serverbound {
     }
 
     impl Packet for EncryptionResponsePacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x01
         }
     }
@@ -391,7 +392,7 @@ pub mod serverbound {
     pub struct LoginPluginResponsePacket;
 
     impl Packet for LoginPluginResponsePacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x02
         }
     }
@@ -424,7 +425,7 @@ pub mod serverbound {
     pub struct LoginAcknowledgedPacket;
 
     impl Packet for LoginAcknowledgedPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x03
         }
     }
@@ -460,7 +461,7 @@ pub mod serverbound {
     }
 
     impl Packet for CookieResponsePacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x04
         }
     }

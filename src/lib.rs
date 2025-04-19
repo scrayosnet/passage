@@ -44,7 +44,7 @@ use tracing::{debug, info, warn};
 pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // retrieve config params
     let timeout_duration = Duration::from_secs(config.timeout);
-    let auth_secret = config.auth_secret.map(|str| str.into_bytes());
+    let auth_secret = config.auth_secret.map(String::into_bytes);
 
     // initialize status supplier
     let status_supplier = match config.status.adapter.as_str() {

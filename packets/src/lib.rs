@@ -48,9 +48,9 @@ pub enum Error {
     #[error("illegal packets ID: {actual} (expected {expected})")]
     IllegalPacketId {
         /// The expected value that should be present.
-        expected: usize,
+        expected: VarInt,
         /// The actual value that was observed.
-        actual: usize,
+        actual: VarInt,
     },
 
     /// The JSON response of a packet is incorrectly encoded (not UTF-8).
@@ -297,7 +297,7 @@ impl TryFrom<VarInt> for ParticleStatus {
 /// Packets are network packets that are part of the protocol definition and identified by a context and ID.
 pub trait Packet {
     /// Returns the defined ID of this network packet.
-    fn get_packet_id() -> usize;
+    fn get_packet_id() -> VarInt;
 }
 
 /// `WritePacket`s are packets that can be written to a buffer.
@@ -418,12 +418,12 @@ pub trait AsyncReadPacket {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ReadPacket, WritePacket};
+    use crate::{ReadPacket, VarInt, WritePacket};
     use fake::{Dummy, Fake, Faker};
     use std::fmt::Debug;
     use std::io::Cursor;
 
-    pub async fn assert_packet<T>(packet_id: usize)
+    pub async fn assert_packet<T>(packet_id: VarInt)
     where
         T: PartialEq + Eq + Dummy<Faker> + ReadPacket + WritePacket + Send + Sync + Debug + Clone,
     {

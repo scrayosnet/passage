@@ -70,6 +70,7 @@ pub struct AuthCookie {
     pub user_id: Uuid,
 }
 
+#[allow(clippy::unused_async)]
 trait PacketHandler<T>: Sized {
     async fn handle(&mut self, _packet: T) -> Result<(), Error>
     where
@@ -294,7 +295,7 @@ where
             return Ok(());
         }
 
-        let packet = conf_out::KeepAlivePacket::new(id);
+        let packet = conf_out::KeepAlivePacket { id };
         self.write_packet(packet).await?;
 
         Ok(())

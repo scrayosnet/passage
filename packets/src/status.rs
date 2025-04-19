@@ -1,6 +1,7 @@
 #[cfg(any(feature = "server", feature = "client"))]
 use crate::Error;
 use crate::Packet;
+use crate::VarInt;
 #[cfg(test)]
 use fake::Dummy;
 
@@ -29,7 +30,7 @@ pub mod clientbound {
     }
 
     impl Packet for StatusResponsePacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x00
         }
     }
@@ -70,7 +71,7 @@ pub mod clientbound {
     }
 
     impl Packet for PongPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x01
         }
     }
@@ -122,7 +123,7 @@ pub mod serverbound {
     pub struct StatusRequestPacket;
 
     impl Packet for StatusRequestPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x00
         }
     }
@@ -158,7 +159,7 @@ pub mod serverbound {
     }
 
     impl Packet for PingPacket {
-        fn get_packet_id() -> usize {
+        fn get_packet_id() -> VarInt {
             0x01
         }
     }

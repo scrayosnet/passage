@@ -2,7 +2,6 @@ use crate::authentication::Error::InvalidVerifyToken;
 use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc};
 use cfb8::cipher::KeyIvInit;
 use hmac::{Hmac, Mac};
-use lazy_static::lazy_static;
 use num_bigint::BigInt;
 use packets::VerifyToken;
 use rand::rngs::OsRng;
@@ -12,18 +11,23 @@ use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use sha2::Sha256;
+use std::sync::LazyLock;
 use uuid::Uuid;
 
-lazy_static! {
-    /// The RSA keypair of the application.
-    pub(crate) static ref KEY_PAIR: (RsaPrivateKey, RsaPublicKey) = generate_keypair().expect("failed to generate keypair");
+/// The RSA keypair of the application.
+pub(crate) static KEY_PAIR: LazyLock<(RsaPrivateKey, RsaPublicKey)> =
+    LazyLock::new(|| generate_keypair().expect("failed to generate keypair"));
 
-    /// The encoded public key.
-    pub(crate) static ref ENCODED_PUB: Vec<u8> = encode_public_key(&KEY_PAIR.1).expect("failed to encode keypair");
+/// The encoded public key.
+pub(crate) static ENCODED_PUB: LazyLock<Vec<u8>> =
+    LazyLock::new(|| encode_public_key(&KEY_PAIR.1).expect("failed to encode keypair"));
 
-    /// The shared http client (for mojang requests).
-    static ref HTTP_CLIENT: reqwest::Client = reqwest::Client::builder().build().expect("failed to create http client");
-}
+/// The shared http client (for mojang requests).
+static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .build()
+        .expect("failed to create http client")
+});
 
 /// The internal error type for all errors related to the authentication and cryptography.
 ///
