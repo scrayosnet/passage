@@ -3,13 +3,12 @@ use crate::adapter::status::{Protocol, StatusSupplier};
 use crate::adapter::target_selection::TargetSelector;
 use crate::authentication;
 use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
-use Phase::{Acknowledge, Configuration, Encryption, Handshake, Login, Status, Transfer};
 use packets::{
-    AsyncReadPacket, AsyncWritePacket, Packet, ReadPacket, ResourcePackResult, State, VarInt,
+    AsyncReadPacket, AsyncWritePacket, ReadPacket, ResourcePackResult, State, VarInt,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use std::io::Cursor;
+use std::io::{Cursor, ErrorKind};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -17,11 +16,10 @@ use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, ReadBuf};
-use tokio::sync::mpsc;
-use tracing::{debug, trace, warn};
+use tokio::time::{Instant, Interval};
+use tracing::debug;
 use uuid::Uuid;
 
-use crate::connection::Phase::Ping;
 use packets::configuration::clientbound as conf_out;
 use packets::configuration::serverbound as conf_in;
 use packets::handshake::serverbound as hand_in;
@@ -54,12 +52,40 @@ pub enum Error {
     #[error("{0}")]
     PacketError(#[from] packets::Error),
 
+    /// The connection was closed.
+    #[error("Connection closed")]
+    ConnectionClosed,
+
+    /// Keep-alive was not received.
+    #[error("Missed keep-alive")]
+    MissedKeepAlive,
+
+    /// Some protocol error occurred.
+    #[error("Some protocol error occurred")]
+    InvalidProtocol,
+
     /// The packet handle was called while in an unexpected phase.
     #[error("invalid state: {actual} (expected {expected})")]
     InvalidState {
         expected: &'static str,
         actual: &'static str,
     },
+}
+
+impl Error {
+    pub fn is_connection_closed(&self) -> bool {
+        let err = match self {
+            Error::Io(err) => err,
+            Error::PacketError(err) => return err.is_connection_closed(),
+            Error::ConnectionClosed => return true,
+            _ => return false,
+        };
+
+        err.kind() == ErrorKind::UnexpectedEof
+            || err.kind() == ErrorKind::ConnectionReset
+            || err.kind() == ErrorKind::ConnectionAborted
+            || err.kind() == ErrorKind::BrokenPipe
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -70,126 +96,39 @@ pub struct AuthCookie {
     pub user_id: Uuid,
 }
 
-#[allow(clippy::unused_async)]
-trait PacketHandler<T>: Sized {
-    async fn handle(&mut self, _packet: T) -> Result<(), Error>
-    where
-        T: Packet,
-    {
-        Ok(())
-    }
-}
-
 #[macro_export]
-macro_rules! phase {
-    ($phase:expr, $expected:path, $($field:ident,)*) => {
-        let $expected { $($field,)* .. } = &mut $phase else {
-            return Err(Error::InvalidState {
-                actual: $phase.name(),
-                expected: stringify!($expected),
-            });
-        };
-    }
-}
-
-#[derive(Debug)]
-pub enum Phase {
-    Handshake {
-        client_address: SocketAddr,
-    },
-    Status {
-        client_address: SocketAddr,
-        protocol_version: VarInt,
-        server_address: String,
-        server_port: u16,
-    },
-    Ping {
-        client_address: SocketAddr,
-        protocol_version: VarInt,
-        server_address: String,
-        server_port: u16,
-    },
-    Login {
-        client_address: SocketAddr,
-        protocol_version: VarInt,
-        server_address: String,
-        server_port: u16,
-        transfer: bool,
-    },
-    Transfer {
-        client_address: SocketAddr,
-        protocol_version: VarInt,
-        server_address: String,
-        server_port: u16,
-        user_name: String,
-        user_id: Uuid,
-    },
-    Encryption {
-        client_address: SocketAddr,
-        protocol_version: VarInt,
-        server_address: String,
-        server_port: u16,
-        user_name: String,
-        user_id: Uuid,
-        verify_token: [u8; 32],
-        should_authenticate: bool,
-    },
-    Acknowledge {
-        client_address: SocketAddr,
-        protocol_version: VarInt,
-        server_address: String,
-        server_port: u16,
-        user_name: String,
-        user_id: Uuid,
-        should_write_auth_cookie: bool,
-    },
-    Configuration {
-        client_address: SocketAddr,
-        protocol_version: VarInt,
-        server_address: String,
-        server_port: u16,
-        user_name: String,
-        user_id: Uuid,
-        transit_packs: Vec<(Uuid, bool)>,
-        last_keep_alive: KeepAlive,
-    },
-}
-
-impl Phase {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Handshake { .. } => "Handshake",
-            Status { .. } => "Status",
-            Ping { .. } => "Ping",
-            Login { .. } => "Login",
-            Transfer { .. } => "Transfer",
-            Encryption { .. } => "Encryption",
-            Acknowledge { .. } => "Acknowledge",
-            Configuration { .. } => "Configuration",
+macro_rules! match_packet {
+    {
+        $con:expr, $keep_alive:expr,
+        $($packet:pat = $packet_id:literal, $packet_type:ty => $handler:expr,)*
+    } => {{
+        let (id, mut buf) = $con.next_packet($keep_alive).await?;
+        match id {
+            $(
+                $packet_id => {
+                    let $packet = <$packet_type>::read_from_buffer(&mut buf).await?;
+                    $handler
+                },
+            )*
+            _ => return Err(Error::InvalidProtocol),
         }
-    }
-}
-
-impl std::fmt::Display for Phase {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.name())
-    }
+    }}
 }
 
 #[derive(Debug)]
-pub struct KeepAlive([u64; 2]);
+pub struct KeepAlive {
+    pub packets: [u64; 2],
+    pub last_sent: Instant,
+    pub interval: Interval,
+}
 
 impl KeepAlive {
-    pub fn empty() -> Self {
-        KeepAlive([0, 0])
-    }
-
     pub fn replace(&mut self, from: u64, to: u64) -> bool {
-        if self.0[0] == from {
-            self.0[0] = to;
+        if self.packets[0] == from {
+            self.packets[0] = to;
             true
-        } else if self.0[1] == from {
-            self.0[1] = to;
+        } else if self.packets[1] == from {
+            self.packets[1] = to;
             true
         } else {
             false
@@ -201,16 +140,14 @@ impl KeepAlive {
 pub struct Connection<S> {
     /// The connection reader
     stream: CipherStream<S, Aes128Cfb8Enc, Aes128Cfb8Dec>,
-    /// Shutdown channel, stops main loop
-    shutdown: Option<mpsc::UnboundedSender<()>>,
+    /// The keep-alive config
+    keep_alive: KeepAlive,
     /// The status supplier of the connection
     pub status_supplier: Arc<dyn StatusSupplier>,
     /// ...
     pub target_selector: Arc<dyn TargetSelector>,
     /// ...
     pub resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
-    /// The current phase of the connection.
-    pub phase: Phase,
     /// Auth cookie secret.
     pub auth_secret: Option<Vec<u8>>,
 }
@@ -221,19 +158,25 @@ where
 {
     pub fn new(
         stream: S,
-        client_address: SocketAddr,
         status_supplier: Arc<dyn StatusSupplier>,
         target_selector: Arc<dyn TargetSelector>,
         resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
         auth_secret: Option<Vec<u8>>,
     ) -> Connection<S> {
+        // start ticker for keep-alive packets (use delay so that we don't miss any)
+        let mut interval = tokio::time::interval(Duration::from_secs(10));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
         Self {
             stream: CipherStream::new(stream, None, None),
-            shutdown: None,
+            keep_alive: KeepAlive {
+                packets: [0; 2],
+                last_sent: Instant::now(),
+                interval,
+            },
             status_supplier,
             target_selector,
             resourcepack_supplier,
-            phase: Handshake { client_address },
             auth_secret,
         }
     }
@@ -243,170 +186,58 @@ impl<S> Connection<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
 {
-    pub async fn listen(&mut self) -> Result<(), Error> {
-        // start ticker for keep-alive packets
-        let mut interval = tokio::time::interval(Duration::from_secs(10));
+    async fn next_packet(&mut self, keep_alive: bool) -> Result<(VarInt, Cursor<Vec<u8>>), Error> {
+        // start ticker for keep-alive packets (use delay so that we don't miss any)
+        let duration = Duration::from_secs(10);
+        let mut interval = tokio::time::interval_at(self.keep_alive.last_sent + duration, duration);
 
-        // init shutdown signal
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        self.shutdown = Some(tx);
-
-        // start listening for events
-        loop {
+        // wait for the next packet, send keep-alive packets as necessary
+        let length = loop {
             tokio::select! {
                 // use biased selection such that branches are checked in order
                 biased;
-                // await shutdown
-                _ = rx.recv() => break,
                 // await the next timer tick for keep-alive
-                _ = interval.tick() => self.handle_tick().await?,
-                // await the next packet in, reading the packet size (expect fast execution)
-                maybe_length = self.read_varint() => match maybe_length {
-                    Ok(length) =>  self.handle_packet(length).await?,
-                    Err(err) => {
-                        // hide error from possible if the connection closed (eof)
-                        if err.is_connection_closed() {
-                            break
-                        }
-                        return Err(Error::PacketError(err));
+                _ = interval.tick() => {
+                    if !keep_alive { continue; }
+                    self.keep_alive.last_sent = Instant::now();
+                    let id = authentication::generate_keep_alive();
+                    if !self.keep_alive.replace(0, id) {
+                        self.write_packet(conf_out::DisconnectPacket {
+                            reason: "Missed Keepalive".to_string(),
+                        })
+                        .await?;
+                        return Err(Error::MissedKeepAlive);
                     }
+                    let packet = conf_out::KeepAlivePacket { id };
+                    self.write_packet(packet).await?;
+                },
+                // await the next packet in, reading the packet size (expect fast execution)
+                maybe_length = self.read_varint() => {
+                    break maybe_length?;
                 },
             }
-        }
-
-        Ok(())
-    }
-
-    async fn handle_tick(&mut self) -> Result<(), Error> {
-        let Configuration {
-            last_keep_alive, ..
-        } = &mut self.phase
-        else {
-            return Ok(());
         };
 
-        let id = authentication::generate_keep_alive();
-        if !last_keep_alive.replace(0, id) {
-            self.write_packet(conf_out::DisconnectPacket {
-                reason: "Missed Keepalive".to_string(),
-            })
-            .await?;
-            self.shutdown();
-            return Ok(());
-        }
-
-        let packet = conf_out::KeepAlivePacket { id };
-        self.write_packet(packet).await?;
-
-        Ok(())
-    }
-
-    async fn handle_packet(&mut self, length: VarInt) -> Result<(), Error> {
-        // check the length of the packe for any following content
+        // check the length of the packet for any following content
         if length == 0 || length > MAX_PACKET_LENGTH {
-            debug!(
-                length,
-                "packet length should be between 0 and {MAX_PACKET_LENGTH}"
-            );
+            debug!(length, "packet length should be between 0 and {MAX_PACKET_LENGTH}");
             return Err(Error::PacketError(packets::Error::IllegalPacketLength));
         }
 
         // extract the encoded packet id
-        let packet_id = self.read_varint().await?;
-
-        trace!(
-            length = length,
-            packet_id = packet_id,
-            phase = ?self.phase,
-            "Handling packet"
-        );
+        let id = self.read_varint().await?;
 
         // split a separate reader from the stream and read packet bytes (advancing stream)
         let mut buffer = vec![];
         self.take(length as u64 - 1)
             .read_to_end(&mut buffer)
             .await?;
-        let buf = &mut Cursor::new(&mut buffer);
+        let buf = Cursor::new(buffer);
 
-        // deserialize and handle the packet based on its packet id and phase
-        match (packet_id, &self.phase) {
-            (0x00, Handshake { .. }) => {
-                self.handle(hand_in::HandshakePacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x00, Status { .. }) => {
-                self.handle(status_in::StatusRequestPacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x01, Ping { .. }) => {
-                self.handle(status_in::PingPacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x00, Login { .. }) => {
-                self.handle(login_in::LoginStartPacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x04, Transfer { .. }) => {
-                self.handle(login_in::CookieResponsePacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x01, Encryption { .. }) => {
-                self.handle(login_in::EncryptionResponsePacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x02, Acknowledge { .. }) => {
-                self.handle(login_in::LoginPluginResponsePacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x03, Acknowledge { .. }) => {
-                self.handle(login_in::LoginAcknowledgedPacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x00, Configuration { .. }) => {
-                self.handle(conf_in::ClientInformationPacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x01, Configuration { .. }) => {
-                self.handle(conf_in::CookieResponsePacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x02, Configuration { .. }) => {
-                self.handle(conf_in::PluginMessagePacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x03, Configuration { .. }) => {
-                self.handle(conf_in::AckFinishConfigurationPacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x04, Configuration { .. }) => {
-                self.handle(conf_in::KeepAlivePacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x05, Configuration { .. }) => {
-                self.handle(conf_in::PongPacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x06, Configuration { .. }) => {
-                self.handle(conf_in::ResourcePackResponsePacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            (0x07, Configuration { .. }) => {
-                self.handle(conf_in::KnownPacksPacket::read_from_buffer(buf).await?)
-                    .await
-            }
-            // otherwise
-            _ => {
-                debug!(
-                    packe_id = packet_id,
-                    phase = ?self.phase,
-                    "Unsupported packet in phase"
-                );
-                Ok(())
-            }
-        }
+        Ok((id, buf))
     }
 
-    pub(crate) fn apply_encryption(&mut self, shared_secret: &[u8]) -> Result<(), Error> {
+    fn apply_encryption(&mut self, shared_secret: &[u8]) -> Result<(), Error> {
         debug!("enabling encryption");
 
         // get stream ciphers and wrap stream with cipher
@@ -416,40 +247,260 @@ where
         Ok(())
     }
 
-    // utilities
-
-    /// Disables reading new packets and stopping the connection
-    pub fn shutdown(&mut self) {
-        // send a shutdown message if available
-        if let Some(shutdown) = self.shutdown.take() {
-            debug!("sending connection shutdown signal");
-            let _ = shutdown.send(());
+    pub async fn listen(&mut self, client_address: SocketAddr) -> Result<(), Error> {
+        // hides connection closed errors
+        match self.run_protocol(client_address).await {
+            Err(err) => {
+                if err.is_connection_closed() {
+                    Ok(())
+                } else {
+                    Err(err)
+                }
+            }
+            Ok(()) => Ok(()),
         }
     }
 
-    /// Initializes the transfer
-    pub async fn transfer(&mut self) -> Result<(), Error> {
-        // get expected phase state
-        phase!(
-            self.phase,
-            Configuration,
-            protocol_version,
-            client_address,
-            server_address,
-            server_port,
-            user_id,
-            user_name,
-        );
+    async fn run_protocol(&mut self, client_address: SocketAddr) -> Result<(), Error> {
+        // handle handshake
+        let handshake = match_packet! { self, false,
+            packet = 0x00, hand_in::HandshakePacket => packet,
+        };
 
-        // select target
+        // handle status request
+        if handshake.next_state == State::Status {
+            let _ = match_packet! { self, false,
+                packet = 0x00, status_in::StatusRequestPacket => packet,
+            };
+
+            let status = self
+                .status_supplier
+                .get_status(
+                    &client_address,
+                    (&handshake.server_address, handshake.server_port),
+                    handshake.protocol_version as Protocol,
+                )
+                .await?;
+
+            self.write_packet(status_out::StatusResponsePacket {
+                body: serde_json::to_string(&status)?,
+            }).await?;
+
+            let ping = match_packet! { self, false,
+                packet = 0x01, status_in::PingPacket => packet,
+            };
+
+            self.write_packet(status_out::PongPacket {
+                payload: ping.payload,
+            }).await?;
+
+            return Ok(())
+        }
+
+        // handle login request
+        let mut login_start = match_packet! { self, false,
+            packet = 0x00, login_in::LoginStartPacket => packet,
+        };
+
+        // in case of transfer, use the auth cookie
+        let mut should_authenticate = true;
+        'transfer: {
+            if handshake.next_state == State::Transfer {
+                if self.auth_secret.is_none() {
+                    break 'transfer;
+                }
+
+                self.write_packet(login_out::CookieRequestPacket {
+                    key: AUTH_COOKIE_KEY.to_string(),
+                }).await?;
+
+                let cookie = match_packet! { self, false,
+                    packet = 0x04, login_in::CookieResponsePacket => packet,
+                };
+
+                let Some(message) = cookie.payload else {
+                    break 'transfer;
+                };
+
+                let Some(secret) = &self.auth_secret else {
+                    break 'transfer;
+                };
+
+                let (ok, message) = authentication::check_sign(&message, secret);
+                if !ok {
+                    break 'transfer;
+                }
+
+                let cookie = serde_json::from_slice::<AuthCookie>(message)?;
+                let expires_at = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("time error")
+                    .as_secs()
+                    + AUTH_COOKIE_EXPIRY_SECS;
+
+                if cookie.client_addr.ip() != client_address.ip() || cookie.timestamp > expires_at {
+                    break 'transfer;
+                }
+
+                should_authenticate = false;
+
+                // update state by token
+                login_start.user_name = cookie.user_name;
+                login_start.user_id = cookie.user_id;
+            }
+        }
+
+        // handle encryption
+        let verify_token = authentication::generate_token()?;
+
+        self.write_packet(login_out::EncryptionRequestPacket {
+            server_id: "".to_owned(),
+            public_key: authentication::ENCODED_PUB.clone(),
+            verify_token,
+            should_authenticate,
+        }).await?;
+
+        let encrypt = match_packet! { self, false,
+            packet = 0x01, login_in::EncryptionResponsePacket => packet,
+        };
+
+        // decrypt the shared secret and verify the token
+        let shared_secret =
+            authentication::decrypt(&authentication::KEY_PAIR.0, &encrypt.shared_secret)?;
+        let decrypted_verify_token =
+            authentication::decrypt(&authentication::KEY_PAIR.0, &encrypt.verify_token)?;
+
+        // verify the token is correct
+        authentication::verify_token(verify_token, &decrypted_verify_token)?;
+
+        // handle authentication if not already authenticated by the token
+        if should_authenticate {
+            let auth_response = authentication::authenticate_mojang(
+                &login_start.user_name,
+                &shared_secret,
+                &authentication::ENCODED_PUB,
+            ).await?;
+
+            // update state for actual use info
+            login_start.user_name = auth_response.name;
+            login_start.user_id = auth_response.id;
+        }
+
+        // enable encryption for the connection using the shared secret
+        self.apply_encryption(&shared_secret)?;
+
+        self.write_packet(login_out::LoginSuccessPacket {
+            user_name: login_start.user_name.clone(),
+            user_id: login_start.user_id,
+        }).await?;
+
+        let _ = match_packet! { self, false,
+            packet = 0x03, login_in::LoginAcknowledgedPacket => packet,
+        };
+
+        // write auth cookie
+        'auth_cookie: {
+            if should_authenticate {
+                let Some(secret) = &self.auth_secret else {
+                    break 'auth_cookie;
+                };
+
+                let cookie = AuthCookie {
+                    client_addr: client_address,
+                    timestamp: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("time error")
+                        .as_secs(),
+                    user_name: login_start.user_name.clone(),
+                    user_id: login_start.user_id,
+                };
+
+                let auth_payload = serde_json::to_vec(&cookie)?;
+                self.write_packet(conf_out::StoreCookiePacket {
+                    key: AUTH_COOKIE_KEY.to_string(),
+                    payload: authentication::sign(&auth_payload, secret),
+                }).await?;
+            }
+        }
+
+        // write resource packs
+        let packs = self
+            .resourcepack_supplier
+            .get_resourcepacks(
+                &client_address,
+                (&handshake.server_address, handshake.server_port),
+                handshake.protocol_version as Protocol,
+                &login_start.user_name,
+                &login_start.user_id,
+            )
+            .await?;
+        let mut pack_ids: Vec<(Uuid, bool)> = packs.iter().map(|pack| (pack.uuid, pack.forced)).collect();
+
+        for pack in packs {
+            let packet = conf_out::AddResourcePackPacket {
+                uuid: pack.uuid,
+                url: pack.url,
+                hash: pack.hash,
+                forced: pack.forced,
+                prompt_message: pack.prompt_message,
+            };
+            self.write_packet(packet).await?;
+        }
+
+        // wait for resource packs to be accepted
+        while !pack_ids.is_empty() {
+            let packet = match_packet! { self, true,
+                packet = 0x06, conf_in::ResourcePackResponsePacket => packet,
+                // handle keep alive packets
+                packet = 0x04, conf_in::KeepAlivePacket => {
+                    if !self.keep_alive.replace(packet.id, 0) {
+                        debug!(id = packet.id, "keep alive packet id unknown");
+                    }
+                    continue;
+                },
+                // ignore unsupported packets but don't throw an error
+                _ = 0x00, conf_in::ClientInformationPacket => continue,
+                _ = 0x02, conf_in::PluginMessagePacket => continue,
+            };
+
+            // check the state for any final state in the resource pack loading process
+            let success = match packet.result {
+                ResourcePackResult::Success => true,
+                ResourcePackResult::Declined
+                | ResourcePackResult::DownloadFailed
+                | ResourcePackResult::InvalidUrl
+                | ResourcePackResult::ReloadFailed
+                | ResourcePackResult::Discorded => false,
+                // pending state, keep waiting
+                _ => continue
+            };
+
+            // pop pack from the list (ignoring unknown pack ids)
+            let Some(pos) = pack_ids.iter().position(|(uuid, _)| uuid == &packet.uuid) else {
+                continue;
+            };
+            let (_, forced) = pack_ids.swap_remove(pos);
+
+            // handle pack forced
+            if forced && !success {
+                // TODO write actual reason
+                self.write_packet(conf_out::DisconnectPacket {
+                    reason: "".to_string(),
+                })
+                    .await?;
+                return Ok(());
+            }
+        }
+
+        // transfer
         let target = self
             .target_selector
             .select(
-                client_address,
-                (server_address, *server_port),
-                *protocol_version as Protocol,
-                user_name,
-                user_id,
+                &client_address,
+                (&handshake.server_address, handshake.server_port),
+                handshake.protocol_version as Protocol,
+                &login_start.user_name,
+                &login_start.user_id,
             )
             .await?;
 
@@ -459,8 +510,7 @@ where
             self.write_packet(conf_out::DisconnectPacket {
                 reason: "".to_string(),
             })
-            .await?;
-            self.shutdown();
+                .await?;
             return Ok(());
         };
 
@@ -469,11 +519,7 @@ where
             host: target.ip().to_string(),
             port: target.port(),
         };
-        debug!(packet = debug(&transfer), "sending transfer packet");
         self.write_packet(transfer).await?;
-
-        // graceful shutdown
-        self.shutdown();
 
         Ok(())
     }
@@ -514,560 +560,4 @@ where
     ) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.get_mut().stream).poll_read(cx, buf)
     }
-}
-
-impl<S> PacketHandler<hand_in::HandshakePacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
-{
-    async fn handle(&mut self, packet: hand_in::HandshakePacket) -> Result<(), Error>
-    where
-        hand_in::HandshakePacket: Packet,
-    {
-        debug!(packet = ?packet, "received handshake packet");
-        phase!(self.phase, Handshake, client_address,);
-
-        // collect information
-        let client_address = *client_address;
-        let protocol_version = packet.protocol_version;
-        let server_address = packet.server_address.to_string();
-        let server_port = packet.server_port;
-        let transfer = packet.next_state == State::Transfer;
-
-        // switch to the next phase based on state
-        self.phase = match &packet.next_state {
-            State::Status => Status {
-                client_address,
-                server_address,
-                server_port,
-                protocol_version,
-            },
-            _ => Login {
-                client_address,
-                server_address,
-                server_port,
-                protocol_version,
-                transfer,
-            },
-        };
-
-        Ok(())
-    }
-}
-
-impl<S> PacketHandler<status_in::StatusRequestPacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
-{
-    async fn handle(&mut self, packet: status_in::StatusRequestPacket) -> Result<(), Error>
-    where
-        status_in::StatusRequestPacket: Packet,
-    {
-        debug!(packet = ?packet, "received status request packet");
-        phase!(
-            self.phase,
-            Status,
-            client_address,
-            server_address,
-            server_port,
-            protocol_version,
-        );
-
-        // get status from status supplier
-        let status = self
-            .status_supplier
-            .get_status(
-                client_address,
-                (server_address, *server_port),
-                *protocol_version as Protocol,
-            )
-            .await?;
-
-        // create a new status request packet and send it
-        let json_response = serde_json::to_string(&status)?;
-
-        self.phase = Ping {
-            client_address: *client_address,
-            server_address: server_address.clone(),
-            server_port: *server_port,
-            protocol_version: *protocol_version,
-        };
-
-        // create a new status response packet and send it
-        let request = status_out::StatusResponsePacket {
-            body: json_response,
-        };
-        debug!(packet = debug(&request), "sending status response packet");
-        self.write_packet(request).await?;
-
-        Ok(())
-    }
-}
-
-impl<S> PacketHandler<status_in::PingPacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
-{
-    async fn handle(&mut self, packet: status_in::PingPacket) -> Result<(), Error>
-    where
-        status_in::PingPacket: Packet,
-    {
-        debug!(packet = ?packet, "received ping packet");
-        phase!(self.phase, Ping,);
-
-        // create a new pong packet and send it
-        let pong_response = status_out::PongPacket {
-            payload: packet.payload,
-        };
-        debug!(packet = debug(&pong_response), "sending pong packet");
-        self.write_packet(pong_response).await?;
-
-        // close connection
-        self.shutdown();
-
-        Ok(())
-    }
-}
-
-impl<S> PacketHandler<login_in::LoginStartPacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
-{
-    async fn handle(&mut self, packet: login_in::LoginStartPacket) -> Result<(), Error>
-    where
-        login_in::LoginStartPacket: Packet,
-    {
-        debug!(packet = ?packet, "received login start packet");
-        phase!(
-            self.phase,
-            Phase::Login,
-            client_address,
-            protocol_version,
-            server_address,
-            server_port,
-            transfer,
-        );
-
-        // handle transfer
-        if *transfer && self.auth_secret.is_some() {
-            // update phase and wait for cookie
-            self.phase = Phase::Transfer {
-                client_address: *client_address,
-                protocol_version: *protocol_version,
-                server_address: server_address.clone(),
-                server_port: *server_port,
-                user_name: packet.user_name.clone(),
-                user_id: packet.user_id,
-            };
-            self.write_packet(login_out::CookieRequestPacket {
-                key: AUTH_COOKIE_KEY.to_string(),
-            })
-            .await?;
-            return Ok(());
-        }
-
-        // encode public key and generate verify token
-        let verify_token = authentication::generate_token()?;
-
-        // switch phase to accept encryption response
-        self.phase = Phase::Encryption {
-            client_address: *client_address,
-            protocol_version: *protocol_version,
-            server_address: server_address.clone(),
-            server_port: *server_port,
-            user_name: packet.user_name.clone(),
-            user_id: packet.user_id,
-            verify_token,
-            should_authenticate: true,
-        };
-
-        // create a new encryption request and send it
-        let encryption_request = login_out::EncryptionRequestPacket {
-            server_id: "".to_owned(),
-            public_key: authentication::ENCODED_PUB.clone(),
-            verify_token,
-            should_authenticate: true,
-        };
-        debug!(
-            packet = debug(&encryption_request),
-            "sending encryption request packet"
-        );
-        self.write_packet(encryption_request).await?;
-
-        Ok(())
-    }
-}
-
-impl<S> PacketHandler<login_in::CookieResponsePacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
-{
-    async fn handle(&mut self, packet: login_in::CookieResponsePacket) -> Result<(), Error>
-    where
-        login_in::CookieResponsePacket: Packet,
-    {
-        debug!(packet = ?packet, "received cookie response packet");
-
-        // only supports auth cookie
-        if packet.key != AUTH_COOKIE_KEY {
-            return Ok(());
-        }
-
-        // get auth cookie secret
-        let Some(secret) = &self.auth_secret else {
-            return Ok(());
-        };
-
-        phase!(
-            self.phase,
-            Phase::Transfer,
-            client_address,
-            protocol_version,
-            server_address,
-            server_port,
-            user_name,
-            user_id,
-        );
-
-        // verify token
-        let mut should_authenticate = true;
-        if let Some(message) = packet.payload {
-            let (ok, message) = authentication::check_sign(&message, secret);
-            if ok {
-                let cookie = serde_json::from_slice::<AuthCookie>(message)?;
-                let expires_at = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("time error")
-                    .as_secs()
-                    + AUTH_COOKIE_EXPIRY_SECS;
-                if cookie.client_addr.ip() == client_address.ip() && cookie.timestamp < expires_at {
-                    should_authenticate = false;
-
-                    // update state by token
-                    *user_name = cookie.user_name;
-                    *user_id = cookie.user_id;
-                }
-            }
-        }
-
-        // encode public key and generate verify token
-        let verify_token = authentication::generate_token()?;
-
-        // switch phase to accept encryption response
-        self.phase = Phase::Encryption {
-            client_address: *client_address,
-            protocol_version: *protocol_version,
-            server_address: server_address.clone(),
-            server_port: *server_port,
-            user_name: user_name.clone(),
-            user_id: *user_id,
-            verify_token,
-            should_authenticate,
-        };
-
-        // create a new encryption request and send it
-        let encryption_request = login_out::EncryptionRequestPacket {
-            server_id: "".to_owned(),
-            public_key: authentication::ENCODED_PUB.clone(),
-            verify_token,
-            should_authenticate,
-        };
-        debug!(
-            packet = debug(&encryption_request),
-            "sending encryption request packet"
-        );
-        self.write_packet(encryption_request).await?;
-
-        Ok(())
-    }
-}
-
-impl<S> PacketHandler<login_in::EncryptionResponsePacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
-{
-    async fn handle(&mut self, packet: login_in::EncryptionResponsePacket) -> Result<(), Error>
-    where
-        login_in::EncryptionResponsePacket: Packet,
-    {
-        debug!(packet = ?packet, "received encryption response packet");
-        phase!(
-            self.phase,
-            Phase::Encryption,
-            client_address,
-            protocol_version,
-            server_address,
-            server_port,
-            user_name,
-            user_id,
-            verify_token,
-            should_authenticate,
-        );
-
-        // decrypt the shared secret and verify token
-        let shared_secret =
-            authentication::decrypt(&authentication::KEY_PAIR.0, &packet.shared_secret)?;
-        let decrypted_verify_token =
-            authentication::decrypt(&authentication::KEY_PAIR.0, &packet.verify_token)?;
-
-        // verify the token is correct
-        authentication::verify_token(*verify_token, &decrypted_verify_token)?;
-
-        // handle mojang auth if not handled by cookie
-        if *should_authenticate {
-            // get the data for login success
-            let auth_response = authentication::authenticate_mojang(
-                user_name,
-                &shared_secret,
-                &authentication::ENCODED_PUB,
-            )
-            .await;
-
-            let auth_response = match auth_response {
-                Ok(inner) => inner,
-                Err(err) => {
-                    warn!(err = ?err, "mojang auth failed");
-                    // TODO write actual reason
-                    self.write_packet(login_out::DisconnectPacket {
-                        reason: "".to_string(),
-                    })
-                    .await?;
-                    self.shutdown();
-                    return Ok(());
-                }
-            };
-
-            // update state for actual use info
-            *user_name = auth_response.name;
-            *user_id = auth_response.id;
-        }
-
-        // build response packet
-        let login_success = login_out::LoginSuccessPacket {
-            user_name: user_name.clone(),
-            user_id: *user_id,
-        };
-
-        // switch to login-acknowledge phase
-        self.phase = Phase::Acknowledge {
-            client_address: *client_address,
-            protocol_version: *protocol_version,
-            server_address: server_address.clone(),
-            server_port: *server_port,
-            user_name: user_name.clone(),
-            user_id: *user_id,
-            should_write_auth_cookie: *should_authenticate,
-        };
-
-        // enable encryption for the connection using the shared secret
-        self.apply_encryption(&shared_secret)?;
-
-        // create a new login success packet and send it
-        debug!(
-            packet = debug(&login_success),
-            "sending login success packet"
-        );
-        self.write_packet(login_success).await?;
-
-        Ok(())
-    }
-}
-
-impl<S> PacketHandler<login_in::LoginPluginResponsePacket> for Connection<S> where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
-{
-}
-
-impl<S> PacketHandler<login_in::LoginAcknowledgedPacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
-{
-    async fn handle(&mut self, packet: login_in::LoginAcknowledgedPacket) -> Result<(), Error>
-    where
-        login_in::LoginAcknowledgedPacket: Packet,
-    {
-        debug!(packet = ?packet, "received login acknowledged packet");
-        phase!(
-            self.phase,
-            Acknowledge,
-            client_address,
-            protocol_version,
-            server_address,
-            server_port,
-            user_name,
-            user_id,
-            should_write_auth_cookie,
-        );
-        let should_write_auth_cookie = *should_write_auth_cookie;
-
-        // generate auth cookie payload
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time error")
-            .as_secs();
-        let auth_payload = serde_json::to_vec(&AuthCookie {
-            timestamp: now_secs,
-            client_addr: *client_address,
-            user_name: user_name.clone(),
-            user_id: *user_id,
-        })?;
-
-        // get resource packs to load
-        let packs = self
-            .resourcepack_supplier
-            .get_resourcepacks(
-                client_address,
-                (server_address, *server_port),
-                *protocol_version as Protocol,
-                user_name,
-                user_id,
-            )
-            .await?;
-        let pack_ids = packs.iter().map(|pack| (pack.uuid, pack.forced)).collect();
-
-        // switch to the configuration phase
-        self.phase = Configuration {
-            client_address: *client_address,
-            protocol_version: *protocol_version,
-            server_address: server_address.clone(),
-            server_port: *server_port,
-            user_name: user_name.clone(),
-            user_id: *user_id,
-            transit_packs: pack_ids,
-            last_keep_alive: KeepAlive::empty(),
-        };
-
-        // store auth cookie
-        if should_write_auth_cookie {
-            if let Some(secret) = &self.auth_secret {
-                self.write_packet(conf_out::StoreCookiePacket {
-                    key: AUTH_COOKIE_KEY.to_string(),
-                    payload: authentication::sign(&auth_payload, secret),
-                })
-                .await?;
-            }
-        }
-
-        // handle no resource packs to send
-        if packs.is_empty() {
-            return self.transfer().await;
-        }
-
-        // send resource packs
-        for pack in packs {
-            let packet = conf_out::AddResourcePackPacket {
-                uuid: pack.uuid,
-                url: pack.url,
-                hash: pack.hash,
-                forced: pack.forced,
-                prompt_message: pack.prompt_message,
-            };
-            self.write_packet(packet).await?;
-        }
-
-        Ok(())
-    }
-}
-
-impl<S> PacketHandler<conf_in::ClientInformationPacket> for Connection<S> where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
-{
-}
-
-impl<S> PacketHandler<conf_in::CookieResponsePacket> for Connection<S> where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
-{
-}
-
-impl<S> PacketHandler<conf_in::PluginMessagePacket> for Connection<S> where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
-{
-}
-
-impl<S> PacketHandler<conf_in::AckFinishConfigurationPacket> for Connection<S> where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
-{
-}
-
-impl<S> PacketHandler<conf_in::KeepAlivePacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
-{
-    async fn handle(&mut self, packet: conf_in::KeepAlivePacket) -> Result<(), Error>
-    where
-        conf_in::KeepAlivePacket: Packet,
-    {
-        debug!(packet = ?packet, "received keep alive packet");
-        phase!(self.phase, Phase::Configuration, last_keep_alive,);
-
-        if !last_keep_alive.replace(packet.id, 0) {
-            debug!(id = packet.id, "keep alive packet id unknown");
-        }
-
-        Ok(())
-    }
-}
-
-impl<S> PacketHandler<conf_in::PongPacket> for Connection<S> where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
-{
-}
-
-impl<S> PacketHandler<conf_in::ResourcePackResponsePacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
-{
-    async fn handle(&mut self, packet: conf_in::ResourcePackResponsePacket) -> Result<(), Error>
-    where
-        conf_in::ResourcePackResponsePacket: Packet,
-    {
-        debug!(packet = ?packet, "received keep alive packet");
-        phase!(self.phase, Phase::Configuration, transit_packs,);
-
-        // check the state for any final state in the resource pack loading process
-        let success = match packet.result {
-            ResourcePackResult::Success => true,
-            ResourcePackResult::Declined
-            | ResourcePackResult::DownloadFailed
-            | ResourcePackResult::InvalidUrl
-            | ResourcePackResult::ReloadFailed
-            | ResourcePackResult::Discorded => false,
-            _ => {
-                // pending state, keep waiting
-                return Ok(());
-            }
-        };
-
-        // pop pack from the list (ignoring unknown pack ids)
-        let Some(pos) = transit_packs
-            .iter()
-            .position(|(uuid, _)| uuid == &packet.uuid)
-        else {
-            return Ok(());
-        };
-        let (_, forced) = transit_packs.swap_remove(pos);
-
-        // handle pack forced
-        if forced && !success {
-            // TODO write actual reason
-            self.write_packet(conf_out::DisconnectPacket {
-                reason: "".to_string(),
-            })
-            .await?;
-            self.shutdown();
-            return Ok(());
-        }
-
-        // handle all packs transferred
-        if transit_packs.is_empty() {
-            return self.transfer().await;
-        }
-
-        Ok(())
-    }
-}
-
-impl<S> PacketHandler<conf_in::KnownPacksPacket> for Connection<S> where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
-{
 }

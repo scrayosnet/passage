@@ -5,15 +5,15 @@ use packets::login::serverbound as login_in;
 use packets::status::clientbound as status_out;
 use packets::status::serverbound as status_in;
 use packets::{AsyncReadPacket, AsyncWritePacket, State};
-use passage::adapter::resourcepack::ResourcepackSupplier;
 use passage::adapter::resourcepack::none::NoneResourcePackSupplier;
-use passage::adapter::status::StatusSupplier;
+use passage::adapter::resourcepack::ResourcepackSupplier;
 use passage::adapter::status::none::NoneStatusSupplier;
-use passage::adapter::target_selection::TargetSelector;
+use passage::adapter::status::StatusSupplier;
 use passage::adapter::target_selection::none::NoneTargetSelector;
+use passage::adapter::target_selection::TargetSelector;
 use passage::authentication;
 use passage::cipher_stream::CipherStream;
-use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection};
+use passage::connection::{AuthCookie, Connection, AUTH_COOKIE_KEY};
 use rand::rngs::OsRng;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
@@ -42,7 +42,6 @@ async fn simulate_handshake() {
     // build connection
     let mut server = Connection::new(
         server_stream,
-        client_address,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
@@ -51,7 +50,7 @@ async fn simulate_handshake() {
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
-        server.listen().await.expect("server listen failed");
+        server.listen(client_address).await.expect("server listen failed");
     });
 
     // simulate client
@@ -86,7 +85,6 @@ async fn simulate_status() {
     // build connection
     let mut server = Connection::new(
         server_stream,
-        client_address,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
@@ -95,7 +93,7 @@ async fn simulate_status() {
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
-        server.listen().await.expect("server listen failed");
+        server.listen(client_address).await.expect("server listen failed");
     });
 
     // simulate client
@@ -154,7 +152,6 @@ async fn simulate_transfer_no_configuration() {
     // build connection
     let mut server = Connection::new(
         server_stream,
-        client_address,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
@@ -163,7 +160,7 @@ async fn simulate_transfer_no_configuration() {
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
-        server.listen().await.expect("server listen failed");
+        server.listen(client_address).await.expect("server listen failed");
     });
 
     // simulate client

@@ -8,16 +8,16 @@ pub mod config;
 pub mod connection;
 pub mod rate_limiter;
 
-use crate::adapter::resourcepack::ResourcepackSupplier;
 use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
-use crate::adapter::status::StatusSupplier;
+use crate::adapter::resourcepack::ResourcepackSupplier;
 use crate::adapter::status::none::NoneStatusSupplier;
+use crate::adapter::status::StatusSupplier;
 use crate::adapter::target_selection::fixed::FixedTargetSelector;
 use crate::adapter::target_selection::none::NoneTargetSelector;
 use crate::adapter::target_selection::{Target, TargetSelector};
-use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::adapter::target_strategy::any::AnyTargetSelectorStrategy;
 use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
+use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::config::Config;
 use crate::connection::Connection;
 use crate::rate_limiter::RateLimiter;
@@ -137,7 +137,6 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
             // build connection wrapper for stream
             let mut con = Connection::new(
                 &mut stream,
-                addr,
                 Arc::clone(&status_supplier),
                 Arc::clone(&target_selector),
                 Arc::clone(&resourcepack_supplier),
@@ -145,7 +144,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
             );
 
             // handle the client connection
-            if let Err(err) = con.listen().await {
+            if let Err(err) = con.listen(addr).await {
                 warn!(
                     cause = err.to_string(),
                     addr = &addr.to_string(),
