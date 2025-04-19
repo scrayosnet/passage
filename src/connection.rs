@@ -21,6 +21,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
+use crate::connection::Phase::Ping;
 use packets::configuration::clientbound as conf_out;
 use packets::configuration::serverbound as conf_in;
 use packets::handshake::serverbound as hand_in;
@@ -62,7 +63,7 @@ pub enum Error {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct AuthCookie {
+pub struct AuthCookie {
     pub timestamp: u64,
     pub client_addr: SocketAddr,
     pub user_name: String,
@@ -70,9 +71,12 @@ struct AuthCookie {
 }
 
 trait PacketHandler<T>: Sized {
-    async fn handle(&mut self, packet: T) -> Result<(), Error>
+    async fn handle(&mut self, _packet: T) -> Result<(), Error>
     where
-        T: Packet;
+        T: Packet,
+    {
+        Ok(())
+    }
 }
 
 #[macro_export]
@@ -93,6 +97,12 @@ pub enum Phase {
         client_address: SocketAddr,
     },
     Status {
+        client_address: SocketAddr,
+        protocol_version: VarInt,
+        server_address: String,
+        server_port: u16,
+    },
+    Ping {
         client_address: SocketAddr,
         protocol_version: VarInt,
         server_address: String,
@@ -149,6 +159,7 @@ impl Phase {
         match self {
             Handshake { .. } => "Handshake",
             Status { .. } => "Status",
+            Ping { .. } => "Ping",
             Login { .. } => "Login",
             Transfer { .. } => "Transfer",
             Encryption { .. } => "Encryption",
@@ -326,7 +337,7 @@ where
                 self.handle(status_in::StatusRequestPacket::read_from_buffer(buf).await?)
                     .await
             }
-            (0x01, Status { .. }) => {
+            (0x01, Ping { .. }) => {
                 self.handle(status_in::PingPacket::read_from_buffer(buf).await?)
                     .await
             }
@@ -574,6 +585,13 @@ where
         // create a new status request packet and send it
         let json_response = serde_json::to_string(&status)?;
 
+        self.phase = Ping {
+            client_address: *client_address,
+            server_address: server_address.clone(),
+            server_port: *server_port,
+            protocol_version: *protocol_version,
+        };
+
         // create a new status response packet and send it
         let request = status_out::StatusResponsePacket {
             body: json_response,
@@ -594,7 +612,7 @@ where
         status_in::PingPacket: Packet,
     {
         debug!(packet = ?packet, "received ping packet");
-        phase!(self.phase, Status,);
+        phase!(self.phase, Ping,);
 
         // create a new pong packet and send it
         let pong_response = status_out::PongPacket {
@@ -840,7 +858,7 @@ where
             should_write_auth_cookie: *should_authenticate,
         };
 
-        // enable encryption for the selfnection using the shared secret
+        // enable encryption for the connection using the shared secret
         self.apply_encryption(&shared_secret)?;
 
         // create a new login success packet and send it
@@ -854,16 +872,9 @@ where
     }
 }
 
-impl<S> PacketHandler<login_in::LoginPluginResponsePacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+impl<S> PacketHandler<login_in::LoginPluginResponsePacket> for Connection<S> where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
 {
-    async fn handle(&mut self, _packet: login_in::LoginPluginResponsePacket) -> Result<(), Error>
-    where
-        login_in::LoginPluginResponsePacket: Packet,
-    {
-        Ok(())
-    }
 }
 
 impl<S> PacketHandler<login_in::LoginAcknowledgedPacket> for Connection<S>
@@ -877,7 +888,7 @@ where
         debug!(packet = ?packet, "received login acknowledged packet");
         phase!(
             self.phase,
-            Phase::Acknowledge,
+            Acknowledge,
             client_address,
             protocol_version,
             server_address,
@@ -913,8 +924,8 @@ where
             .await?;
         let pack_ids = packs.iter().map(|pack| (pack.uuid, pack.forced)).collect();
 
-        // switch to configuration phase
-        self.phase = Phase::Configuration {
+        // switch to the configuration phase
+        self.phase = Configuration {
             client_address: *client_address,
             protocol_version: *protocol_version,
             server_address: server_address.clone(),
@@ -957,52 +968,24 @@ where
     }
 }
 
-impl<S> PacketHandler<conf_in::ClientInformationPacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+impl<S> PacketHandler<conf_in::ClientInformationPacket> for Connection<S> where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
 {
-    async fn handle(&mut self, _packet: conf_in::ClientInformationPacket) -> Result<(), Error>
-    where
-        conf_in::ClientInformationPacket: Packet,
-    {
-        Ok(())
-    }
 }
 
-impl<S> PacketHandler<conf_in::CookieResponsePacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+impl<S> PacketHandler<conf_in::CookieResponsePacket> for Connection<S> where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
 {
-    async fn handle(&mut self, _packet: conf_in::CookieResponsePacket) -> Result<(), Error>
-    where
-        conf_in::CookieResponsePacket: Packet,
-    {
-        Ok(())
-    }
 }
 
-impl<S> PacketHandler<conf_in::PluginMessagePacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+impl<S> PacketHandler<conf_in::PluginMessagePacket> for Connection<S> where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
 {
-    async fn handle(&mut self, _packet: conf_in::PluginMessagePacket) -> Result<(), Error>
-    where
-        conf_in::PluginMessagePacket: Packet,
-    {
-        Ok(())
-    }
 }
 
-impl<S> PacketHandler<conf_in::AckFinishConfigurationPacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+impl<S> PacketHandler<conf_in::AckFinishConfigurationPacket> for Connection<S> where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
 {
-    async fn handle(&mut self, _packet: conf_in::AckFinishConfigurationPacket) -> Result<(), Error>
-    where
-        conf_in::AckFinishConfigurationPacket: Packet,
-    {
-        Ok(())
-    }
 }
 
 impl<S> PacketHandler<conf_in::KeepAlivePacket> for Connection<S>
@@ -1024,17 +1007,9 @@ where
     }
 }
 
-impl<S> PacketHandler<conf_in::PongPacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+impl<S> PacketHandler<conf_in::PongPacket> for Connection<S> where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
 {
-    async fn handle(&mut self, _packet: conf_in::PongPacket) -> Result<(), Error>
-    where
-        conf_in::PongPacket: Packet,
-    {
-        // TODO implement me?
-        Ok(())
-    }
 }
 
 impl<S> PacketHandler<conf_in::ResourcePackResponsePacket> for Connection<S>
@@ -1091,286 +1066,7 @@ where
     }
 }
 
-impl<S> PacketHandler<conf_in::KnownPacksPacket> for Connection<S>
-where
-    S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
+impl<S> PacketHandler<conf_in::KnownPacksPacket> for Connection<S> where
+    S: AsyncRead + AsyncWrite + Send + Sync + Unpin
 {
-    async fn handle(&mut self, _packet: conf_in::KnownPacksPacket) -> Result<(), Error>
-    where
-        conf_in::KnownPacksPacket: Packet,
-    {
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
-    use crate::adapter::status::ServerStatus;
-    use crate::adapter::target_selection::none::NoneTargetSelector;
-    use async_trait::async_trait;
-    use rand::rngs::OsRng;
-    use rsa::pkcs8::DecodePublicKey;
-    use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
-    use std::str::FromStr;
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use uuid::uuid;
-
-    struct NoneStatusSupplier;
-
-    #[async_trait]
-    impl StatusSupplier for NoneStatusSupplier {
-        async fn get_status(
-            &self,
-            _client_addr: &SocketAddr,
-            _server_addr: (&str, u16),
-            protocol: Protocol,
-        ) -> Result<Option<ServerStatus>, Error> {
-            let mut status = ServerStatus::default();
-            status.version.protocol = protocol;
-            Ok(Some(status))
-        }
-    }
-
-    pub fn encrypt(key: &RsaPublicKey, value: &[u8]) -> Vec<u8> {
-        key.encrypt(&mut OsRng, Pkcs1v15Encrypt, value)
-            .expect("encrypt failed")
-    }
-
-    #[tokio::test]
-    async fn simulate_handshake() {
-        // create stream
-        let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
-        let server_address = SocketAddr::from_str("127.0.0.1:25565").expect("invalid address");
-        let (mut client_stream, server_stream) = tokio::io::duplex(1024);
-
-        // build supplier
-        let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-        let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector);
-        let resourcepack_supplier: Arc<dyn ResourcepackSupplier> =
-            Arc::new(NoneResourcePackSupplier);
-
-        // build connection
-        let mut server = Connection::new(
-            server_stream,
-            client_address,
-            Arc::clone(&status_supplier),
-            Arc::clone(&target_selector),
-            Arc::clone(&resourcepack_supplier),
-            None,
-        );
-
-        // start the server in its own thread
-        let server = tokio::spawn(async move {
-            server.listen().await.expect("server listen failed");
-        });
-
-        // simulate client
-        client_stream
-            .write_packet(hand_in::HandshakePacket {
-                protocol_version: 0,
-                server_address: "".to_string(),
-                server_port: 0,
-                next_state: State::Status,
-            })
-            .await
-            .expect("send handshake failed");
-
-        // simulate connection closed after the handshake packet
-        drop(client_stream);
-
-        // wait for the server to finish
-        server.await.expect("server run failed");
-    }
-
-    #[tokio::test]
-    async fn simulate_status() {
-        // create stream
-        let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
-        let server_address = SocketAddr::from_str("127.0.0.1:25565").expect("invalid address");
-        let (mut client_stream, server_stream) = tokio::io::duplex(1024);
-
-        // build supplier
-        let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-        let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector);
-        let resourcepack_supplier: Arc<dyn ResourcepackSupplier> =
-            Arc::new(NoneResourcePackSupplier);
-
-        // build connection
-        let mut server = Connection::new(
-            server_stream,
-            client_address,
-            Arc::clone(&status_supplier),
-            Arc::clone(&target_selector),
-            Arc::clone(&resourcepack_supplier),
-            None,
-        );
-
-        // start the server in its own thread
-        let server = tokio::spawn(async move {
-            server.listen().await.expect("server listen failed");
-        });
-
-        // simulate client
-        client_stream
-            .write_packet(hand_in::HandshakePacket {
-                protocol_version: 0,
-                server_address: "".to_string(),
-                server_port: 0,
-                next_state: State::Status,
-            })
-            .await
-            .expect("send handshake failed");
-
-        client_stream
-            .write_packet(status_in::StatusRequestPacket)
-            .await
-            .expect("send status request failed");
-
-        let status_response_packet: status_out::StatusResponsePacket = client_stream
-            .read_packet()
-            .await
-            .expect("status response packet read failed");
-        assert_eq!(
-            status_response_packet.body,
-            "{\"version\":{\"name\":\"JustChunks\",\"protocol\":0},\"players\":null,\"description\":null,\"favicon\":null,\"enforcesSecureChat\":null}"
-        );
-
-        client_stream
-            .write_packet(status_in::PingPacket { payload: 42 })
-            .await
-            .expect("send ping request failed");
-
-        let pong_packet: status_out::PongPacket = client_stream
-            .read_packet()
-            .await
-            .expect("pong packet read failed");
-        assert_eq!(pong_packet.payload, 42);
-
-        // wait for the server to finish
-        server.await.expect("server run failed");
-    }
-
-    #[tokio::test]
-    async fn simulate_transfer_no_configuration() {
-        let shared_secret = b"verysecuresecret";
-        let user_name = "Hydrofin".to_owned();
-        let user_id = uuid!("09879557-e479-45a9-b434-a56377674627");
-
-        // create stream
-        let auth_secret = b"secret".to_vec();
-        let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
-        let server_address = SocketAddr::from_str("127.0.0.1:25565").expect("invalid address");
-        let (mut client_stream, server_stream) = tokio::io::duplex(1024);
-
-        // build supplier
-        let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-        let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector);
-        let resourcepack_supplier: Arc<dyn ResourcepackSupplier> =
-            Arc::new(NoneResourcePackSupplier);
-
-        // build connection
-        let mut server = Connection::new(
-            server_stream,
-            client_address,
-            Arc::clone(&status_supplier),
-            Arc::clone(&target_selector),
-            Arc::clone(&resourcepack_supplier),
-            Some(auth_secret.clone()),
-        );
-
-        // start the server in its own thread
-        let server = tokio::spawn(async move {
-            server.listen().await.expect("server listen failed");
-        });
-
-        // simulate client
-        client_stream
-            .write_packet(hand_in::HandshakePacket {
-                protocol_version: 0,
-                server_address: "".to_string(),
-                server_port: 0,
-                next_state: State::Transfer,
-            })
-            .await
-            .expect("send handshake failed");
-
-        client_stream
-            .write_packet(login_in::LoginStartPacket {
-                user_name: user_name.clone(),
-                user_id,
-            })
-            .await
-            .expect("send login start failed");
-
-        let cookie_request_packet: login_out::CookieRequestPacket = client_stream
-            .read_packet()
-            .await
-            .expect("cookie request packet read failed");
-        assert_eq!(&cookie_request_packet.key, AUTH_COOKIE_KEY);
-
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time error")
-            .as_secs();
-        let auth_payload = serde_json::to_vec(&AuthCookie {
-            timestamp: now_secs,
-            client_addr: client_address,
-            user_name: user_name.clone(),
-            user_id,
-        })
-        .expect("auth cookie serialization failed");
-
-        client_stream
-            .write_packet(login_in::CookieResponsePacket {
-                key: cookie_request_packet.key,
-                payload: Some(authentication::sign(&auth_payload, &auth_secret)),
-            })
-            .await
-            .expect("send cookie response failed");
-
-        let encryption_request_packet: login_out::EncryptionRequestPacket = client_stream
-            .read_packet()
-            .await
-            .expect("encryption request packet read failed");
-        assert!(!encryption_request_packet.should_authenticate);
-
-        let pub_key = RsaPublicKey::from_public_key_der(&encryption_request_packet.public_key)
-            .expect("public key deserialization failed");
-        let enc_shared_secret = encrypt(&pub_key, shared_secret);
-        let enc_verify_token = encrypt(&pub_key, &encryption_request_packet.verify_token);
-        client_stream
-            .write_packet(login_in::EncryptionResponsePacket {
-                shared_secret: enc_shared_secret,
-                verify_token: enc_verify_token,
-            })
-            .await
-            .expect("send encryption response failed");
-
-        let (encryptor, decryptor) =
-            authentication::create_ciphers(shared_secret).expect("create ciphers failed");
-        let mut client_stream = CipherStream::new(client_stream, Some(encryptor), Some(decryptor));
-
-        let login_success_packet: login_out::LoginSuccessPacket = client_stream
-            .read_packet()
-            .await
-            .expect("login success packet read failed");
-        assert_eq!(login_success_packet.user_name, user_name);
-        assert_eq!(login_success_packet.user_id, user_id);
-
-        client_stream
-            .write_packet(login_in::LoginAcknowledgedPacket)
-            .await
-            .expect("send login acknowledged packet failed");
-
-        // disconnect as no target configured
-        let _disconnect_packet: conf_out::DisconnectPacket = client_stream
-            .read_packet()
-            .await
-            .expect("disconnect packet read failed");
-
-        // wait for the server to finish
-        server.await.expect("server run failed");
-    }
 }
