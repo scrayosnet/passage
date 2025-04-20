@@ -40,4 +40,7 @@ sentry-tracing = "0.37"
 async-trait = "0.1"
 sha2 = "0.10.8"
 hmac = "0.12.1"
+packets = { path = "./packets", features = ["server"] }
+
+[dev-dependencies]
 packets = { path = "./packets", features = ["server", "client"] }
