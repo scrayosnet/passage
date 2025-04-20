@@ -21,7 +21,7 @@ pub trait ResourcepackSupplier: Send + Sync {
     ) -> Result<Vec<Resourcepack>, Error>;
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Default, Debug, Serialize, Deserialize, Clone)]
 pub struct Resourcepack {
     pub uuid: Uuid,
     pub url: String,
