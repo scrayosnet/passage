@@ -29,6 +29,31 @@ use packets::login::serverbound as login_in;
 use packets::status::clientbound as status_out;
 use packets::status::serverbound as status_in;
 
+#[macro_export]
+macro_rules! match_packet {
+    // macro variant without sending keep-alive packets
+    { $con:expr, $($packet:pat = $packet_type:ty => $handler:expr,)* } => {
+        match_packet! { $con, false, $($packet = $packet_type => $handler,)* }
+    };
+    // macro variant with sending keep-alive packets
+    { $con:expr, keep_alive, $($packet:pat = $packet_type:ty => $handler:expr,)* } => {
+        match_packet! { $con, true, $($packet = $packet_type => $handler,)* }
+    };
+    // general macro implementation with boolean for sending keep-alive packets
+    {$con:expr, $keep_alive:expr, $($packet:pat = $packet_type:ty => $handler:expr,)* } => {{
+        let (id, mut buf) = $con.next_packet($keep_alive).await?;
+        match id {
+            $(
+                <$packet_type>::ID => {
+                    let $packet = <$packet_type>::read_from_buffer(&mut buf).await?;
+                    $handler
+                },
+            )*
+            _ => return Err(Error::InvalidProtocol),
+        }
+    }};
+}
+
 /// The max packet length in bytes. Larger packets are rejected.
 const MAX_PACKET_LENGTH: VarInt = 10_000;
 
@@ -95,25 +120,6 @@ pub struct AuthCookie {
     pub client_addr: SocketAddr,
     pub user_name: String,
     pub user_id: Uuid,
-}
-
-#[macro_export]
-macro_rules! match_packet {
-    {
-        $con:expr, $keep_alive:expr,
-        $($packet:pat = $packet_type:ty => $handler:expr,)*
-    } => {{
-        let (id, mut buf) = $con.next_packet($keep_alive).await?;
-        match id {
-            $(
-                <$packet_type>::ID => {
-                    let $packet = <$packet_type>::read_from_buffer(&mut buf).await?;
-                    $handler
-                },
-            )*
-            _ => return Err(Error::InvalidProtocol),
-        }
-    }}
 }
 
 #[derive(Debug)]
@@ -264,13 +270,13 @@ where
 
     async fn run_protocol(&mut self, client_address: SocketAddr) -> Result<(), Error> {
         // handle handshake
-        let handshake = match_packet! { self, false,
+        let handshake = match_packet! { self,
             packet = hand_in::HandshakePacket => packet,
         };
 
         // handle status request
         if handshake.next_state == State::Status {
-            let _ = match_packet! { self, false,
+            let _ = match_packet! { self,
                 packet = status_in::StatusRequestPacket => packet,
             };
 
@@ -287,7 +293,7 @@ where
                 body: serde_json::to_string(&status)?,
             }).await?;
 
-            let ping = match_packet! { self, false,
+            let ping = match_packet! { self,
                 packet = status_in::PingPacket => packet,
             };
 
@@ -299,7 +305,7 @@ where
         }
 
         // handle login request
-        let mut login_start = match_packet! { self, false,
+        let mut login_start = match_packet! { self,
             packet = login_in::LoginStartPacket => packet,
         };
 
@@ -315,7 +321,7 @@ where
                     key: AUTH_COOKIE_KEY.to_string(),
                 }).await?;
 
-                let cookie = match_packet! { self, false,
+                let cookie = match_packet! { self,
                     packet = login_in::CookieResponsePacket => packet,
                 };
 
@@ -361,7 +367,7 @@ where
             should_authenticate,
         }).await?;
 
-        let encrypt = match_packet! { self, false,
+        let encrypt = match_packet! { self,
             packet = login_in::EncryptionResponsePacket => packet,
         };
 
@@ -395,7 +401,7 @@ where
             user_id: login_start.user_id,
         }).await?;
 
-        let _ = match_packet! { self, false,
+        let _ = match_packet! { self,
             packet = login_in::LoginAcknowledgedPacket => packet,
         };
 
@@ -450,7 +456,7 @@ where
 
         // wait for resource packs to be accepted
         while !pack_ids.is_empty() {
-            let packet = match_packet! { self, true,
+            let packet = match_packet! { self, keep_alive,
                 packet = conf_in::ResourcePackResponsePacket => packet,
                 // handle keep alive packets
                 packet = conf_in::KeepAlivePacket => {
