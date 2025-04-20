@@ -78,10 +78,6 @@ pub enum Error {
     #[error("{0}")]
     PacketError(#[from] packets::Error),
 
-    /// The connection was closed.
-    #[error("Connection closed")]
-    ConnectionClosed,
-
     /// Keep-alive was not received.
     #[error("Missed keep-alive")]
     MissedKeepAlive,
@@ -89,13 +85,6 @@ pub enum Error {
     /// Some protocol error occurred.
     #[error("Some protocol error occurred")]
     InvalidProtocol,
-
-    /// The packet handle was called while in an unexpected phase.
-    #[error("invalid state: {actual} (expected {expected})")]
-    InvalidState {
-        expected: &'static str,
-        actual: &'static str,
-    },
 }
 
 impl Error {
@@ -103,7 +92,6 @@ impl Error {
         let err = match self {
             Error::Io(err) => err,
             Error::PacketError(err) => return err.is_connection_closed(),
-            Error::ConnectionClosed => return true,
             _ => return false,
         };
 

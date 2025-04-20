@@ -70,7 +70,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         "none" => Arc::new(NoneTargetSelector) as Arc<dyn TargetSelector>,
         "fixed" => {
             let Some(fixed) = config.target.fixed.clone() else {
-                return Err("".into());
+                return Err("fixed target selector adapter requires a configuration".into());
             };
             let target = Target {
                 identifier: fixed.identifier,
