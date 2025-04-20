@@ -30,9 +30,7 @@ pub mod clientbound {
     }
 
     impl Packet for StatusResponsePacket {
-        fn get_packet_id() -> VarInt {
-            0x00
-        }
+        const ID: VarInt = 0x00;
     }
 
     #[cfg(feature = "server")]
@@ -71,9 +69,7 @@ pub mod clientbound {
     }
 
     impl Packet for PongPacket {
-        fn get_packet_id() -> VarInt {
-            0x01
-        }
+        const ID: VarInt = 0x01;
     }
 
     #[cfg(feature = "server")]
@@ -123,9 +119,7 @@ pub mod serverbound {
     pub struct StatusRequestPacket;
 
     impl Packet for StatusRequestPacket {
-        fn get_packet_id() -> VarInt {
-            0x00
-        }
+        const ID: VarInt = 0x00;
     }
 
     #[cfg(feature = "client")]
@@ -159,9 +153,7 @@ pub mod serverbound {
     }
 
     impl Packet for PingPacket {
-        fn get_packet_id() -> VarInt {
-            0x01
-        }
+        const ID: VarInt = 0x01;
     }
 
     #[cfg(feature = "client")]

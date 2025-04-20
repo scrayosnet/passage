@@ -35,9 +35,7 @@ pub mod serverbound {
     }
 
     impl Packet for HandshakePacket {
-        fn get_packet_id() -> VarInt {
-            0x00
-        }
+        const ID: VarInt = 0x00;
     }
 
     #[cfg(feature = "client")]

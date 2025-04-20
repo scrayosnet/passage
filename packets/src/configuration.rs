@@ -28,9 +28,7 @@ pub mod clientbound {
     pub struct CookieRequestPacket;
 
     impl Packet for CookieRequestPacket {
-        fn get_packet_id() -> VarInt {
-            0x00
-        }
+        const ID: VarInt = 0x00;
     }
 
     #[cfg(feature = "server")]
@@ -65,9 +63,7 @@ pub mod clientbound {
     pub struct PluginMessagePacket;
 
     impl Packet for PluginMessagePacket {
-        fn get_packet_id() -> VarInt {
-            0x01
-        }
+        const ID: VarInt = 0x01;
     }
 
     #[cfg(feature = "server")]
@@ -101,9 +97,7 @@ pub mod clientbound {
     }
 
     impl Packet for DisconnectPacket {
-        fn get_packet_id() -> VarInt {
-            0x02
-        }
+        const ID: VarInt = 0x02;
     }
 
     #[cfg(feature = "server")]
@@ -137,9 +131,7 @@ pub mod clientbound {
     pub struct FinishConfigurationPacket;
 
     impl Packet for FinishConfigurationPacket {
-        fn get_packet_id() -> VarInt {
-            0x03
-        }
+        const ID: VarInt = 0x03;
     }
 
     #[cfg(feature = "server")]
@@ -184,9 +176,7 @@ pub mod clientbound {
     }
 
     impl Packet for KeepAlivePacket {
-        fn get_packet_id() -> VarInt {
-            0x04
-        }
+        const ID: VarInt = 0x04;
     }
 
     #[cfg(feature = "server")]
@@ -226,9 +216,7 @@ pub mod clientbound {
     }
 
     impl Packet for PingPacket {
-        fn get_packet_id() -> VarInt {
-            0x05
-        }
+        const ID: VarInt = 0x05;
     }
 
     #[cfg(feature = "server")]
@@ -263,9 +251,7 @@ pub mod clientbound {
     pub struct ResetChatPacket;
 
     impl Packet for ResetChatPacket {
-        fn get_packet_id() -> VarInt {
-            0x06
-        }
+        const ID: VarInt = 0x06;
     }
 
     #[cfg(feature = "server")]
@@ -299,9 +285,7 @@ pub mod clientbound {
     pub struct RegistryDataPacket;
 
     impl Packet for RegistryDataPacket {
-        fn get_packet_id() -> VarInt {
-            0x07
-        }
+        const ID: VarInt = 0x07;
     }
 
     #[cfg(feature = "server")]
@@ -332,9 +316,7 @@ pub mod clientbound {
     pub struct RemoveResourcePackPacket;
 
     impl Packet for RemoveResourcePackPacket {
-        fn get_packet_id() -> VarInt {
-            0x08
-        }
+        const ID: VarInt = 0x08;
     }
 
     #[cfg(feature = "server")]
@@ -372,9 +354,7 @@ pub mod clientbound {
     }
 
     impl Packet for AddResourcePackPacket {
-        fn get_packet_id() -> VarInt {
-            0x09
-        }
+        const ID: VarInt = 0x09;
     }
 
     #[cfg(feature = "server")]
@@ -437,9 +417,7 @@ pub mod clientbound {
     }
 
     impl Packet for StoreCookiePacket {
-        fn get_packet_id() -> VarInt {
-            0x0A
-        }
+        const ID: VarInt = 0x0A;
     }
 
     #[cfg(feature = "server")]
@@ -482,9 +460,7 @@ pub mod clientbound {
     }
 
     impl Packet for TransferPacket {
-        fn get_packet_id() -> VarInt {
-            0x0B
-        }
+        const ID: VarInt = 0x0B;
     }
 
     #[cfg(feature = "server")]
@@ -523,9 +499,7 @@ pub mod clientbound {
     pub struct FeatureFlagsPacket;
 
     impl Packet for FeatureFlagsPacket {
-        fn get_packet_id() -> VarInt {
-            0x0C
-        }
+        const ID: VarInt = 0x0C;
     }
 
     #[cfg(feature = "server")]
@@ -556,9 +530,7 @@ pub mod clientbound {
     pub struct UpdateTagsPacket;
 
     impl Packet for UpdateTagsPacket {
-        fn get_packet_id() -> VarInt {
-            0x0D
-        }
+        const ID: VarInt = 0x0D;
     }
 
     #[cfg(feature = "server")]
@@ -594,9 +566,7 @@ pub mod clientbound {
     pub struct KnownPacksPacket;
 
     impl Packet for KnownPacksPacket {
-        fn get_packet_id() -> VarInt {
-            0x0E
-        }
+        const ID: VarInt = 0x0E;
     }
 
     #[cfg(feature = "server")]
@@ -630,9 +600,7 @@ pub mod clientbound {
     pub struct CustomReportDetailsPacket;
 
     impl Packet for CustomReportDetailsPacket {
-        fn get_packet_id() -> VarInt {
-            0x0F
-        }
+        const ID: VarInt = 0x0F;
     }
 
     #[cfg(feature = "server")]
@@ -666,9 +634,7 @@ pub mod clientbound {
     pub struct ServerLinksPacket;
 
     impl Packet for ServerLinksPacket {
-        fn get_packet_id() -> VarInt {
-            0x10
-        }
+        const ID: VarInt = 0x10;
     }
 
     #[cfg(feature = "server")]
@@ -723,9 +689,7 @@ pub mod serverbound {
     }
 
     impl Packet for ClientInformationPacket {
-        fn get_packet_id() -> VarInt {
-            0x00
-        }
+        const ID: VarInt = 0x00;
     }
 
     #[cfg(feature = "client")]
@@ -789,9 +753,7 @@ pub mod serverbound {
     pub struct CookieResponsePacket;
 
     impl Packet for CookieResponsePacket {
-        fn get_packet_id() -> VarInt {
-            0x01
-        }
+        const ID: VarInt = 0x01;
     }
 
     #[cfg(feature = "client")]
@@ -829,9 +791,7 @@ pub mod serverbound {
     pub struct PluginMessagePacket;
 
     impl Packet for PluginMessagePacket {
-        fn get_packet_id() -> VarInt {
-            0x02
-        }
+        const ID: VarInt = 0x02;
     }
 
     #[cfg(feature = "client")]
@@ -865,9 +825,7 @@ pub mod serverbound {
     pub struct AckFinishConfigurationPacket;
 
     impl Packet for AckFinishConfigurationPacket {
-        fn get_packet_id() -> VarInt {
-            0x03
-        }
+        const ID: VarInt = 0x03;
     }
 
     #[cfg(feature = "client")]
@@ -906,9 +864,7 @@ pub mod serverbound {
     }
 
     impl Packet for KeepAlivePacket {
-        fn get_packet_id() -> VarInt {
-            0x04
-        }
+        const ID: VarInt = 0x04;
     }
 
     #[cfg(feature = "client")]
@@ -946,9 +902,7 @@ pub mod serverbound {
     }
 
     impl Packet for PongPacket {
-        fn get_packet_id() -> VarInt {
-            0x05
-        }
+        const ID: VarInt = 0x05;
     }
 
     #[cfg(feature = "client")]
@@ -986,9 +940,7 @@ pub mod serverbound {
     }
 
     impl Packet for ResourcePackResponsePacket {
-        fn get_packet_id() -> VarInt {
-            0x06
-        }
+        const ID: VarInt = 0x06;
     }
 
     #[cfg(feature = "client")]
@@ -1029,9 +981,7 @@ pub mod serverbound {
     pub struct KnownPacksPacket;
 
     impl Packet for KnownPacksPacket {
-        fn get_packet_id() -> VarInt {
-            0x07
-        }
+        const ID: VarInt = 0x07;
     }
 
     #[cfg(feature = "client")]

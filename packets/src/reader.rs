@@ -12,7 +12,7 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
 
         // extract the encoded packets id and validate if it is expected
         let packet_id = self.read_varint().await?;
-        let expected_packet_id = T::get_packet_id();
+        let expected_packet_id = T::ID;
         if packet_id != expected_packet_id {
             return Err(Error::IllegalPacketId {
                 expected: expected_packet_id,

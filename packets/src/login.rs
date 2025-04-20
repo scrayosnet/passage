@@ -29,9 +29,7 @@ pub mod clientbound {
     }
 
     impl Packet for DisconnectPacket {
-        fn get_packet_id() -> VarInt {
-            0x00
-        }
+        const ID: VarInt = 0x00;
     }
 
     #[cfg(feature = "server")]
@@ -72,9 +70,7 @@ pub mod clientbound {
     }
 
     impl Packet for EncryptionRequestPacket {
-        fn get_packet_id() -> VarInt {
-            0x01
-        }
+        const ID: VarInt = 0x01;
     }
 
     #[cfg(feature = "server")]
@@ -128,9 +124,7 @@ pub mod clientbound {
     }
 
     impl Packet for LoginSuccessPacket {
-        fn get_packet_id() -> VarInt {
-            0x02
-        }
+        const ID: VarInt = 0x02;
     }
 
     #[cfg(feature = "server")]
@@ -177,9 +171,7 @@ pub mod clientbound {
     pub struct SetCompressionPacket;
 
     impl Packet for SetCompressionPacket {
-        fn get_packet_id() -> VarInt {
-            0x03
-        }
+        const ID: VarInt = 0x03;
     }
 
     #[cfg(feature = "server")]
@@ -215,9 +207,7 @@ pub mod clientbound {
     pub struct LoginPluginRequestPacket;
 
     impl Packet for LoginPluginRequestPacket {
-        fn get_packet_id() -> VarInt {
-            0x04
-        }
+        const ID: VarInt = 0x04;
     }
 
     #[cfg(feature = "server")]
@@ -252,9 +242,7 @@ pub mod clientbound {
     }
 
     impl Packet for CookieRequestPacket {
-        fn get_packet_id() -> VarInt {
-            0x05
-        }
+        const ID: VarInt = 0x05;
     }
 
     #[cfg(feature = "server")]
@@ -305,9 +293,7 @@ pub mod serverbound {
     }
 
     impl Packet for LoginStartPacket {
-        fn get_packet_id() -> VarInt {
-            0x00
-        }
+        const ID: VarInt = 0x00;
     }
 
     #[cfg(feature = "client")]
@@ -350,9 +336,7 @@ pub mod serverbound {
     }
 
     impl Packet for EncryptionResponsePacket {
-        fn get_packet_id() -> VarInt {
-            0x01
-        }
+        const ID: VarInt = 0x01;
     }
 
     #[cfg(feature = "client")]
@@ -392,9 +376,7 @@ pub mod serverbound {
     pub struct LoginPluginResponsePacket;
 
     impl Packet for LoginPluginResponsePacket {
-        fn get_packet_id() -> VarInt {
-            0x02
-        }
+        const ID: VarInt = 0x02;
     }
 
     #[cfg(feature = "client")]
@@ -425,9 +407,7 @@ pub mod serverbound {
     pub struct LoginAcknowledgedPacket;
 
     impl Packet for LoginAcknowledgedPacket {
-        fn get_packet_id() -> VarInt {
-            0x03
-        }
+        const ID: VarInt = 0x03;
     }
 
     #[cfg(feature = "client")]
@@ -461,9 +441,7 @@ pub mod serverbound {
     }
 
     impl Packet for CookieResponsePacket {
-        fn get_packet_id() -> VarInt {
-            0x04
-        }
+        const ID: VarInt = 0x04;
     }
 
     #[cfg(feature = "client")]

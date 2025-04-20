@@ -3,6 +3,7 @@ use crate::adapter::status::{Protocol, StatusSupplier};
 use crate::adapter::target_selection::TargetSelector;
 use crate::authentication;
 use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
+use packets::Packet;
 use packets::{
     AsyncReadPacket, AsyncWritePacket, ReadPacket, ResourcePackResult, State, VarInt,
 };
@@ -100,12 +101,12 @@ pub struct AuthCookie {
 macro_rules! match_packet {
     {
         $con:expr, $keep_alive:expr,
-        $($packet:pat = $packet_id:literal, $packet_type:ty => $handler:expr,)*
+        $($packet:pat = $packet_type:ty => $handler:expr,)*
     } => {{
         let (id, mut buf) = $con.next_packet($keep_alive).await?;
         match id {
             $(
-                $packet_id => {
+                <$packet_type>::ID => {
                     let $packet = <$packet_type>::read_from_buffer(&mut buf).await?;
                     $handler
                 },
@@ -264,13 +265,13 @@ where
     async fn run_protocol(&mut self, client_address: SocketAddr) -> Result<(), Error> {
         // handle handshake
         let handshake = match_packet! { self, false,
-            packet = 0x00, hand_in::HandshakePacket => packet,
+            packet = hand_in::HandshakePacket => packet,
         };
 
         // handle status request
         if handshake.next_state == State::Status {
             let _ = match_packet! { self, false,
-                packet = 0x00, status_in::StatusRequestPacket => packet,
+                packet = status_in::StatusRequestPacket => packet,
             };
 
             let status = self
@@ -287,7 +288,7 @@ where
             }).await?;
 
             let ping = match_packet! { self, false,
-                packet = 0x01, status_in::PingPacket => packet,
+                packet = status_in::PingPacket => packet,
             };
 
             self.write_packet(status_out::PongPacket {
@@ -299,7 +300,7 @@ where
 
         // handle login request
         let mut login_start = match_packet! { self, false,
-            packet = 0x00, login_in::LoginStartPacket => packet,
+            packet = login_in::LoginStartPacket => packet,
         };
 
         // in case of transfer, use the auth cookie
@@ -315,7 +316,7 @@ where
                 }).await?;
 
                 let cookie = match_packet! { self, false,
-                    packet = 0x04, login_in::CookieResponsePacket => packet,
+                    packet = login_in::CookieResponsePacket => packet,
                 };
 
                 let Some(message) = cookie.payload else {
@@ -361,7 +362,7 @@ where
         }).await?;
 
         let encrypt = match_packet! { self, false,
-            packet = 0x01, login_in::EncryptionResponsePacket => packet,
+            packet = login_in::EncryptionResponsePacket => packet,
         };
 
         // decrypt the shared secret and verify the token
@@ -395,7 +396,7 @@ where
         }).await?;
 
         let _ = match_packet! { self, false,
-            packet = 0x03, login_in::LoginAcknowledgedPacket => packet,
+            packet = login_in::LoginAcknowledgedPacket => packet,
         };
 
         // write auth cookie
@@ -450,17 +451,17 @@ where
         // wait for resource packs to be accepted
         while !pack_ids.is_empty() {
             let packet = match_packet! { self, true,
-                packet = 0x06, conf_in::ResourcePackResponsePacket => packet,
+                packet = conf_in::ResourcePackResponsePacket => packet,
                 // handle keep alive packets
-                packet = 0x04, conf_in::KeepAlivePacket => {
+                packet = conf_in::KeepAlivePacket => {
                     if !self.keep_alive.replace(packet.id, 0) {
                         debug!(id = packet.id, "keep alive packet id unknown");
                     }
                     continue;
                 },
                 // ignore unsupported packets but don't throw an error
-                _ = 0x00, conf_in::ClientInformationPacket => continue,
-                _ = 0x02, conf_in::PluginMessagePacket => continue,
+                _ = conf_in::ClientInformationPacket => continue,
+                _ = conf_in::PluginMessagePacket => continue,
             };
 
             // check the state for any final state in the resource pack loading process

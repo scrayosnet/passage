@@ -297,7 +297,7 @@ impl TryFrom<VarInt> for ParticleStatus {
 /// Packets are network packets that are part of the protocol definition and identified by a context and ID.
 pub trait Packet {
     /// Returns the defined ID of this network packet.
-    fn get_packet_id() -> VarInt;
+    const ID: VarInt;
 }
 
 /// `WritePacket`s are packets that can be written to a buffer.
@@ -443,7 +443,7 @@ mod tests {
             .await
             .expect("failed to read packets");
 
-        assert_eq!(T::get_packet_id(), packet_id, "mismatching packet id");
+        assert_eq!(T::ID, packet_id, "mismatching packet id");
         assert_eq!(expected, actual);
         assert_eq!(
             reader.position() as usize,
