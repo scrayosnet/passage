@@ -3,22 +3,25 @@ use crate::adapter::status::{Protocol, StatusSupplier};
 use crate::adapter::target_selection::TargetSelector;
 use crate::authentication;
 use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
-use packets::Packet;
 use packets::{AsyncReadPacket, AsyncWritePacket, ReadPacket, ResourcePackResult, State, VarInt};
+use packets::{Packet, WritePacket};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::{Cursor, ErrorKind};
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::io::AsyncReadExt;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::io::{AsyncReadExt, ReadBuf};
 use tokio::time::{Instant, Interval};
 use tracing::debug;
 use uuid::Uuid;
 
+use crate::metrics::{
+    Guard, RECEIVED_PACKETS, REQUEST_DURATION, RESOURCEPACK_DURATION, ReceivedPackets,
+    RequestDurationLabels, ResourcePackDurationLabels, SENT_PACKETS, SentPackets,
+};
 use packets::configuration::clientbound as conf_out;
 use packets::configuration::serverbound as conf_in;
 use packets::handshake::serverbound as hand_in;
@@ -39,7 +42,7 @@ macro_rules! match_packet {
     };
     // general macro implementation with boolean for sending keep-alive packets
     {$con:expr, $keep_alive:expr, $($packet:pat = $packet_type:ty => $handler:expr,)* } => {{
-        let (id, mut buf) = $con.next_packet($keep_alive).await?;
+        let (id, mut buf) = $con.receive_packet($keep_alive).await?;
         match id {
             $(
                 <$packet_type>::ID => {
@@ -179,7 +182,10 @@ impl<S> Connection<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
 {
-    async fn next_packet(&mut self, keep_alive: bool) -> Result<(VarInt, Cursor<Vec<u8>>), Error> {
+    async fn receive_packet(
+        &mut self,
+        keep_alive: bool,
+    ) -> Result<(VarInt, Cursor<Vec<u8>>), Error> {
         // start ticker for keep-alive packets (use delay so that we don't miss any)
         let duration = Duration::from_secs(10);
         let mut interval = tokio::time::interval_at(self.keep_alive.last_sent + duration, duration);
@@ -195,21 +201,23 @@ where
                     self.keep_alive.last_sent = Instant::now();
                     let id = authentication::generate_keep_alive();
                     if !self.keep_alive.replace(0, id) {
-                        self.write_packet(conf_out::DisconnectPacket {
+                        self.send_packet(conf_out::DisconnectPacket {
                             reason: "Missed Keepalive".to_string(),
                         })
                         .await?;
                         return Err(Error::MissedKeepAlive);
                     }
                     let packet = conf_out::KeepAlivePacket { id };
-                    self.write_packet(packet).await?;
+                    self.send_packet(packet).await?;
                 },
                 // await the next packet in, reading the packet size (expect fast execution)
-                maybe_length = self.read_varint() => {
+                maybe_length = self.stream.read_varint() => {
                     break maybe_length?;
                 },
             }
         };
+
+        RECEIVED_PACKETS.get_or_create(&ReceivedPackets {}).inc();
 
         // check the length of the packet for any following content
         if length == 0 || length > MAX_PACKET_LENGTH {
@@ -221,16 +229,25 @@ where
         }
 
         // extract the encoded packet id
-        let id = self.read_varint().await?;
+        let id = self.stream.read_varint().await?;
 
         // split a separate reader from the stream and read packet bytes (advancing stream)
         let mut buffer = vec![];
-        self.take(length as u64 - 1)
+        (&mut self.stream)
+            .take(length as u64 - 1)
             .read_to_end(&mut buffer)
             .await?;
         let buf = Cursor::new(buffer);
 
         Ok((id, buf))
+    }
+
+    async fn send_packet<T: WritePacket + Send + Sync + Debug>(
+        &mut self,
+        packet: T,
+    ) -> Result<(), Error> {
+        SENT_PACKETS.get_or_create(&SentPackets {}).inc();
+        Ok(self.stream.write_packet(packet).await?)
     }
 
     fn apply_encryption(&mut self, shared_secret: &[u8]) -> Result<(), Error> {
@@ -258,10 +275,28 @@ where
     }
 
     async fn run_protocol(&mut self, client_address: SocketAddr) -> Result<(), Error> {
+        let start = Instant::now();
+
         // handle handshake
         let handshake = match_packet! { self,
             packet = hand_in::HandshakePacket => packet,
         };
+
+        // track metrics
+        let variant = match handshake.next_state {
+            State::Status => "status",
+            State::Login => "login",
+            State::Transfer => "transfer",
+        };
+
+        let _timer = Guard::on_drop(|| {
+            REQUEST_DURATION
+                .get_or_create(&RequestDurationLabels {
+                    variant,
+                    protocol_version: handshake.protocol_version,
+                })
+                .observe(start.elapsed().as_secs_f64());
+        });
 
         // handle status request
         if handshake.next_state == State::Status {
@@ -278,7 +313,7 @@ where
                 )
                 .await?;
 
-            self.write_packet(status_out::StatusResponsePacket {
+            self.send_packet(status_out::StatusResponsePacket {
                 body: serde_json::to_string(&status)?,
             })
             .await?;
@@ -287,7 +322,7 @@ where
                 packet = status_in::PingPacket => packet,
             };
 
-            self.write_packet(status_out::PongPacket {
+            self.send_packet(status_out::PongPacket {
                 payload: ping.payload,
             })
             .await?;
@@ -308,7 +343,7 @@ where
                     break 'transfer;
                 }
 
-                self.write_packet(login_out::CookieRequestPacket {
+                self.send_packet(login_out::CookieRequestPacket {
                     key: AUTH_COOKIE_KEY.to_string(),
                 })
                 .await?;
@@ -352,7 +387,7 @@ where
         // handle encryption
         let verify_token = authentication::generate_token()?;
 
-        self.write_packet(login_out::EncryptionRequestPacket {
+        self.send_packet(login_out::EncryptionRequestPacket {
             server_id: "".to_owned(),
             public_key: authentication::ENCODED_PUB.clone(),
             verify_token,
@@ -390,7 +425,7 @@ where
         // enable encryption for the connection using the shared secret
         self.apply_encryption(&shared_secret)?;
 
-        self.write_packet(login_out::LoginSuccessPacket {
+        self.send_packet(login_out::LoginSuccessPacket {
             user_name: login_start.user_name.clone(),
             user_id: login_start.user_id,
         })
@@ -418,7 +453,7 @@ where
                 };
 
                 let auth_payload = serde_json::to_vec(&cookie)?;
-                self.write_packet(conf_out::StoreCookiePacket {
+                self.send_packet(conf_out::StoreCookiePacket {
                     key: AUTH_COOKIE_KEY.to_string(),
                     payload: authentication::sign(&auth_payload, secret),
                 })
@@ -437,8 +472,7 @@ where
                 &login_start.user_id,
             )
             .await?;
-        let mut pack_ids: Vec<(Uuid, bool)> =
-            packs.iter().map(|pack| (pack.uuid, pack.forced)).collect();
+        let mut pack_ids: HashMap<Uuid, (bool, Instant)> = HashMap::with_capacity(packs.len());
 
         for pack in packs {
             let packet = conf_out::AddResourcePackPacket {
@@ -448,7 +482,8 @@ where
                 forced: pack.forced,
                 prompt_message: pack.prompt_message,
             };
-            self.write_packet(packet).await?;
+            self.send_packet(packet).await?;
+            pack_ids.insert(pack.uuid, (pack.forced, Instant::now()));
         }
 
         // wait for resource packs to be accepted
@@ -480,15 +515,22 @@ where
             };
 
             // pop pack from the list (ignoring unknown pack ids)
-            let Some(pos) = pack_ids.iter().position(|(uuid, _)| uuid == &packet.uuid) else {
+            let Some((forced, time)) = pack_ids.remove(&packet.uuid) else {
                 continue;
             };
-            let (_, forced) = pack_ids.swap_remove(pos);
+
+            if success {
+                RESOURCEPACK_DURATION
+                    .get_or_create(&ResourcePackDurationLabels {
+                        uuid: packet.uuid.to_string(),
+                    })
+                    .observe(time.elapsed().as_secs_f64());
+            }
 
             // handle pack forced
             if forced && !success {
                 // TODO write actual reason
-                self.write_packet(conf_out::DisconnectPacket {
+                self.send_packet(conf_out::DisconnectPacket {
                     reason: "".to_string(),
                 })
                 .await?;
@@ -511,7 +553,7 @@ where
         // disconnect if not target found
         let Some(target) = target else {
             // TODO write actual message
-            self.write_packet(conf_out::DisconnectPacket {
+            self.send_packet(conf_out::DisconnectPacket {
                 reason: "".to_string(),
             })
             .await?;
@@ -523,45 +565,8 @@ where
             host: target.ip().to_string(),
             port: target.port(),
         };
-        self.write_packet(transfer).await?;
+        self.send_packet(transfer).await?;
 
         Ok(())
-    }
-}
-
-impl<S> AsyncWrite for Connection<S>
-where
-    S: AsyncWrite + Unpin + Send + Sync,
-{
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<Result<usize, std::io::Error>> {
-        Pin::new(&mut self.get_mut().stream).poll_write(cx, buf)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
-        Pin::new(&mut self.get_mut().stream).poll_flush(cx)
-    }
-
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
-        Pin::new(&mut self.get_mut().stream).poll_shutdown(cx)
-    }
-}
-
-impl<S> AsyncRead for Connection<S>
-where
-    S: AsyncRead + Unpin + Send + Sync,
-{
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.get_mut().stream).poll_read(cx, buf)
     }
 }

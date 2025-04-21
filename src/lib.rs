@@ -9,27 +9,27 @@ pub mod connection;
 mod metrics;
 pub mod rate_limiter;
 
-use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
 use crate::adapter::resourcepack::ResourcepackSupplier;
-use crate::adapter::status::none::NoneStatusSupplier;
+use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
 use crate::adapter::status::StatusSupplier;
+use crate::adapter::status::none::NoneStatusSupplier;
 use crate::adapter::target_selection::fixed::FixedTargetSelector;
 use crate::adapter::target_selection::none::NoneTargetSelector;
 use crate::adapter::target_selection::{Target, TargetSelector};
+use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::adapter::target_strategy::any::AnyTargetSelectorStrategy;
 use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
-use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::config::Config;
 use crate::connection::Connection;
-use crate::metrics::{RateLimitedLabels, RequestLabels};
+use crate::metrics::{REQUEST_DURATION, RequestsLabels};
 use crate::rate_limiter::RateLimiter;
 use adapter::resourcepack::fixed::FixedResourcePackSupplier;
 use adapter::status::fixed::FixedStatusSupplier;
 use http_body_util::Full;
+use hyper::Response;
 use hyper::body::Bytes;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper::Response;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use prometheus_client::encoding::text::encode;
 use std::collections::HashMap;
@@ -39,7 +39,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::select;
-use tokio::time::timeout;
+use tokio::time::{Instant, timeout};
 use tracing::{debug, error, info, warn};
 
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
@@ -123,7 +123,6 @@ async fn start_metrics(
                 .serve_connection(
                     io,
                     service_fn(|_| async {
-                        // TODO: handle errors
                         let mut buf = String::new();
                         encode(&mut buf, &metrics::REGISTRY).expect("failed to encode metrics");
 
@@ -229,13 +228,12 @@ async fn start_protocol(
             },
         };
 
-        metrics::REQUESTS.get_or_create(&RequestLabels {}).inc();
-
         // check rate limiter
         if rate_limiter_enabled && !rate_limiter.enqueue(&addr.ip()) {
             debug!(addr = addr.to_string(), "rate limited client");
-            metrics::RATE_LIMITED
-                .get_or_create(&RateLimitedLabels {})
+
+            metrics::REQUESTS
+                .get_or_create(&RequestsLabels { result: "rejected" })
                 .inc();
 
             if let Err(e) = stream.shutdown().await {
@@ -247,6 +245,10 @@ async fn start_protocol(
             }
             continue;
         }
+
+        metrics::REQUESTS
+            .get_or_create(&RequestsLabels { result: "accepted" })
+            .inc();
 
         // clone values to be moved
         let status_supplier = Arc::clone(&status_supplier);
