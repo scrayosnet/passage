@@ -49,28 +49,6 @@ use serde::Deserialize;
 use std::env;
 use std::net::SocketAddr;
 
-/// [Metrics] holds the metrics service configuration. The metrics service is part of the rest server.
-/// The rest server will be, if not already so, implicitly enabled if the metrics service is enabled.
-/// If enabled, it is exposed at the rest server at `/metrics`.
-///
-/// Metrics will always be aggregated by the application. This option is only used to expose the metrics
-/// service. The service supports basic auth that can be enabled. Make sure to override the default
-/// username and password in that case.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Metrics {
-    /// Whether the metrics service should be enabled.
-    pub enabled: bool,
-
-    /// Whether the metrics service should use basic auth.
-    pub auth_enabled: bool,
-
-    /// The basic auth username. Override default configuration if basic auth is enabled.
-    pub username: String,
-
-    /// The basic auth password. Override default configuration if basic auth is enabled.
-    pub password: String,
-}
-
 /// [Sentry] hold the sentry configuration. The release is automatically inferred from cargo.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Sentry {
@@ -137,7 +115,7 @@ pub struct Resourcepack {
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixedResourcepack {
     /// Adapter to retrieve the results.
-    pub packs: Vec<crate::adapter::resourcepack::Resourcepack>,
+    pub packs: Vec<adapter::resourcepack::Resourcepack>,
 }
 
 /// [Target] hold the target discovery configuration.
@@ -170,8 +148,8 @@ pub struct TargetStrategy {
 /// with status ok.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    /// The metrics configuration. The metrics service is part of the [RestServer].
-    pub metrics: Metrics,
+    /// The metrics server address.
+    pub metrics_address: SocketAddr,
 
     /// The sentry configuration.
     pub sentry: Sentry,

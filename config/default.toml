@@ -1,6 +1,7 @@
 # See settings documantation at src/settings.rs.
 
 address = "0.0.0.0:25565"
+metrics_address = "0.0.0.0:25566"
 timeout = 120
 
 [protocol]

@@ -6,6 +6,7 @@ pub mod authentication;
 pub mod cipher_stream;
 pub mod config;
 pub mod connection;
+mod metrics;
 pub mod rate_limiter;
 
 use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
@@ -20,10 +21,19 @@ use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::config::Config;
 use crate::connection::Connection;
+use crate::metrics::{RateLimitedLabels, RequestLabels};
 use crate::rate_limiter::RateLimiter;
 use adapter::resourcepack::fixed::FixedResourcePackSupplier;
 use adapter::status::fixed::FixedStatusSupplier;
+use http_body_util::Full;
+use hyper::body::Bytes;
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::Response;
+use hyper_util::rt::{TokioIo, TokioTimer};
+use prometheus_client::encoding::text::encode;
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -42,6 +52,56 @@ use tracing::{debug, info, warn};
 /// Will return an appropriate error if the socket cannot be bound to the supplied address, or the TCP server cannot be
 /// properly initialized.
 pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+    // TODO shutdown signal!
+    tokio::try_join!(start_mc(config.clone()), start_metrics(config)).map(|_| ())
+}
+
+async fn start_metrics(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+    // start metrics server
+    info!(
+        addr = config.metrics_address.to_string(),
+        "binding metrics socket address"
+    );
+    let listener = TcpListener::bind(&config.metrics_address).await?;
+
+    // listen for connections
+    loop {
+        let (stream, addr) = listener.accept().await?;
+        let io = TokioIo::new(stream);
+        tokio::task::spawn(async move {
+            if let Err(err) = http1::Builder::new()
+                .timer(TokioTimer::new())
+                .serve_connection(
+                    io,
+                    service_fn(|_| async {
+                        // TODO: handle errors
+                        let mut buf = String::new();
+                        encode(&mut buf, &metrics::REGISTRY).expect("failed to encode metrics");
+
+                        let response = Response::builder()
+                            .header(
+                                hyper::header::CONTENT_TYPE,
+                                "application/openmetrics-text; version=1.0.0; charset=utf-8",
+                            )
+                            .body(Full::<Bytes>::from(buf))
+                            .expect("failed to build response");
+
+                        Ok::<Response<Full<Bytes>>, Infallible>(response)
+                    }),
+                )
+                .await
+            {
+                warn!(
+                    cause = err.to_string(),
+                    addr = &addr.to_string(),
+                    "failure communicating with a client"
+                );
+            }
+        });
+    }
+}
+
+async fn start_mc(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // retrieve config params
     let timeout_duration = Duration::from_secs(config.timeout);
     let auth_secret = config.auth_secret.map(String::into_bytes);
@@ -114,9 +174,15 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
             },
         };
 
+        metrics::REQUESTS.get_or_create(&RequestLabels {}).inc();
+
         // check rate limiter
         if rate_limiter_enabled && !rate_limiter.enqueue(&addr.ip()) {
             debug!(addr = addr.to_string(), "rate limited client");
+            metrics::RATE_LIMITED
+                .get_or_create(&RateLimitedLabels {})
+                .inc();
+
             if let Err(e) = stream.shutdown().await {
                 debug!(
                     cause = e.to_string(),

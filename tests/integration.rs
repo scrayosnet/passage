@@ -9,13 +9,13 @@ use packets::{AsyncReadPacket, AsyncWritePacket, ResourcePackResult, State};
 use passage::adapter::resourcepack::fixed::FixedResourcePackSupplier;
 use passage::adapter::resourcepack::none::NoneResourcePackSupplier;
 use passage::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
-use passage::adapter::status::none::NoneStatusSupplier;
 use passage::adapter::status::StatusSupplier;
-use passage::adapter::target_selection::none::NoneTargetSelector;
+use passage::adapter::status::none::NoneStatusSupplier;
 use passage::adapter::target_selection::TargetSelector;
+use passage::adapter::target_selection::none::NoneTargetSelector;
 use passage::authentication;
 use passage::cipher_stream::CipherStream;
-use passage::connection::{AuthCookie, Connection, AUTH_COOKIE_KEY};
+use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection};
 use rand::rngs::OsRng;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
@@ -52,7 +52,10 @@ async fn simulate_handshake() {
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
-        server.listen(client_address).await.expect("server listen failed");
+        server
+            .listen(client_address)
+            .await
+            .expect("server listen failed");
     });
 
     // simulate client
@@ -95,7 +98,10 @@ async fn simulate_status() {
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
-        server.listen(client_address).await.expect("server listen failed");
+        server
+            .listen(client_address)
+            .await
+            .expect("server listen failed");
     });
 
     // simulate client
@@ -162,7 +168,10 @@ async fn simulate_transfer_no_configuration() {
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
-        server.listen(client_address).await.expect("server listen failed");
+        server
+            .listen(client_address)
+            .await
+            .expect("server listen failed");
     });
 
     // simulate client
@@ -269,7 +278,7 @@ async fn sends_keep_alive() {
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
     let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector);
     let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(
-        FixedResourcePackSupplier::new(vec![Resourcepack::default()])
+        FixedResourcePackSupplier::new(vec![Resourcepack::default()]),
     );
 
     // build connection
@@ -283,7 +292,10 @@ async fn sends_keep_alive() {
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
-        server.listen(client_address).await.expect("server listen failed");
+        server
+            .listen(client_address)
+            .await
+            .expect("server listen failed");
     });
 
     // simulate client
@@ -321,7 +333,7 @@ async fn sends_keep_alive() {
         user_name: user_name.clone(),
         user_id,
     })
-        .expect("auth cookie serialization failed");
+    .expect("auth cookie serialization failed");
 
     client_stream
         .write_packet(login_in::CookieResponsePacket {
@@ -378,10 +390,13 @@ async fn sends_keep_alive() {
         .await
         .expect("keep-alive packet read failed");
 
-    client_stream.write_packet(conf_in::ResourcePackResponsePacket {
-        uuid: add_pack.uuid,
-        result: ResourcePackResult::Success,
-    }).await.expect("send resource pack response packet failed");
+    client_stream
+        .write_packet(conf_in::ResourcePackResponsePacket {
+            uuid: add_pack.uuid,
+            result: ResourcePackResult::Success,
+        })
+        .await
+        .expect("send resource pack response packet failed");
 
     // disconnect as no target configured
     let _disconnect_packet: conf_out::DisconnectPacket = client_stream
@@ -408,7 +423,7 @@ async fn no_respond_keep_alive() {
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
     let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector);
     let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(
-        FixedResourcePackSupplier::new(vec![Resourcepack::default()])
+        FixedResourcePackSupplier::new(vec![Resourcepack::default()]),
     );
 
     // build connection
@@ -422,7 +437,10 @@ async fn no_respond_keep_alive() {
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
-        server.listen(client_address).await.expect("server listen failed");
+        server
+            .listen(client_address)
+            .await
+            .expect("server listen failed");
     });
 
     // simulate client
@@ -460,7 +478,7 @@ async fn no_respond_keep_alive() {
         user_name: user_name.clone(),
         user_id,
     })
-        .expect("auth cookie serialization failed");
+    .expect("auth cookie serialization failed");
 
     client_stream
         .write_packet(login_in::CookieResponsePacket {

@@ -4,9 +4,7 @@ use crate::adapter::target_selection::TargetSelector;
 use crate::authentication;
 use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
 use packets::Packet;
-use packets::{
-    AsyncReadPacket, AsyncWritePacket, ReadPacket, ResourcePackResult, State, VarInt,
-};
+use packets::{AsyncReadPacket, AsyncWritePacket, ReadPacket, ResourcePackResult, State, VarInt};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::io::{Cursor, ErrorKind};
@@ -215,7 +213,10 @@ where
 
         // check the length of the packet for any following content
         if length == 0 || length > MAX_PACKET_LENGTH {
-            debug!(length, "packet length should be between 0 and {MAX_PACKET_LENGTH}");
+            debug!(
+                length,
+                "packet length should be between 0 and {MAX_PACKET_LENGTH}"
+            );
             return Err(Error::PacketError(packets::Error::IllegalPacketLength));
         }
 
@@ -279,7 +280,8 @@ where
 
             self.write_packet(status_out::StatusResponsePacket {
                 body: serde_json::to_string(&status)?,
-            }).await?;
+            })
+            .await?;
 
             let ping = match_packet! { self,
                 packet = status_in::PingPacket => packet,
@@ -287,9 +289,10 @@ where
 
             self.write_packet(status_out::PongPacket {
                 payload: ping.payload,
-            }).await?;
+            })
+            .await?;
 
-            return Ok(())
+            return Ok(());
         }
 
         // handle login request
@@ -307,7 +310,8 @@ where
 
                 self.write_packet(login_out::CookieRequestPacket {
                     key: AUTH_COOKIE_KEY.to_string(),
-                }).await?;
+                })
+                .await?;
 
                 let cookie = match_packet! { self,
                     packet = login_in::CookieResponsePacket => packet,
@@ -353,7 +357,8 @@ where
             public_key: authentication::ENCODED_PUB.clone(),
             verify_token,
             should_authenticate,
-        }).await?;
+        })
+        .await?;
 
         let encrypt = match_packet! { self,
             packet = login_in::EncryptionResponsePacket => packet,
@@ -374,7 +379,8 @@ where
                 &login_start.user_name,
                 &shared_secret,
                 &authentication::ENCODED_PUB,
-            ).await?;
+            )
+            .await?;
 
             // update state for actual use info
             login_start.user_name = auth_response.name;
@@ -387,7 +393,8 @@ where
         self.write_packet(login_out::LoginSuccessPacket {
             user_name: login_start.user_name.clone(),
             user_id: login_start.user_id,
-        }).await?;
+        })
+        .await?;
 
         let _ = match_packet! { self,
             packet = login_in::LoginAcknowledgedPacket => packet,
@@ -414,7 +421,8 @@ where
                 self.write_packet(conf_out::StoreCookiePacket {
                     key: AUTH_COOKIE_KEY.to_string(),
                     payload: authentication::sign(&auth_payload, secret),
-                }).await?;
+                })
+                .await?;
             }
         }
 
@@ -429,7 +437,8 @@ where
                 &login_start.user_id,
             )
             .await?;
-        let mut pack_ids: Vec<(Uuid, bool)> = packs.iter().map(|pack| (pack.uuid, pack.forced)).collect();
+        let mut pack_ids: Vec<(Uuid, bool)> =
+            packs.iter().map(|pack| (pack.uuid, pack.forced)).collect();
 
         for pack in packs {
             let packet = conf_out::AddResourcePackPacket {
@@ -467,7 +476,7 @@ where
                 | ResourcePackResult::ReloadFailed
                 | ResourcePackResult::Discorded => false,
                 // pending state, keep waiting
-                _ => continue
+                _ => continue,
             };
 
             // pop pack from the list (ignoring unknown pack ids)
@@ -482,7 +491,7 @@ where
                 self.write_packet(conf_out::DisconnectPacket {
                     reason: "".to_string(),
                 })
-                    .await?;
+                .await?;
                 return Ok(());
             }
         }
@@ -505,7 +514,7 @@ where
             self.write_packet(conf_out::DisconnectPacket {
                 reason: "".to_string(),
             })
-                .await?;
+            .await?;
             return Ok(());
         };
 
