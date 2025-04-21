@@ -38,8 +38,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
+use tokio::select;
 use tokio::time::timeout;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
 ///
@@ -52,11 +53,52 @@ use tracing::{debug, info, warn};
 /// Will return an appropriate error if the socket cannot be bound to the supplied address, or the TCP server cannot be
 /// properly initialized.
 pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
-    // TODO shutdown signal!
-    tokio::try_join!(start_mc(config.clone()), start_metrics(config)).map(|_| ())
+    let (shutdown, _) = tokio::sync::broadcast::channel(1);
+
+    // start the metrics server in own thread
+    let m_shutdown = shutdown.clone();
+    let m_config = config.clone();
+    let metric_server = tokio::spawn(async move {
+        if let Err(err) = start_metrics(m_config.clone(), m_shutdown.subscribe()).await {
+            error!(cause = err.to_string(), "metrics server stopped with error");
+        }
+        m_shutdown.send(()).expect("failed to shutdown");
+    });
+
+    // start the protocol server in own thread
+    let p_shutdown = shutdown.clone();
+    let p_config = config.clone();
+    let protocol_server = tokio::spawn(async move {
+        if let Err(err) = start_protocol(p_config.clone(), p_shutdown.subscribe()).await {
+            error!(
+                cause = err.to_string(),
+                "protocol server stopped with error"
+            );
+        }
+        p_shutdown.send(()).expect("failed to shutdown");
+    });
+
+    // wait for either a shutdown signal (from error) or a ctrl-c
+    let mut shutdown_signal = shutdown.subscribe();
+    select!(
+        _ = shutdown_signal.recv() => {},
+        _ = tokio::signal::ctrl_c() => {
+            info!("received ctrl-c signal, shutting down");
+            shutdown.send(()).expect("failed to shutdown");
+        },
+    );
+
+    // wait for threads to shut down
+    _ = metric_server.await;
+    _ = protocol_server.await;
+
+    Ok(())
 }
 
-async fn start_metrics(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+async fn start_metrics(
+    config: Config,
+    mut shutdown: tokio::sync::broadcast::Receiver<()>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // start metrics server
     info!(
         addr = config.metrics_address.to_string(),
@@ -66,7 +108,14 @@ async fn start_metrics(config: Config) -> Result<(), Box<dyn std::error::Error>>
 
     // listen for connections
     loop {
-        let (stream, addr) = listener.accept().await?;
+        // accept the next incoming connection
+        let (stream, addr) = select! {
+            accepted = listener.accept() => accepted?,
+            _ = shutdown.recv() => {
+                break;
+            },
+        };
+
         let io = TokioIo::new(stream);
         tokio::task::spawn(async move {
             if let Err(err) = http1::Builder::new()
@@ -99,9 +148,15 @@ async fn start_metrics(config: Config) -> Result<(), Box<dyn std::error::Error>>
             }
         });
     }
+
+    info!("metrics server stopped successfully");
+    Ok(())
 }
 
-async fn start_mc(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+async fn start_protocol(
+    config: Config,
+    mut shutdown: tokio::sync::broadcast::Receiver<()>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // retrieve config params
     let timeout_duration = Duration::from_secs(config.timeout);
     let auth_secret = config.auth_secret.map(String::into_bytes);
@@ -167,9 +222,9 @@ async fn start_mc(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         // accept the next incoming connection
-        let (mut stream, addr) = tokio::select! {
+        let (mut stream, addr) = select! {
             accepted = listener.accept() => accepted?,
-            _ = tokio::signal::ctrl_c() => {
+            _ = shutdown.recv() => {
                 break;
             },
         };
