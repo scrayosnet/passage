@@ -21,7 +21,7 @@ use crate::adapter::target_strategy::any::AnyTargetSelectorStrategy;
 use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use crate::config::Config;
 use crate::connection::Connection;
-use crate::metrics::{REQUEST_DURATION, RequestsLabels};
+use crate::metrics::RequestsLabels;
 use crate::rate_limiter::RateLimiter;
 use adapter::resourcepack::fixed::FixedResourcePackSupplier;
 use adapter::status::fixed::FixedStatusSupplier;
@@ -39,7 +39,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::select;
-use tokio::time::{Instant, timeout};
+use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
@@ -246,17 +246,13 @@ async fn start_protocol(
             continue;
         }
 
-        metrics::REQUESTS
-            .get_or_create(&RequestsLabels { result: "accepted" })
-            .inc();
-
         // clone values to be moved
         let status_supplier = Arc::clone(&status_supplier);
         let target_selector = Arc::clone(&target_selector);
         let resourcepack_supplier = Arc::clone(&resourcepack_supplier);
         let auth_secret = auth_secret.clone();
 
-        tokio::spawn(timeout(timeout_duration, async move {
+        tokio::spawn(async move {
             // build connection wrapper for stream
             let mut con = Connection::new(
                 &mut stream,
@@ -267,13 +263,19 @@ async fn start_protocol(
             );
 
             // handle the client connection
-            if let Err(err) = con.listen(addr).await {
-                warn!(
-                    cause = err.to_string(),
-                    addr = &addr.to_string(),
-                    "failure communicating with a client"
-                );
-            }
+            let timeout = timeout(timeout_duration, con.listen(addr)).await;
+            let result = match timeout {
+                Ok(Err(err)) => {
+                    warn!(
+                        cause = err.to_string(),
+                        addr = &addr.to_string(),
+                        "failure communicating with a client"
+                    );
+                    err.as_label()
+                }
+                Err(_) => "timeout",
+                Ok(_) => "success",
+            };
 
             // flush connection and shutdown
             if let Err(err) = stream.shutdown().await {
@@ -284,8 +286,12 @@ async fn start_protocol(
                 );
             }
 
+            metrics::REQUESTS
+                .get_or_create(&RequestsLabels { result })
+                .inc();
+
             debug!(addr = &addr.to_string(), "closed connection with a client");
-        }));
+        });
     }
 
     info!("protocol server stopped successfully");

@@ -15,7 +15,7 @@ use passage::adapter::target_selection::TargetSelector;
 use passage::adapter::target_selection::none::NoneTargetSelector;
 use passage::authentication;
 use passage::cipher_stream::CipherStream;
-use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection};
+use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection, Error};
 use rand::rngs::OsRng;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
@@ -168,10 +168,11 @@ async fn simulate_transfer_no_configuration() {
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
-        server
-            .listen(client_address)
-            .await
-            .expect("server listen failed");
+        let result = server.listen(client_address).await;
+        match result {
+            Err(Error::NoTargetFound) => {}
+            other => panic!("expected no target found, got {:?}", other),
+        }
     });
 
     // simulate client
@@ -292,10 +293,11 @@ async fn sends_keep_alive() {
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
-        server
-            .listen(client_address)
-            .await
-            .expect("server listen failed");
+        let result = server.listen(client_address).await;
+        match result {
+            Err(Error::NoTargetFound) => {}
+            other => panic!("expected no target found, got {:?}", other),
+        }
     });
 
     // simulate client

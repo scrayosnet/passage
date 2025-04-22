@@ -14,9 +14,9 @@ pub(crate) static REGISTRY: LazyLock<Arc<Registry>> = LazyLock::new(build_regist
 pub(crate) static REQUESTS: LazyLock<Family<RequestsLabels, Counter>> =
     LazyLock::new(Family::<RequestsLabels, Counter>::default);
 
-pub(crate) static REQUEST_DURATION: LazyLock<HistogramFamily<RequestDurationLabels>> =
+pub(crate) static CONNECTION_DURATION: LazyLock<HistogramFamily<ConnectionDurationLabels>> =
     LazyLock::new(|| {
-        HistogramFamily::<RequestDurationLabels>::new_with_constructor(|| {
+        HistogramFamily::<ConnectionDurationLabels>::new_with_constructor(|| {
             Histogram::new(exponential_buckets(0.1, 2.0, 10))
         })
     });
@@ -34,13 +34,23 @@ pub(crate) static RESOURCEPACK_DURATION: LazyLock<HistogramFamily<ResourcePackDu
         })
     });
 
+pub(crate) static TRANSFER_TARGETS: LazyLock<Family<TransferTargetsLabels, Counter>> =
+    LazyLock::new(Family::<TransferTargetsLabels, Counter>::default);
+
+pub(crate) static MOJANG_DURATION: LazyLock<HistogramFamily<MojangDurationLabels>> =
+    LazyLock::new(|| {
+        HistogramFamily::<MojangDurationLabels>::new_with_constructor(|| {
+            Histogram::new(exponential_buckets(0.1, 2.0, 10))
+        })
+    });
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct RequestsLabels {
     pub result: &'static str,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
-pub struct RequestDurationLabels {
+pub struct ConnectionDurationLabels {
     pub variant: &'static str,
     pub protocol_version: Protocol,
 }
@@ -54,6 +64,16 @@ pub struct SentPackets {}
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct ResourcePackDurationLabels {
     pub uuid: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct TransferTargetsLabels {
+    pub target: Option<String>,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct MojangDurationLabels {
+    pub result: &'static str,
 }
 
 pub(crate) struct Guard<F: FnOnce()> {
@@ -79,9 +99,9 @@ fn build_registry() -> Arc<Registry> {
 
     registry.register("requests", "Number of requests", REQUESTS.clone());
     registry.register(
-        "request_duration_seconds",
-        "Duration a request was processed for in seconds",
-        REQUEST_DURATION.clone(),
+        "connection_duration_seconds",
+        "Duration a (non-aborted) connection was processed for in seconds",
+        CONNECTION_DURATION.clone(),
     );
     registry.register(
         "received_packets",
@@ -98,8 +118,16 @@ fn build_registry() -> Arc<Registry> {
         "Duration a resource pack took to load in seconds",
         RESOURCEPACK_DURATION.clone(),
     );
-    // TODO transfer target
-    // TODO mojang success
+    registry.register(
+        "transfer_targets",
+        "Number of targets selected for transfer",
+        TRANSFER_TARGETS.clone(),
+    );
+    registry.register(
+        "mojang_duration_seconds",
+        "Duration a mojang request took in seconds",
+        MOJANG_DURATION.clone(),
+    );
 
     Arc::new(registry)
 }

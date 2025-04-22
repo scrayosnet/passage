@@ -19,8 +19,9 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::metrics::{
-    Guard, RECEIVED_PACKETS, REQUEST_DURATION, RESOURCEPACK_DURATION, ReceivedPackets,
-    RequestDurationLabels, ResourcePackDurationLabels, SENT_PACKETS, SentPackets,
+    CONNECTION_DURATION, ConnectionDurationLabels, Guard, MOJANG_DURATION, MojangDurationLabels,
+    RECEIVED_PACKETS, RESOURCEPACK_DURATION, ReceivedPackets, ResourcePackDurationLabels,
+    SENT_PACKETS, SentPackets, TRANSFER_TARGETS, TransferTargetsLabels,
 };
 use packets::configuration::clientbound as conf_out;
 use packets::configuration::serverbound as conf_in;
@@ -86,6 +87,14 @@ pub enum Error {
     /// Some protocol error occurred.
     #[error("Some protocol error occurred")]
     InvalidProtocol,
+
+    /// Some forced resource pack was not loaded.
+    #[error("Some forced resourcepack was not loaded")]
+    FailedResourcepack,
+
+    /// No target was found for the user.
+    #[error("No target was found for the user")]
+    NoTargetFound,
 }
 
 impl Error {
@@ -100,6 +109,20 @@ impl Error {
             || err.kind() == ErrorKind::ConnectionReset
             || err.kind() == ErrorKind::ConnectionAborted
             || err.kind() == ErrorKind::BrokenPipe
+    }
+
+    pub fn as_label(&self) -> &'static str {
+        if self.is_connection_closed() {
+            return "closed";
+        }
+
+        match self {
+            Error::PacketError(_) | Error::InvalidProtocol => "invalid-protocol",
+            Error::MissedKeepAlive => "failed-keepalive",
+            Error::FailedResourcepack => "failed-resourcepack",
+            Error::NoTargetFound => "no-target",
+            _ => "internal-error",
+        }
     }
 }
 
@@ -290,8 +313,8 @@ where
         };
 
         let _timer = Guard::on_drop(|| {
-            REQUEST_DURATION
-                .get_or_create(&RequestDurationLabels {
+            CONNECTION_DURATION
+                .get_or_create(&ConnectionDurationLabels {
                     variant,
                     protocol_version: handshake.protocol_version,
                 })
@@ -410,12 +433,28 @@ where
 
         // handle authentication if not already authenticated by the token
         if should_authenticate {
+            let start = Instant::now();
             let auth_response = authentication::authenticate_mojang(
                 &login_start.user_name,
                 &shared_secret,
                 &authentication::ENCODED_PUB,
             )
-            .await?;
+            .await;
+
+            let auth_response = match auth_response {
+                Ok(resp) => {
+                    MOJANG_DURATION
+                        .get_or_create(&MojangDurationLabels { result: "success" })
+                        .observe(start.elapsed().as_secs_f64());
+                    resp
+                }
+                Err(err) => {
+                    MOJANG_DURATION
+                        .get_or_create(&MojangDurationLabels { result: "error" })
+                        .observe(start.elapsed().as_secs_f64());
+                    return Err(Error::from(err));
+                }
+            };
 
             // update state for actual use info
             login_start.user_name = auth_response.name;
@@ -534,7 +573,7 @@ where
                     reason: "".to_string(),
                 })
                 .await?;
-                return Ok(());
+                return Err(Error::FailedResourcepack);
             }
         }
 
@@ -550,6 +589,12 @@ where
             )
             .await?;
 
+        TRANSFER_TARGETS
+            .get_or_create(&TransferTargetsLabels {
+                target: target.clone().map(|target| target.to_string()),
+            })
+            .inc();
+
         // disconnect if not target found
         let Some(target) = target else {
             // TODO write actual message
@@ -557,7 +602,7 @@ where
                 reason: "".to_string(),
             })
             .await?;
-            return Ok(());
+            return Err(Error::NoTargetFound);
         };
 
         // create a new transfer packet and send it
