@@ -110,3 +110,139 @@ where
         poll_result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::authentication::create_ciphers;
+    use rand::RngCore;
+    use rand::rngs::OsRng;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    const SHARED_SECRET: &[u8; 16] = b"verysecuresecret";
+
+    fn generate_bytes(len: usize) -> Vec<u8> {
+        let mut data = Vec::with_capacity(len);
+        OsRng
+            .try_fill_bytes(&mut data)
+            .expect("failed to generate bytes");
+        data
+    }
+
+    #[tokio::test]
+    async fn without_encryption() {
+        // create connected streams
+        let (client_stream, server_stream) = tokio::io::duplex(1024);
+
+        // wrap streams
+        let mut client_stream: CipherStream<_, Aes128Cfb8Enc, Aes128Cfb8Dec> =
+            CipherStream::new(client_stream, None, None);
+        let mut server_stream: CipherStream<_, Aes128Cfb8Enc, Aes128Cfb8Dec> =
+            CipherStream::new(server_stream, None, None);
+
+        assert!(!client_stream.is_encrypted());
+        assert!(!server_stream.is_encrypted());
+
+        // send and receive packet
+        let sent = generate_bytes(1024);
+        client_stream
+            .write_all(&sent)
+            .await
+            .expect("failed to send bytes");
+        drop(client_stream);
+
+        let mut received = Vec::with_capacity(1024);
+        server_stream
+            .read_to_end(&mut received)
+            .await
+            .expect("failed to receive bytes");
+
+        assert_eq!(&sent, &received);
+    }
+
+    #[tokio::test]
+    async fn with_encryption() {
+        // create connected streams
+        let (client_stream, server_stream) = tokio::io::duplex(1024);
+
+        // wrap streams
+        let (encryptor, decryptor) =
+            create_ciphers(SHARED_SECRET).expect("failed to create ciphers");
+        let mut client_stream = CipherStream::new(client_stream, Some(encryptor), Some(decryptor));
+        let (encryptor, decryptor) =
+            create_ciphers(SHARED_SECRET).expect("failed to create ciphers");
+        let mut server_stream = CipherStream::new(server_stream, Some(encryptor), Some(decryptor));
+
+        assert!(client_stream.is_encrypted());
+        assert!(server_stream.is_encrypted());
+
+        // send and receive packet
+        let sent = generate_bytes(1024);
+        client_stream
+            .write_all(&sent)
+            .await
+            .expect("failed to send bytes");
+        drop(client_stream);
+
+        let mut received = Vec::with_capacity(1024);
+        server_stream
+            .read_to_end(&mut received)
+            .await
+            .expect("failed to receive bytes");
+
+        assert_eq!(&sent, &received);
+    }
+
+    #[tokio::test]
+    async fn with_some_encryption() {
+        // create connected streams
+        let (client_stream, server_stream) = tokio::io::duplex(1024);
+
+        // wrap streams
+        let mut client_stream = CipherStream::new(client_stream, None, None);
+        let mut server_stream = CipherStream::new(server_stream, None, None);
+
+        assert!(!client_stream.is_encrypted());
+        assert!(!server_stream.is_encrypted());
+
+        // send and receive packet
+        let sent = generate_bytes(1024);
+        client_stream
+            .write_all(&sent)
+            .await
+            .expect("failed to send bytes");
+
+        let mut received = Vec::with_capacity(1024);
+        server_stream
+            .read_exact(&mut received)
+            .await
+            .expect("failed to receive bytes");
+
+        // enable encryption
+        let (encryptor, decryptor) =
+            create_ciphers(SHARED_SECRET).expect("failed to create ciphers");
+        client_stream.set_encryption(Some(encryptor), Some(decryptor));
+        let (encryptor, decryptor) =
+            create_ciphers(SHARED_SECRET).expect("failed to create ciphers");
+        server_stream.set_encryption(Some(encryptor), Some(decryptor));
+
+        assert!(client_stream.is_encrypted());
+        assert!(server_stream.is_encrypted());
+
+        // send and receive packet
+        let sent = generate_bytes(1024);
+        client_stream
+            .write_all(&sent)
+            .await
+            .expect("failed to send bytes");
+        drop(client_stream);
+
+        let mut received = Vec::with_capacity(1024);
+        server_stream
+            .read_to_end(&mut received)
+            .await
+            .expect("failed to receive bytes");
+
+        assert_eq!(&sent, &received);
+    }
+}
