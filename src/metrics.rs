@@ -44,6 +44,9 @@ pub(crate) static MOJANG_DURATION: LazyLock<HistogramFamily<MojangDurationLabels
         })
     });
 
+pub(crate) static CLIENT_LOCALES: LazyLock<Family<ClientLocaleLabels, Counter>> =
+    LazyLock::new(Family::<ClientLocaleLabels, Counter>::default);
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct RequestsLabels {
     pub result: &'static str,
@@ -74,6 +77,11 @@ pub struct TransferTargetsLabels {
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct MojangDurationLabels {
     pub result: &'static str,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct ClientLocaleLabels {
+    pub locale: String,
 }
 
 pub(crate) struct Guard<F: FnOnce()> {
@@ -127,6 +135,11 @@ fn build_registry() -> Arc<Registry> {
         "mojang_duration_seconds",
         "Duration a mojang request took in seconds",
         MOJANG_DURATION.clone(),
+    );
+    registry.register(
+        "client_locales",
+        "Number of received client locales",
+        CLIENT_LOCALES.clone(),
     );
 
     Arc::new(registry)

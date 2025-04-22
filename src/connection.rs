@@ -19,9 +19,10 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::metrics::{
-    CONNECTION_DURATION, ConnectionDurationLabels, Guard, MOJANG_DURATION, MojangDurationLabels,
-    RECEIVED_PACKETS, RESOURCEPACK_DURATION, ReceivedPackets, ResourcePackDurationLabels,
-    SENT_PACKETS, SentPackets, TRANSFER_TARGETS, TransferTargetsLabels,
+    CLIENT_LOCALES, CONNECTION_DURATION, ClientLocaleLabels, ConnectionDurationLabels, Guard,
+    MOJANG_DURATION, MojangDurationLabels, RECEIVED_PACKETS, RESOURCEPACK_DURATION,
+    ReceivedPackets, ResourcePackDurationLabels, SENT_PACKETS, SentPackets, TRANSFER_TARGETS,
+    TransferTargetsLabels,
 };
 use packets::configuration::clientbound as conf_out;
 use packets::configuration::serverbound as conf_in;
@@ -537,7 +538,13 @@ where
                     continue;
                 },
                 // ignore unsupported packets but don't throw an error
-                _ = conf_in::ClientInformationPacket => continue,
+                packet = conf_in::ClientInformationPacket => {
+                    // caution: this packet is tracked, but not enforced
+                    CLIENT_LOCALES.get_or_create(&ClientLocaleLabels {
+                        locale: packet.locale
+                    }).inc();
+                    continue
+                },
                 _ = conf_in::PluginMessagePacket => continue,
             };
 
