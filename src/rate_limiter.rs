@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
-use std::time::{Duration, Instant};
+use tokio::time::{Duration, Instant};
 
 /// [`RateLimiter`] tracks connections per client address over some time window.
 ///
@@ -43,7 +43,7 @@ where
 
         // clear non-recent entries
         while let Some(front) = value.front() {
-            if front.elapsed() < self.duration {
+            if front.elapsed() <= self.duration {
                 break;
             }
             value.pop_front();
@@ -51,7 +51,7 @@ where
         }
 
         // check the number of recent entries
-        if value.len() > self.entry_max_size {
+        if value.len() >= self.entry_max_size {
             return false;
         }
 
@@ -88,5 +88,67 @@ where
         for key in expired {
             self.entries.remove(&key);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn allow_initial() {
+        tokio::time::pause();
+        let mut rate_limiter = RateLimiter::new(Duration::from_secs(10), 3);
+        assert!(rate_limiter.enqueue(&0));
+        assert!(rate_limiter.enqueue(&0));
+        assert!(rate_limiter.enqueue(&0));
+    }
+
+    #[tokio::test]
+    async fn reject_many() {
+        tokio::time::pause();
+        let mut rate_limiter = RateLimiter::new(Duration::from_secs(10), 3);
+
+        assert!(rate_limiter.enqueue(&0));
+        assert!(rate_limiter.enqueue(&0));
+        assert!(rate_limiter.enqueue(&0));
+        assert!(!rate_limiter.enqueue(&0));
+
+        tokio::time::advance(Duration::from_secs(9)).await;
+
+        assert!(!rate_limiter.enqueue(&0));
+    }
+
+    #[tokio::test]
+    async fn allow_after_duration() {
+        tokio::time::pause();
+        let mut rate_limiter = RateLimiter::new(Duration::from_secs(10), 3);
+
+        assert!(rate_limiter.enqueue(&0));
+        assert!(rate_limiter.enqueue(&0));
+        assert!(rate_limiter.enqueue(&0));
+        assert!(!rate_limiter.enqueue(&0));
+
+        tokio::time::advance(Duration::from_secs(20)).await;
+
+        assert!(rate_limiter.enqueue(&0));
+        assert!(rate_limiter.enqueue(&0));
+        assert!(rate_limiter.enqueue(&0));
+        assert!(!rate_limiter.enqueue(&0));
+    }
+
+    #[tokio::test]
+    async fn allow_disjoint() {
+        tokio::time::pause();
+        let mut rate_limiter = RateLimiter::new(Duration::from_secs(10), 3);
+
+        assert!(rate_limiter.enqueue(&0));
+        assert!(rate_limiter.enqueue(&0));
+        assert!(rate_limiter.enqueue(&0));
+        assert!(!rate_limiter.enqueue(&0));
+
+        assert!(rate_limiter.enqueue(&1));
+        assert!(rate_limiter.enqueue(&1));
+        assert!(rate_limiter.enqueue(&1));
     }
 }
