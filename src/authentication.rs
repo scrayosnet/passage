@@ -17,6 +17,9 @@ use uuid::Uuid;
 /// Hmac type, expects 32 Byte hash
 pub type HmacSha256 = Hmac<Sha256>;
 
+/// The Mojang host. Used for making authentication requests.
+const MOJANG_HOST: &'static str = "https://sessionserver.mojang.com"; // "http://127.0.0.1:8731";
+
 /// The RSA keypair of the application.
 pub static KEY_PAIR: LazyLock<(RsaPrivateKey, RsaPublicKey)> =
     LazyLock::new(|| generate_keypair().expect("failed to generate keypair"));
@@ -149,7 +152,7 @@ pub fn verify_token(expected: VerifyToken, actual: &[u8]) -> Result<(), Error> {
 }
 
 /// Creates hash for the Minecraft protocol.
-fn minecraft_hash(server_id: &str, shared_secret: &[u8], encoded_public: &[u8]) -> String {
+pub fn minecraft_hash(server_id: &str, shared_secret: &[u8], encoded_public: &[u8]) -> String {
     // create a new hasher instance
     let mut hasher = Sha1::new();
 
@@ -184,10 +187,9 @@ pub async fn authenticate_mojang(
     let hash = minecraft_hash(server_id, shared_secret, encoded_public);
 
     // issue a request to Mojang's authentication endpoint
-    let url = format!(
-        "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}"
-    );
-    let response = HTTP_CLIENT.get(url).send().await?.error_for_status()?;
+    let url =
+        format!("{MOJANG_HOST}/session/minecraft/hasJoined?username={username}&serverId={hash}");
+    let response = HTTP_CLIENT.get(&url).send().await?.error_for_status()?;
 
     // extract the fields of the response
     Ok(response.json().await?)
