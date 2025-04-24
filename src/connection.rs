@@ -179,23 +179,21 @@ pub struct AuthCookie {
 }
 
 #[derive(Debug)]
-pub struct KeepAlive {
-    pub packets: [u64; 2],
+pub struct KeepAlive<const SIZE: usize> {
+    pub packets: [u64; SIZE],
     pub last_sent: Instant,
     pub interval: Interval,
 }
 
-impl KeepAlive {
+impl<const SIZE: usize> KeepAlive<SIZE> {
     pub fn replace(&mut self, from: u64, to: u64) -> bool {
-        if self.packets[0] == from {
-            self.packets[0] = to;
-            true
-        } else if self.packets[1] == from {
-            self.packets[1] = to;
-            true
-        } else {
-            false
+        for entry in self.packets.iter_mut() {
+            if *entry == from {
+                *entry = to;
+                return true;
+            }
         }
+        false
     }
 }
 
@@ -204,7 +202,7 @@ pub struct Connection<S> {
     /// The connection reader
     stream: CipherStream<S, Aes128Cfb8Enc, Aes128Cfb8Dec>,
     /// The keep-alive config
-    keep_alive: KeepAlive,
+    keep_alive: KeepAlive<2>,
     /// The status supplier of the connection
     pub status_supplier: Arc<dyn StatusSupplier>,
     /// ...
@@ -233,6 +231,7 @@ where
         Self {
             stream: CipherStream::new(stream, None, None),
             keep_alive: KeepAlive {
+                // array size is based on interval duration
                 packets: [0; 2],
                 last_sent: Instant::now(),
                 interval,
