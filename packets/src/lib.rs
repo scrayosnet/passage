@@ -1,7 +1,6 @@
 #[cfg(test)]
 use fake::Dummy;
 use std::fmt::Debug;
-use std::io::ErrorKind;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
@@ -60,18 +59,6 @@ pub enum Error {
     /// Some array conversion failed.
     #[error("could not convert into array")]
     ArrayConversionFailed,
-}
-
-impl Error {
-    pub fn is_connection_closed(&self) -> bool {
-        let Error::Io(err) = self else {
-            return false;
-        };
-        err.kind() == ErrorKind::UnexpectedEof
-            || err.kind() == ErrorKind::ConnectionReset
-            || err.kind() == ErrorKind::ConnectionAborted
-            || err.kind() == ErrorKind::BrokenPipe
-    }
 }
 
 /// State is the desired state that the connection should be in after the initial handshake.

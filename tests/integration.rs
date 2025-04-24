@@ -52,10 +52,11 @@ async fn simulate_handshake() {
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
-        server
-            .listen(client_address)
-            .await
-            .expect("server listen failed");
+        let res = server.listen(client_address).await;
+        match res {
+            Err(Error::ConnectionClosed(_)) => {}
+            other => panic!("expected connection closed, got {:?}", other),
+        }
     });
 
     // simulate client

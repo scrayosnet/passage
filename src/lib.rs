@@ -20,7 +20,7 @@ use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::adapter::target_strategy::any::AnyTargetSelectorStrategy;
 use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use crate::config::Config;
-use crate::connection::Connection;
+use crate::connection::{Connection, Error};
 use crate::metrics::RequestsLabels;
 use crate::rate_limiter::RateLimiter;
 use adapter::resourcepack::fixed::FixedResourcePackSupplier;
@@ -262,9 +262,10 @@ async fn start_protocol(
                 auth_secret,
             );
 
-            // handle the client connection
+            // handle the client connection (ignore connection closed by client)
             let timeout = timeout(timeout_duration, con.listen(addr)).await;
             let result = match timeout {
+                Ok(Err(Error::ConnectionClosed(_))) => "connection-closed",
                 Ok(Err(err)) => {
                     warn!(
                         cause = err.to_string(),
@@ -273,8 +274,8 @@ async fn start_protocol(
                     );
                     err.as_label()
                 }
-                Err(_) => "timeout",
                 Ok(_) => "success",
+                Err(_) => "timeout",
             };
 
             // flush connection and shutdown

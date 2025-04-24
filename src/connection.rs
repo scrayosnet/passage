@@ -52,7 +52,7 @@ macro_rules! match_packet {
                     $handler
                 },
             )*
-            _ => return Err(Error::InvalidProtocol),
+            _ => return Err(Error::UnexpectedPacketId(id)),
         }
     }};
 }
@@ -61,13 +61,14 @@ macro_rules! match_packet {
 const MAX_PACKET_LENGTH: VarInt = 10_000;
 
 pub const AUTH_COOKIE_KEY: &str = "passage:authentication";
+
 pub const AUTH_COOKIE_EXPIRY_SECS: u64 = 6 * 60 * 60; // 6 hours
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// An error occurred while reading or writing to the underlying byte stream.
-    #[error("error reading or writing data: {0}")]
-    Io(#[from] std::io::Error),
+    /// An unrecognized io error. All expected io errors are
+    #[error("unexpected io error: {0}")]
+    InternalIo(std::io::Error),
 
     /// The JSON version of a packet content could not be encoded.
     #[error("invalid struct for JSON (encoding problem)")]
@@ -77,17 +78,9 @@ pub enum Error {
     #[error("could not encrypt connection: {0}")]
     CryptographyFailed(#[from] authentication::Error),
 
-    /// Some packet error.
-    #[error("{0}")]
-    PacketError(#[from] packets::Error),
-
     /// Keep-alive was not received.
     #[error("Missed keep-alive")]
     MissedKeepAlive,
-
-    /// Some protocol error occurred.
-    #[error("Some protocol error occurred")]
-    InvalidProtocol,
 
     /// Some forced resource pack was not loaded.
     #[error("Some forced resourcepack was not loaded")]
@@ -96,32 +89,82 @@ pub enum Error {
     /// No target was found for the user.
     #[error("No target was found for the user")]
     NoTargetFound,
+
+    /// The connection was closed, presumably by the client.
+    #[error("The connection was closed (by the client)")]
+    ConnectionClosed(std::io::Error),
+
+    /// The received packets is of an invalid length that we cannot process.
+    #[error("illegal packets length")]
+    IllegalPacketLength,
+
+    /// The received value index cannot be mapped to an existing enum.
+    #[error("illegal enum value index for {kind}: {value}")]
+    IllegalEnumValue {
+        /// The enum kind which was parsed.
+        kind: &'static str,
+        /// The value that was received.
+        value: VarInt,
+    },
+
+    /// The received packets ID is not mapped to an expected packet.
+    #[error("unexpected packet id received {0}")]
+    UnexpectedPacketId(VarInt),
+
+    /// The JSON response of a packet is incorrectly encoded (not UTF-8).
+    #[error("invalid response body (invalid encoding)")]
+    InvalidEncoding,
+
+    /// Some array conversion failed.
+    #[error("could not convert into array")]
+    ArrayConversionFailed,
+}
+
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        match value.kind() {
+            ErrorKind::ConnectionRefused
+            | ErrorKind::ConnectionReset
+            | ErrorKind::HostUnreachable
+            | ErrorKind::NetworkUnreachable
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::NotConnected
+            | ErrorKind::NetworkDown
+            | ErrorKind::BrokenPipe
+            | ErrorKind::TimedOut
+            | ErrorKind::WriteZero
+            | ErrorKind::UnexpectedEof => Error::ConnectionClosed(value),
+            _ => Error::InternalIo(value),
+        }
+    }
+}
+
+impl From<packets::Error> for Error {
+    fn from(value: packets::Error) -> Self {
+        match value {
+            packets::Error::Io(err) => err.into(),
+            packets::Error::IllegalPacketLength => Error::IllegalPacketLength,
+            packets::Error::IllegalEnumValue { kind, value } => {
+                Error::IllegalEnumValue { kind, value }
+            }
+            packets::Error::IllegalPacketId { actual, .. } => Error::UnexpectedPacketId(actual),
+            packets::Error::InvalidEncoding => Error::InvalidEncoding,
+            packets::Error::ArrayConversionFailed => Error::ArrayConversionFailed,
+        }
+    }
 }
 
 impl Error {
-    pub fn is_connection_closed(&self) -> bool {
-        let err = match self {
-            Error::Io(err) => err,
-            Error::PacketError(err) => return err.is_connection_closed(),
-            _ => return false,
-        };
-
-        err.kind() == ErrorKind::UnexpectedEof
-            || err.kind() == ErrorKind::ConnectionReset
-            || err.kind() == ErrorKind::ConnectionAborted
-            || err.kind() == ErrorKind::BrokenPipe
-    }
-
     pub fn as_label(&self) -> &'static str {
-        if self.is_connection_closed() {
-            return "closed";
-        }
-
         match self {
-            Error::PacketError(_) | Error::InvalidProtocol => "invalid-protocol",
-            Error::MissedKeepAlive => "failed-keepalive",
+            Error::MissedKeepAlive => "missed-keep-alive",
             Error::FailedResourcepack => "failed-resourcepack",
-            Error::NoTargetFound => "no-target",
+            Error::NoTargetFound => "no-target-found",
+            Error::ConnectionClosed(_) => "connection-closed",
+            Error::IllegalPacketLength
+            | Error::IllegalEnumValue { .. }
+            | Error::UnexpectedPacketId { .. }
+            | Error::InvalidEncoding => "protocol-error",
             _ => "internal-error",
         }
     }
@@ -249,7 +292,7 @@ where
                 length,
                 "packet length should be between 0 and {MAX_PACKET_LENGTH}"
             );
-            return Err(Error::PacketError(packets::Error::IllegalPacketLength));
+            return Err(packets::Error::IllegalPacketLength.into());
         }
 
         // extract the encoded packet id
@@ -285,20 +328,6 @@ where
     }
 
     pub async fn listen(&mut self, client_address: SocketAddr) -> Result<(), Error> {
-        // hides connection closed errors
-        match self.run_protocol(client_address).await {
-            Err(err) => {
-                if err.is_connection_closed() {
-                    Ok(())
-                } else {
-                    Err(err)
-                }
-            }
-            Ok(()) => Ok(()),
-        }
-    }
-
-    async fn run_protocol(&mut self, client_address: SocketAddr) -> Result<(), Error> {
         let start = Instant::now();
 
         // handle handshake
@@ -598,7 +627,7 @@ where
 
         TRANSFER_TARGETS
             .get_or_create(&TransferTargetsLabels {
-                target: target.clone().map(|target| target.to_string()),
+                target: target.map(|target| target.to_string()),
             })
             .inc();
 
