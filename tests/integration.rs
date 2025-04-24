@@ -26,6 +26,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::uuid;
 
+/// The Mojang host. Used for making authentication requests.
+const MOJANG_HOST: &'static str = "http://127.0.0.1:8731";
+
 pub fn encrypt(key: &RsaPublicKey, value: &[u8]) -> Vec<u8> {
     key.encrypt(&mut OsRng, Pkcs1v15Encrypt, value)
         .expect("encrypt failed")
@@ -45,6 +48,7 @@ async fn simulate_handshake() {
     // build connection
     let mut server = Connection::new(
         server_stream,
+        MOJANG_HOST,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
@@ -92,6 +96,7 @@ async fn simulate_status() {
     // build connection
     let mut server = Connection::new(
         server_stream,
+        MOJANG_HOST,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
@@ -162,6 +167,7 @@ async fn simulate_transfer_no_configuration() {
     // build connection
     let mut server = Connection::new(
         server_stream,
+        MOJANG_HOST,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
@@ -266,8 +272,6 @@ async fn simulate_transfer_no_configuration() {
     server.await.expect("server run failed");
 }
 
-// test is ignored as it tries to mock the mojang server, but we have to override the const MOJANG_HOST for that
-#[ignore]
 #[tokio::test]
 async fn simulate_login_no_configuration() {
     let shared_secret = b"verysecuresecret";
@@ -302,6 +306,7 @@ async fn simulate_login_no_configuration() {
     // build connection
     let mut server = Connection::new(
         server_stream,
+        MOJANG_HOST,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
@@ -402,6 +407,7 @@ async fn sends_keep_alive() {
     // build connection
     let mut server = Connection::new(
         server_stream,
+        MOJANG_HOST,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
@@ -548,6 +554,7 @@ async fn no_respond_keep_alive() {
     // build connection
     let mut server = Connection::new(
         server_stream,
+        MOJANG_HOST,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),

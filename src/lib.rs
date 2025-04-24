@@ -42,6 +42,9 @@ use tokio::select;
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 
+/// The Mojang host. Used for making authentication requests.
+const MOJANG_HOST: &'static str = "https://sessionserver.mojang.com";
+
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
 ///
 /// This binds the server socket and starts the TCP server to serve the login requests of the players. This also
@@ -256,6 +259,7 @@ async fn start_protocol(
             // build connection wrapper for stream
             let mut con = Connection::new(
                 &mut stream,
+                MOJANG_HOST,
                 Arc::clone(&status_supplier),
                 Arc::clone(&target_selector),
                 Arc::clone(&resourcepack_supplier),

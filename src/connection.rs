@@ -203,6 +203,8 @@ pub struct Connection<S> {
     stream: CipherStream<S, Aes128Cfb8Enc, Aes128Cfb8Dec>,
     /// The keep-alive config
     keep_alive: KeepAlive<2>,
+    /// Te mojang host, configurable for tests
+    mojang_host: &'static str,
     /// The status supplier of the connection
     pub status_supplier: Arc<dyn StatusSupplier>,
     /// ...
@@ -219,6 +221,7 @@ where
 {
     pub fn new(
         stream: S,
+        mojang_host: &'static str,
         status_supplier: Arc<dyn StatusSupplier>,
         target_selector: Arc<dyn TargetSelector>,
         resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
@@ -236,6 +239,7 @@ where
                 last_sent: Instant::now(),
                 interval,
             },
+            mojang_host,
             status_supplier,
             target_selector,
             resourcepack_supplier,
@@ -464,6 +468,7 @@ where
         if should_authenticate {
             let start = Instant::now();
             let auth_response = authentication::authenticate_mojang(
+                self.mojang_host,
                 &login_start.user_name,
                 &shared_secret,
                 "",

@@ -17,9 +17,6 @@ use uuid::Uuid;
 /// Hmac type, expects 32 Byte hash
 pub type HmacSha256 = Hmac<Sha256>;
 
-/// The Mojang host. Used for making authentication requests.
-const MOJANG_HOST: &'static str = "https://sessionserver.mojang.com"; // "http://127.0.0.1:8731";
-
 /// The RSA keypair of the application.
 pub static KEY_PAIR: LazyLock<(RsaPrivateKey, RsaPublicKey)> =
     LazyLock::new(|| generate_keypair().expect("failed to generate keypair"));
@@ -178,6 +175,7 @@ pub struct AuthResponse {
 
 /// Makes a authentication request to Mojang.
 pub async fn authenticate_mojang(
+    mojang_host: &str,
     username: &str,
     shared_secret: &[u8],
     server_id: &str,
@@ -188,7 +186,7 @@ pub async fn authenticate_mojang(
 
     // issue a request to Mojang's authentication endpoint
     let url =
-        format!("{MOJANG_HOST}/session/minecraft/hasJoined?username={username}&serverId={hash}");
+        format!("{mojang_host}/session/minecraft/hasJoined?username={username}&serverId={hash}");
     let response = HTTP_CLIENT.get(&url).send().await?.error_for_status()?;
 
     // extract the fields of the response
