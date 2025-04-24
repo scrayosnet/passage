@@ -2,6 +2,7 @@ use crate::adapter::status::Protocol;
 use prometheus_client::encoding::EncodeLabelSet;
 use prometheus_client::metrics::counter::Counter;
 use prometheus_client::metrics::family::Family;
+use prometheus_client::metrics::gauge::Gauge;
 use prometheus_client::metrics::histogram::{Histogram, exponential_buckets};
 use prometheus_client::registry::Registry;
 use std::sync::{Arc, LazyLock};
@@ -13,6 +14,9 @@ pub(crate) static REGISTRY: LazyLock<Arc<Registry>> = LazyLock::new(build_regist
 
 pub(crate) static REQUESTS: LazyLock<Family<RequestsLabels, Counter>> =
     LazyLock::new(Family::<RequestsLabels, Counter>::default);
+
+pub(crate) static RATE_LIMITER: LazyLock<Family<RateLimiterLabels, Gauge>> =
+    LazyLock::new(Family::<RateLimiterLabels, Gauge>::default);
 
 pub(crate) static CONNECTION_DURATION: LazyLock<HistogramFamily<ConnectionDurationLabels>> =
     LazyLock::new(|| {
@@ -51,6 +55,9 @@ pub(crate) static CLIENT_LOCALES: LazyLock<Family<ClientLocaleLabels, Counter>> 
 pub struct RequestsLabels {
     pub result: &'static str,
 }
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct RateLimiterLabels {}
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct ConnectionDurationLabels {
@@ -106,6 +113,11 @@ fn build_registry() -> Arc<Registry> {
     let mut registry = Registry::with_prefix("passage");
 
     registry.register("requests", "Number of requests", REQUESTS.clone());
+    registry.register(
+        "rate_limiter_size",
+        "The number of entries in the rate limiter",
+        RATE_LIMITER.clone(),
+    );
     registry.register(
         "connection_duration_seconds",
         "Duration a (non-aborted) connection was processed for in seconds",
