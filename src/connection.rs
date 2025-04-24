@@ -404,7 +404,7 @@ where
                     packet = login_in::CookieResponsePacket => packet,
                 };
 
-                let Some(message) = cookie.payload else {
+                let Some(signed) = cookie.payload else {
                     break 'transfer;
                 };
 
@@ -412,7 +412,7 @@ where
                     break 'transfer;
                 };
 
-                let (ok, message) = authentication::check_sign(&message, secret);
+                let (ok, message) = authentication::verify(&signed, secret);
                 if !ok {
                     break 'transfer;
                 }
@@ -466,6 +466,7 @@ where
             let auth_response = authentication::authenticate_mojang(
                 &login_start.user_name,
                 &shared_secret,
+                "",
                 &authentication::ENCODED_PUB,
             )
             .await;

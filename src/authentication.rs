@@ -14,12 +14,15 @@ use sha2::Sha256;
 use std::sync::LazyLock;
 use uuid::Uuid;
 
+/// Hmac type, expects 32 Byte hash
+pub type HmacSha256 = Hmac<Sha256>;
+
 /// The RSA keypair of the application.
-pub(crate) static KEY_PAIR: LazyLock<(RsaPrivateKey, RsaPublicKey)> =
+pub static KEY_PAIR: LazyLock<(RsaPrivateKey, RsaPublicKey)> =
     LazyLock::new(|| generate_keypair().expect("failed to generate keypair"));
 
 /// The encoded public key.
-pub(crate) static ENCODED_PUB: LazyLock<Vec<u8>> =
+pub static ENCODED_PUB: LazyLock<Vec<u8>> =
     LazyLock::new(|| encode_public_key(&KEY_PAIR.1).expect("failed to encode keypair"));
 
 /// The shared http client (for mojang requests).
@@ -57,9 +60,8 @@ pub enum Error {
     },
 }
 
-/// Hmac type, expects 32 Byte hash
-pub type HmacSha256 = Hmac<Sha256>;
-
+/// Signs a message with a secret. Returns the signed message. Use [`verify`] to verify and destruct
+/// the signed message.
 pub fn sign(message: &[u8], secret: &[u8]) -> Vec<u8> {
     let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size!");
     mac.update(message);
@@ -73,13 +75,20 @@ pub fn sign(message: &[u8], secret: &[u8]) -> Vec<u8> {
     output
 }
 
-pub fn check_sign<'a>(message: &'a [u8], secret: &[u8]) -> (bool, &'a [u8]) {
+/// Verifies a signed message with a secret. Returns whether the signature is valid, as well as the
+/// inner message. Use [`sign`] to create a signed message.
+pub fn verify<'a>(signed: &'a [u8], secret: &[u8]) -> (bool, &'a [u8]) {
+    if signed.len() < 32 {
+        return (false, b"");
+    }
+
     let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size!");
-    mac.update(&message[32..]);
-    let ok = mac.verify_slice(&message[..32]).is_ok();
-    (ok, &message[32..])
+    mac.update(&signed[32..]);
+    let ok = mac.verify_slice(&signed[..32]).is_ok();
+    (ok, &signed[32..])
 }
 
+/// Generates a random id for a keep alive packet.
 pub fn generate_keep_alive() -> u64 {
     // retrieve a new mutable instance of an OS RNG
     let mut rng = OsRng;
@@ -88,7 +97,8 @@ pub fn generate_keep_alive() -> u64 {
     rng.r#gen()
 }
 
-pub fn generate_keypair() -> Result<(RsaPrivateKey, RsaPublicKey), Error> {
+/// Generates a new RSA keypair.
+fn generate_keypair() -> Result<(RsaPrivateKey, RsaPublicKey), Error> {
     // retrieve a new mutable instance of an OS RNG
     let mut rng = OsRng;
 
@@ -100,16 +110,22 @@ pub fn generate_keypair() -> Result<(RsaPrivateKey, RsaPublicKey), Error> {
     Ok((private_key, public_key))
 }
 
-pub fn encode_public_key(key: &RsaPublicKey) -> Result<Vec<u8>, Error> {
-    let encoded = key.to_public_key_der()?;
-
-    Ok(encoded.to_vec())
+/// Encodes an RSA public key for the Minecraft protocol.
+fn encode_public_key(key: &RsaPublicKey) -> Result<Vec<u8>, Error> {
+    Ok(key.to_public_key_der()?.to_vec())
 }
 
+/// Encrypts some value with an RSA public key for the Minecraft protocol.
+pub fn encrypt(key: &RsaPublicKey, value: &[u8]) -> Result<Vec<u8>, Error> {
+    Ok(key.encrypt(&mut OsRng, Pkcs1v15Encrypt, value)?)
+}
+
+/// Decrypts some value with an RSA public key for the Minecraft protocol.
 pub fn decrypt(key: &RsaPrivateKey, value: &[u8]) -> Result<Vec<u8>, Error> {
     Ok(key.decrypt(Pkcs1v15Encrypt, value)?)
 }
 
+/// Generates a random [`VerifyToken`].
 pub fn generate_token() -> Result<VerifyToken, Error> {
     // retrieve a new mutable instance of an OS RNG
     let mut rng = OsRng;
@@ -121,6 +137,7 @@ pub fn generate_token() -> Result<VerifyToken, Error> {
     Ok(data)
 }
 
+/// Checks whether the provided [`VerifyToken`] matches the expected [`VerifyToken`].
 pub fn verify_token(expected: VerifyToken, actual: &[u8]) -> Result<(), Error> {
     if expected != actual {
         return Err(InvalidVerifyToken {
@@ -128,16 +145,16 @@ pub fn verify_token(expected: VerifyToken, actual: &[u8]) -> Result<(), Error> {
             actual: actual.to_vec(),
         });
     }
-
     Ok(())
 }
 
-fn minecraft_hash(shared_secret: &[u8], encoded_public: &[u8]) -> String {
+/// Creates hash for the Minecraft protocol.
+fn minecraft_hash(server_id: &str, shared_secret: &[u8], encoded_public: &[u8]) -> String {
     // create a new hasher instance
     let mut hasher = Sha1::new();
 
     // server id
-    hasher.update(b"");
+    hasher.update(server_id);
     // shared secret
     hasher.update(shared_secret);
     // encoded public key
@@ -156,27 +173,116 @@ pub struct AuthResponse {
     pub name: String,
 }
 
+/// Makes a authentication request to Mojang.
 pub async fn authenticate_mojang(
     username: &str,
     shared_secret: &[u8],
+    server_id: &str,
     encoded_public: &[u8],
 ) -> Result<AuthResponse, Error> {
     // calculate the minecraft hash for this secret, key and username
-    let hash = minecraft_hash(shared_secret, encoded_public);
+    let hash = minecraft_hash(server_id, shared_secret, encoded_public);
 
     // issue a request to Mojang's authentication endpoint
-    let response = HTTP_CLIENT.get(format!("https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}"))
-        .send()
-        .await?
-        .error_for_status()?;
+    let url = format!(
+        "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}"
+    );
+    let response = HTTP_CLIENT.get(url).send().await?.error_for_status()?;
 
     // extract the fields of the response
     Ok(response.json().await?)
 }
 
+/// Creates a cipher pair for encrypting a TCP stream. The pair is synced for the same shared secret.
 pub fn create_ciphers(shared_secret: &[u8]) -> Result<(Aes128Cfb8Enc, Aes128Cfb8Dec), Error> {
     let encoder = Aes128Cfb8Enc::new_from_slices(shared_secret, shared_secret)?;
     let decoder = Aes128Cfb8Dec::new_from_slices(shared_secret, shared_secret)?;
-
     Ok((encoder, decoder))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_keypair() {
+        generate_keypair().expect("failed to generate keypair");
+    }
+
+    #[test]
+    fn can_create_keypair() {
+        let (_, key) = generate_keypair().expect("failed to generate keypair");
+        encode_public_key(&key).expect("failed to encode keypair");
+    }
+
+    #[test]
+    fn sign_verify() {
+        let message = b"justchunks";
+        let secret = b"secret";
+
+        let signed = sign(message, secret);
+        let (ok, verified) = verify(&signed, secret);
+
+        assert!(ok);
+        assert_eq!(message, verified);
+    }
+
+    #[test]
+    fn sign_verify_invalid_secret() {
+        let message = b"justchunks";
+        let secret1 = b"secret1";
+        let secret2 = b"secret2";
+
+        let signed = sign(message, secret1);
+        let (ok, _) = verify(&signed, secret2);
+
+        assert!(!ok);
+    }
+
+    #[test]
+    fn sign_verify_invalid_message() {
+        let message = b"justchunks";
+        let secret = b"secret";
+
+        let (ok, _) = verify(message, secret);
+
+        assert!(!ok);
+    }
+
+    #[test]
+    fn generate_different_keep_alive() {
+        let id1 = generate_keep_alive();
+        let id2 = generate_keep_alive();
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn generate_different_token() {
+        let token1 = generate_token().expect("failed to generate token");
+        let token2 = generate_token().expect("failed to generate token");
+        assert_ne!(token1, token2);
+    }
+
+    #[test]
+    fn verify_valid_token() {
+        let token = generate_token().expect("failed to generate token");
+        verify_token(token, &token).expect("token should be valid");
+    }
+
+    #[test]
+    fn verify_invalid_token_self() {
+        let token1 = generate_token().expect("failed to generate token");
+        let token2 = generate_token().expect("failed to generate token");
+        let Err(_) = verify_token(token1, &token2) else {
+            panic!("should be different token")
+        };
+    }
+
+    #[test]
+    fn can_hash() {
+        let shared_secret = b"verysecuresecret";
+        let (_, key) = generate_keypair().expect("failed to generate keypair");
+        let encoded = encode_public_key(&key).expect("failed to encode keypair");
+        minecraft_hash("justchunks", shared_secret, &encoded);
+    }
 }
