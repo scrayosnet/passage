@@ -35,7 +35,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 cfb8 = "0.8"
 aes = "0.8"
 config = "0.15"
-sentry = { version = "0.37", default-features = false, features = ["backtrace", "contexts", "panic", "debug-images", "reqwest", "rustls", "tower"] }
+sentry = { version = "0.38", default-features = false, features = ["backtrace", "contexts", "panic", "debug-images", "reqwest", "rustls", "tower"] }
 sentry-tracing = "0.37"
 async-trait = "0.1"
 sha2 = "0.10.8"
