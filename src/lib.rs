@@ -7,6 +7,7 @@ pub mod cipher_stream;
 pub mod config;
 pub mod connection;
 mod metrics;
+pub mod mojang;
 pub mod rate_limiter;
 
 use crate::adapter::resourcepack::ResourcepackSupplier;
@@ -22,6 +23,8 @@ use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use crate::config::Config;
 use crate::connection::{Connection, Error};
 use crate::metrics::RequestsLabels;
+use crate::mojang::Api;
+use crate::mojang::Mojang;
 use crate::rate_limiter::RateLimiter;
 use adapter::resourcepack::fixed::FixedResourcePackSupplier;
 use adapter::status::fixed::FixedStatusSupplier;
@@ -41,9 +44,6 @@ use tokio::net::TcpListener;
 use tokio::select;
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
-
-/// The Mojang host. Used for making authentication requests.
-const MOJANG_HOST: &'static str = "https://sessionserver.mojang.com";
 
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
 ///
@@ -211,6 +211,9 @@ async fn start_protocol(
         _ => return Err("unknown target selector strategy configured".into()),
     };
 
+    // initialize mojang client
+    let mojang = Arc::new(Api::default()) as Arc<dyn Mojang>;
+
     // bind the socket address on all interfaces
     info!(addr = config.address.to_string(), "binding socket address");
     let listener = TcpListener::bind(&config.address).await?;
@@ -253,16 +256,17 @@ async fn start_protocol(
         let status_supplier = Arc::clone(&status_supplier);
         let target_selector = Arc::clone(&target_selector);
         let resourcepack_supplier = Arc::clone(&resourcepack_supplier);
+        let mojang = Arc::clone(&mojang);
         let auth_secret = auth_secret.clone();
 
         tokio::spawn(async move {
             // build connection wrapper for stream
             let mut con = Connection::new(
                 &mut stream,
-                MOJANG_HOST,
                 Arc::clone(&status_supplier),
                 Arc::clone(&target_selector),
                 Arc::clone(&resourcepack_supplier),
+                Arc::clone(&mojang),
                 auth_secret,
             );
 

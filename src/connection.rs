@@ -24,6 +24,7 @@ use crate::metrics::{
     ReceivedPackets, ResourcePackDurationLabels, SENT_PACKETS, SentPackets, TRANSFER_TARGETS,
     TransferTargetsLabels,
 };
+use crate::mojang::Mojang;
 use packets::configuration::clientbound as conf_out;
 use packets::configuration::serverbound as conf_in;
 use packets::handshake::serverbound as hand_in;
@@ -77,6 +78,9 @@ pub enum Error {
     /// Some crypto/authentication request failed.
     #[error("could not encrypt connection: {0}")]
     CryptographyFailed(#[from] authentication::Error),
+
+    #[error("authentication request failed: {0}")]
+    AuthRequestFailed(#[from] reqwest::Error),
 
     /// Keep-alive was not received.
     #[error("Missed keep-alive")]
@@ -203,14 +207,14 @@ pub struct Connection<S> {
     stream: CipherStream<S, Aes128Cfb8Enc, Aes128Cfb8Dec>,
     /// The keep-alive config
     keep_alive: KeepAlive<2>,
-    /// Te mojang host, configurable for tests
-    mojang_host: &'static str,
     /// The status supplier of the connection
     pub status_supplier: Arc<dyn StatusSupplier>,
     /// ...
     pub target_selector: Arc<dyn TargetSelector>,
     /// ...
     pub resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
+    /// ...
+    pub mojang: Arc<dyn Mojang>,
     /// Auth cookie secret.
     pub auth_secret: Option<Vec<u8>>,
 }
@@ -221,10 +225,10 @@ where
 {
     pub fn new(
         stream: S,
-        mojang_host: &'static str,
         status_supplier: Arc<dyn StatusSupplier>,
         target_selector: Arc<dyn TargetSelector>,
         resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
+        mojang: Arc<dyn Mojang>,
         auth_secret: Option<Vec<u8>>,
     ) -> Connection<S> {
         // start ticker for keep-alive packets (use delay so that we don't miss any)
@@ -239,10 +243,10 @@ where
                 last_sent: Instant::now(),
                 interval,
             },
-            mojang_host,
             status_supplier,
             target_selector,
             resourcepack_supplier,
+            mojang,
             auth_secret,
         }
     }
@@ -467,14 +471,15 @@ where
         // handle authentication if not already authenticated by the token
         if should_authenticate {
             let start = Instant::now();
-            let auth_response = authentication::authenticate_mojang(
-                self.mojang_host,
-                &login_start.user_name,
-                &shared_secret,
-                "",
-                &authentication::ENCODED_PUB,
-            )
-            .await;
+            let auth_response = self
+                .mojang
+                .authenticate(
+                    &login_start.user_name,
+                    &shared_secret,
+                    "",
+                    &authentication::ENCODED_PUB,
+                )
+                .await;
 
             let auth_response = match auth_response {
                 Ok(resp) => {

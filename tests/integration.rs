@@ -1,4 +1,4 @@
-use mockito::ServerOpts;
+use async_trait::async_trait;
 use packets::configuration::clientbound as conf_out;
 use packets::configuration::serverbound as conf_in;
 use packets::handshake::serverbound as hand_in;
@@ -17,6 +17,7 @@ use passage::adapter::target_selection::none::NoneTargetSelector;
 use passage::authentication;
 use passage::cipher_stream::CipherStream;
 use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection, Error};
+use passage::mojang::{AuthResponse, Mojang};
 use rand::rngs::OsRng;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
@@ -26,8 +27,29 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::uuid;
 
-/// The Mojang host. Used for making authentication requests.
-const MOJANG_HOST: &'static str = "http://127.0.0.1:8731";
+#[derive(Default)]
+struct MojangMock {
+    pub response: AuthResponse,
+}
+
+impl MojangMock {
+    pub fn new(response: AuthResponse) -> Self {
+        Self { response }
+    }
+}
+
+#[async_trait]
+impl Mojang for MojangMock {
+    async fn authenticate(
+        &self,
+        _username: &str,
+        _shared_secret: &[u8],
+        _server_id: &str,
+        _encoded_public: &[u8],
+    ) -> Result<AuthResponse, reqwest::Error> {
+        Ok(self.response.clone())
+    }
+}
 
 pub fn encrypt(key: &RsaPublicKey, value: &[u8]) -> Vec<u8> {
     key.encrypt(&mut OsRng, Pkcs1v15Encrypt, value)
@@ -48,10 +70,10 @@ async fn simulate_handshake() {
     // build connection
     let mut server = Connection::new(
         server_stream,
-        MOJANG_HOST,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
+        Arc::new(MojangMock::default()),
         None,
     );
 
@@ -96,10 +118,10 @@ async fn simulate_status() {
     // build connection
     let mut server = Connection::new(
         server_stream,
-        MOJANG_HOST,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
+        Arc::new(MojangMock::default()),
         None,
     );
 
@@ -167,10 +189,10 @@ async fn simulate_transfer_no_configuration() {
     // build connection
     let mut server = Connection::new(
         server_stream,
-        MOJANG_HOST,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
+        Arc::new(MojangMock::default()),
         Some(auth_secret.clone()),
     );
 
@@ -278,22 +300,6 @@ async fn simulate_login_no_configuration() {
     let user_name = "Hydrofin".to_owned();
     let user_id = uuid!("09879557-e479-45a9-b434-a56377674627");
 
-    let hash = authentication::minecraft_hash("", shared_secret, &authentication::ENCODED_PUB);
-    let mut server = mockito::Server::new_with_opts(ServerOpts {
-        host: "127.0.0.1",
-        port: 8731,
-        assert_on_drop: false,
-    });
-    let mock = server
-        .mock(
-            "GET",
-            format!("/session/minecraft/hasJoined?username={user_name}&serverId={hash}").as_str(),
-        )
-        .with_status(200)
-        .with_header("content-type", "application/json")
-        .with_body(r#"{"id": "09879557-e479-45a9-b434-a56377674627", "name": "Hydrofin"}"#)
-        .create();
-
     // create stream
     let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
@@ -306,10 +312,13 @@ async fn simulate_login_no_configuration() {
     // build connection
     let mut server = Connection::new(
         server_stream,
-        MOJANG_HOST,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
+        Arc::new(MojangMock::new(AuthResponse {
+            id: user_id,
+            name: user_name.clone(),
+        })),
         None,
     );
 
@@ -383,7 +392,6 @@ async fn simulate_login_no_configuration() {
 
     // wait for the server to finish
     server.await.expect("server run failed");
-    mock.assert();
 }
 
 #[tokio::test]
@@ -407,10 +415,10 @@ async fn sends_keep_alive() {
     // build connection
     let mut server = Connection::new(
         server_stream,
-        MOJANG_HOST,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
+        Arc::new(MojangMock::default()),
         Some(auth_secret.clone()),
     );
 
@@ -554,10 +562,10 @@ async fn no_respond_keep_alive() {
     // build connection
     let mut server = Connection::new(
         server_stream,
-        MOJANG_HOST,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
+        Arc::new(MojangMock::default()),
         Some(auth_secret.clone()),
     );
 

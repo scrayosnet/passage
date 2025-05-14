@@ -8,11 +8,10 @@ use rand::rngs::OsRng;
 use rand::{Rng, RngCore};
 use rsa::pkcs8::EncodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
-use serde::{Deserialize, Serialize};
-use sha1::{Digest, Sha1};
+use sha1::Sha1;
+use sha2::Digest;
 use sha2::Sha256;
 use std::sync::LazyLock;
-use uuid::Uuid;
 
 /// Hmac type, expects 32 Byte hash
 pub type HmacSha256 = Hmac<Sha256>;
@@ -24,13 +23,6 @@ pub static KEY_PAIR: LazyLock<(RsaPrivateKey, RsaPublicKey)> =
 /// The encoded public key.
 pub static ENCODED_PUB: LazyLock<Vec<u8>> =
     LazyLock::new(|| encode_public_key(&KEY_PAIR.1).expect("failed to encode keypair"));
-
-/// The shared http client (for mojang requests).
-static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    reqwest::Client::builder()
-        .build()
-        .expect("failed to create http client")
-});
 
 /// The internal error type for all errors related to the authentication and cryptography.
 ///
@@ -148,6 +140,13 @@ pub fn verify_token(expected: VerifyToken, actual: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 
+/// Creates a cipher pair for encrypting a TCP stream. The pair is synced for the same shared secret.
+pub fn create_ciphers(shared_secret: &[u8]) -> Result<(Aes128Cfb8Enc, Aes128Cfb8Dec), Error> {
+    let encoder = Aes128Cfb8Enc::new_from_slices(shared_secret, shared_secret)?;
+    let decoder = Aes128Cfb8Dec::new_from_slices(shared_secret, shared_secret)?;
+    Ok((encoder, decoder))
+}
+
 /// Creates hash for the Minecraft protocol.
 pub fn minecraft_hash(server_id: &str, shared_secret: &[u8], encoded_public: &[u8]) -> String {
     // create a new hasher instance
@@ -162,42 +161,6 @@ pub fn minecraft_hash(server_id: &str, shared_secret: &[u8], encoded_public: &[u
 
     // take the digest and convert it to Minecraft's format
     BigInt::from_signed_bytes_be(&hasher.finalize()).to_str_radix(16)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthResponse {
-    /// The unique identifier of the Minecraft user profile.
-    pub id: Uuid,
-    /// The current visual name of the Minecraft user profile.
-    pub name: String,
-}
-
-/// Makes a authentication request to Mojang.
-pub async fn authenticate_mojang(
-    mojang_host: &str,
-    username: &str,
-    shared_secret: &[u8],
-    server_id: &str,
-    encoded_public: &[u8],
-) -> Result<AuthResponse, Error> {
-    // calculate the minecraft hash for this secret, key and username
-    let hash = minecraft_hash(server_id, shared_secret, encoded_public);
-
-    // issue a request to Mojang's authentication endpoint
-    let url =
-        format!("{mojang_host}/session/minecraft/hasJoined?username={username}&serverId={hash}");
-    let response = HTTP_CLIENT.get(&url).send().await?.error_for_status()?;
-
-    // extract the fields of the response
-    Ok(response.json().await?)
-}
-
-/// Creates a cipher pair for encrypting a TCP stream. The pair is synced for the same shared secret.
-pub fn create_ciphers(shared_secret: &[u8]) -> Result<(Aes128Cfb8Enc, Aes128Cfb8Dec), Error> {
-    let encoder = Aes128Cfb8Enc::new_from_slices(shared_secret, shared_secret)?;
-    let decoder = Aes128Cfb8Dec::new_from_slices(shared_secret, shared_secret)?;
-    Ok((encoder, decoder))
 }
 
 #[cfg(test)]
