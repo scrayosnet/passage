@@ -10,13 +10,15 @@ use packets::{AsyncReadPacket, AsyncWritePacket, ResourcePackResult, State};
 use passage::adapter::resourcepack::fixed::FixedResourcePackSupplier;
 use passage::adapter::resourcepack::none::NoneResourcePackSupplier;
 use passage::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
-use passage::adapter::status::StatusSupplier;
 use passage::adapter::status::none::NoneStatusSupplier;
-use passage::adapter::target_selection::TargetSelector;
+use passage::adapter::status::StatusSupplier;
 use passage::adapter::target_selection::none::NoneTargetSelector;
+use passage::adapter::target_selection::TargetSelector;
+use passage::adapter::target_strategy::none::NoneTargetSelectorStrategy;
+use passage::adapter::target_strategy::TargetSelectorStrategy;
 use passage::authentication;
 use passage::cipher_stream::CipherStream;
-use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection, Error};
+use passage::connection::{AuthCookie, Connection, Error, AUTH_COOKIE_KEY};
 use passage::mojang::{AuthResponse, Mojang};
 use rand::rngs::OsRng;
 use rsa::pkcs8::DecodePublicKey;
@@ -64,7 +66,8 @@ async fn simulate_handshake() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector);
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
     let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(NoneResourcePackSupplier);
 
     // build connection
@@ -112,7 +115,8 @@ async fn simulate_status() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector);
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
     let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(NoneResourcePackSupplier);
 
     // build connection
@@ -183,7 +187,8 @@ async fn simulate_transfer_no_configuration() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector);
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
     let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(NoneResourcePackSupplier);
 
     // build connection
@@ -306,7 +311,8 @@ async fn simulate_login_no_configuration() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector);
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
     let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(NoneResourcePackSupplier);
 
     // build connection
@@ -407,7 +413,8 @@ async fn sends_keep_alive() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector);
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
     let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(
         FixedResourcePackSupplier::new(vec![Resourcepack::default()]),
     );
@@ -554,7 +561,8 @@ async fn no_respond_keep_alive() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector);
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
     let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(
         FixedResourcePackSupplier::new(vec![Resourcepack::default()]),
     );

@@ -27,7 +27,7 @@ duration = 60
 size = 60
 
 [status]
-adapter = "grpc"
+adapter = "fixed"
 
 [status.fixed]
 name = "Passage"
