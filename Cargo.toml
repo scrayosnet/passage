@@ -45,6 +45,12 @@ prometheus-client = "0.23.1"
 hyper = { version = "1.6.0", default-features = false, features = ["server"] }
 hyper-util = "0.1.11"
 http-body-util = "0.1.3"
+tonic = "0.13"
+prost = "0.13"
+prost-types = { version = "0.13" }
 
 [dev-dependencies]
 packets = { path = "./packets", features = ["server", "client"] }
+
+[build-dependencies]
+tonic-build = { version = "0.13", features = ["prost"] }

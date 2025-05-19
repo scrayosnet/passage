@@ -72,13 +72,16 @@ export default defineConfig({
                 text: 'Setup',
                 items: [
                     {text: 'Getting Started', link: '/docs/getting-started'},
-                    {text: 'Installation', link: '/docs/installation'}
+                    {text: 'Installation', link: '/docs/installation'},
+                    {text: 'Kubernetes', link: '/docs/kubernetes'},
                 ]
             },
             {
                 text: 'Customization',
                 items: [
                     {text: 'Overview', link: '/docs/customization'},
+                    {text: 'Config', link: '/docs/config'},
+                    {text: 'Adapter', link: '/docs/adapter'},
                 ]
             }
         ],

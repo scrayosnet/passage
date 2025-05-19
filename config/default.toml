@@ -27,25 +27,38 @@ duration = 60
 size = 60
 
 [status]
-adapter = "fixed"
+adapter = "grpc"
 
 [status.fixed]
 name = "Passage"
 description = "Minecraft Server Transfer Router"
 enforces_secure_chat = true
 
+[status.grpc]
+address = "http://127.0.0.1:3030"
+
+[target_discovery]
+adapter = "fixed"
+
+[[target_discovery.fixed.targets]]
+identifier = "passage-test"
+address = "116.202.130.184:26426"
+meta = { players = "15", type = "pvp" }
+
+[target_discovery.grpc]
+address = "http://127.0.0.1:3030"
+
 [target_strategy]
 adapter = "any"
 
-[target]
-adapter = "fixed"
-
-[target.fixed]
-identifier = "passage-test"
-address = "116.202.130.184:26426"
+[target_strategy.grpc]
+address = "http://127.0.0.1:3030"
 
 [resourcepack]
 adapter = "fixed"
+
+[resourcepack.grpc]
+address = "http://127.0.0.1:3030"
 
 [[resourcepack.fixed.packs]]
 uuid = "9c09eef4-f68d-4387-9751-72bbff53d5a0"

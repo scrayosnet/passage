@@ -1,23 +1,41 @@
 use crate::adapter::status::Protocol;
-use crate::adapter::target_selection::TargetSelector;
-use crate::connection::Error;
+use crate::adapter::target_selection::{strategize, TargetSelector};
+use crate::adapter::target_strategy::TargetSelectorStrategy;
+use crate::adapter::Error;
 use async_trait::async_trait;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use uuid::Uuid;
 
-#[derive(Default)]
-pub struct NoneTargetSelector;
+pub struct NoneTargetSelector {
+    strategy: Arc<dyn TargetSelectorStrategy>,
+}
+
+impl NoneTargetSelector {
+    pub fn new(strategy: Arc<dyn TargetSelectorStrategy>) -> Self {
+        Self { strategy }
+    }
+}
 
 #[async_trait]
 impl TargetSelector for NoneTargetSelector {
     async fn select(
         &self,
-        _client_addr: &SocketAddr,
-        _server_addr: (&str, u16),
-        _protocol: Protocol,
-        _username: &str,
-        _user_id: &Uuid,
+        client_addr: &SocketAddr,
+        server_addr: (&str, u16),
+        protocol: Protocol,
+        username: &str,
+        user_id: &Uuid,
     ) -> Result<Option<SocketAddr>, Error> {
-        Ok(None)
+        strategize(
+            Arc::clone(&self.strategy),
+            client_addr,
+            server_addr,
+            protocol,
+            username,
+            user_id,
+            &[],
+        )
+            .await
     }
 }

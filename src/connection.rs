@@ -19,10 +19,10 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::metrics::{
-    CLIENT_LOCALES, CONNECTION_DURATION, ClientLocaleLabels, ConnectionDurationLabels, Guard,
-    MOJANG_DURATION, MojangDurationLabels, RECEIVED_PACKETS, RESOURCEPACK_DURATION,
-    ReceivedPackets, ResourcePackDurationLabels, SENT_PACKETS, SentPackets, TRANSFER_TARGETS,
-    TransferTargetsLabels,
+    ClientLocaleLabels, ConnectionDurationLabels, Guard, MojangDurationLabels, ReceivedPackets,
+    ResourcePackDurationLabels, SentPackets, TransferTargetsLabels, CLIENT_LOCALES,
+    CONNECTION_DURATION, MOJANG_DURATION, RECEIVED_PACKETS, RESOURCEPACK_DURATION, SENT_PACKETS,
+    TRANSFER_TARGETS,
 };
 use crate::mojang::Mojang;
 use packets::configuration::clientbound as conf_out;
@@ -122,6 +122,10 @@ pub enum Error {
     /// Some array conversion failed.
     #[error("could not convert into array")]
     ArrayConversionFailed,
+
+    /// An error occurred during the invocation or communication of an adapter.
+    #[error("failed to invoke adapter: {0}")]
+    AdapterError(#[from] crate::adapter::Error),
 }
 
 impl From<std::io::Error> for Error {

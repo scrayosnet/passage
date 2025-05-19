@@ -10,16 +10,21 @@ mod metrics;
 pub mod mojang;
 pub mod rate_limiter;
 
-use crate::adapter::resourcepack::ResourcepackSupplier;
+use crate::adapter::resourcepack::grpc::GrpcResourcepackSupplier;
+use crate::adapter::resourcepack::impackable::ImpackableResourcepackSupplier;
 use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
-use crate::adapter::status::StatusSupplier;
+use crate::adapter::resourcepack::ResourcepackSupplier;
+use crate::adapter::status::grpc::GrpcStatusSupplier;
 use crate::adapter::status::none::NoneStatusSupplier;
+use crate::adapter::status::StatusSupplier;
 use crate::adapter::target_selection::fixed::FixedTargetSelector;
+use crate::adapter::target_selection::grpc::GrpcTargetSelector;
 use crate::adapter::target_selection::none::NoneTargetSelector;
-use crate::adapter::target_selection::{Target, TargetSelector};
-use crate::adapter::target_strategy::TargetSelectorStrategy;
+use crate::adapter::target_selection::TargetSelector;
 use crate::adapter::target_strategy::any::AnyTargetSelectorStrategy;
+use crate::adapter::target_strategy::grpc::GrpcTargetSelectorStrategy;
 use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
+use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::config::Config;
 use crate::connection::{Connection, Error};
 use crate::metrics::RequestsLabels;
@@ -29,13 +34,12 @@ use crate::rate_limiter::RateLimiter;
 use adapter::resourcepack::fixed::FixedResourcePackSupplier;
 use adapter::status::fixed::FixedStatusSupplier;
 use http_body_util::Full;
-use hyper::Response;
 use hyper::body::Bytes;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
+use hyper::Response;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use prometheus_client::encoding::text::encode;
-use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
@@ -65,7 +69,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         if let Err(err) = start_metrics(m_config.clone(), m_shutdown.subscribe()).await {
             error!(cause = err.to_string(), "metrics server stopped with error");
         }
-        m_shutdown.send(()).expect("failed to shutdown");
+        m_shutdown.send(()).expect("failed to shut down");
     });
 
     // start the protocol server in own thread
@@ -78,7 +82,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
                 "protocol server stopped with error"
             );
         }
-        p_shutdown.send(()).expect("failed to shutdown");
+        p_shutdown.send(()).expect("failed to shut down");
     });
 
     // wait for either a shutdown signal (from error) or a ctrl-c
@@ -87,7 +91,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         _ = shutdown_signal.recv() => {},
         _ = tokio::signal::ctrl_c() => {
             info!("received ctrl-c signal, shutting down");
-            shutdown.send(()).expect("failed to shutdown");
+            shutdown.send(()).expect("failed to shut down");
         },
     );
 
@@ -166,6 +170,12 @@ async fn start_protocol(
     // initialize status supplier
     let status_supplier = match config.status.adapter.as_str() {
         "none" => Arc::new(NoneStatusSupplier) as Arc<dyn StatusSupplier>,
+        "grpc" => {
+            let Some(grpc) = config.status.grpc.clone() else {
+                return Err("grpc status adapter requires a configuration".into());
+            };
+            Arc::new(GrpcStatusSupplier::new(grpc.address).await?) as Arc<dyn StatusSupplier>
+        }
         "fixed" => {
             let Some(fixed) = config.status.fixed.clone() else {
                 return Err("fixed status adapter requires a configuration".into());
@@ -178,23 +188,32 @@ async fn start_protocol(
     // initialize target selector strategy
     let target_strategy = match config.target_strategy.adapter.as_str() {
         "none" => Arc::new(NoneTargetSelectorStrategy) as Arc<dyn TargetSelectorStrategy>,
+        "grpc" => {
+            let Some(grpc) = config.target_strategy.grpc.clone() else {
+                return Err("grpc target strategy adapter requires a configuration".into());
+            };
+            Arc::new(GrpcTargetSelectorStrategy::new(grpc.address).await?)
+                as Arc<dyn TargetSelectorStrategy>
+        }
         "any" => Arc::new(AnyTargetSelectorStrategy),
         _ => return Err("unknown target selector strategy configured".into()),
     };
 
     // initialize target selector
-    let target_selector = match config.target.adapter.as_str() {
-        "none" => Arc::new(NoneTargetSelector) as Arc<dyn TargetSelector>,
+    let target_selector = match config.target_discovery.adapter.as_str() {
+        "none" => Arc::new(NoneTargetSelector::new(target_strategy)) as Arc<dyn TargetSelector>,
+        "grpc" => {
+            let Some(grpc) = config.target_discovery.grpc.clone() else {
+                return Err("grpc target discovery adapter requires a configuration".into());
+            };
+            Arc::new(GrpcTargetSelector::new(target_strategy, grpc.address).await?)
+                as Arc<dyn TargetSelector>
+        }
         "fixed" => {
-            let Some(fixed) = config.target.fixed.clone() else {
+            let Some(fixed) = config.target_discovery.fixed.clone() else {
                 return Err("fixed target selector adapter requires a configuration".into());
             };
-            let target = Target {
-                identifier: fixed.identifier,
-                address: fixed.address,
-                meta: HashMap::<String, String>::default(),
-            };
-            Arc::new(FixedTargetSelector::new(target_strategy, vec![target]))
+            Arc::new(FixedTargetSelector::new(target_strategy, fixed.targets))
         }
         _ => return Err("unknown target selector strategy configured".into()),
     };
@@ -202,6 +221,26 @@ async fn start_protocol(
     // initialize resourcepack supplier
     let resourcepack_supplier = match config.resourcepack.adapter.as_str() {
         "none" => Arc::new(NoneResourcePackSupplier) as Arc<dyn ResourcepackSupplier>,
+        "grpc" => {
+            let Some(grpc) = config.resourcepack.grpc.clone() else {
+                return Err("grpc resourcepack adapter requires a configuration".into());
+            };
+            Arc::new(GrpcResourcepackSupplier::new(grpc.address).await?)
+                as Arc<dyn ResourcepackSupplier>
+        }
+        "impackable" => {
+            let Some(impackable) = config.resourcepack.impackable.clone() else {
+                return Err("impackable resourcepack adapter requires a configuration".into());
+            };
+            Arc::new(
+                ImpackableResourcepackSupplier::new(
+                    impackable.base_url,
+                    impackable.username,
+                    impackable.password,
+                    impackable.cache_duration,
+                ),
+            ) as Arc<dyn ResourcepackSupplier>
+        }
         "fixed" => {
             let Some(fixed) = config.resourcepack.fixed.clone() else {
                 return Err("fixed resourcepack adapter requires a configuration".into());

@@ -1,5 +1,5 @@
 use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
-use crate::connection::Error;
+use crate::adapter::Error;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 

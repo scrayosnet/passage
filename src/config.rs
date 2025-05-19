@@ -45,9 +45,11 @@ use adapter::status::Protocol;
 use config::{
     ConfigError, Environment, File, FileFormat, FileStoredFormat, Format, Map, Value, ValueKind,
 };
+use reqwest::Url;
 use serde::Deserialize;
 use std::env;
 use std::net::SocketAddr;
+use std::time::Duration;
 
 /// [Sentry] hold the sentry configuration. The release is automatically inferred from cargo.
 #[derive(Debug, Clone, Deserialize)]
@@ -91,6 +93,9 @@ pub struct Status {
 
     /// The config for the fixed status.
     pub fixed: Option<FixedStatus>,
+
+    /// The config for the grpc status.
+    pub grpc: Option<GrpcStatus>,
 }
 
 /// [FixedStatus] hold the fixed status (ping) configuration.
@@ -102,36 +107,84 @@ pub struct FixedStatus {
     pub enforces_secure_chat: Option<bool>,
 }
 
+/// [GrpcStatus] hold the gRPC status (ping) configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GrpcStatus {
+    /// The address of the gRPC adapter server.
+    pub address: String,
+}
+
 /// [Resourcepack] hold the resourcepack configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Resourcepack {
     /// Adapter to retrieve the results.
     pub adapter: String,
 
+    /// The config for the fixed resourcepack.
     pub fixed: Option<FixedResourcepack>,
+
+    /// The config for the grpc resourcepack.
+    pub grpc: Option<GrpcResourcepack>,
+
+    /// The config for the impackable resourcepack.
+    pub impackable: Option<ImpackableResourcepack>
 }
 
-/// [Resourcepack] hold the resourcepack configuration for a fixed set of packs.
+/// [FixedResourcepack] hold the resourcepack configuration for a fixed set of packs.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixedResourcepack {
-    /// Adapter to retrieve the results.
+    /// The resource packs that should be served.
     pub packs: Vec<adapter::resourcepack::Resourcepack>,
 }
 
-/// [Target] hold the target discovery configuration.
+/// [GrpcResourcepack] hold the gRPC resourcepack configuration.
 #[derive(Debug, Clone, Deserialize)]
-pub struct Target {
+pub struct GrpcResourcepack {
+    /// The address of the gRPC adapter server.
+    pub address: String,
+}
+
+/// [ImpackableResourcepack] hold the impackable resourcepack configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ImpackableResourcepack {
+    /// The base URL of the impackable resourcepack server.
+    pub base_url: Url,
+
+    /// The username to authenticate against the query endpoint.
+    pub username: String,
+
+    /// The username to authenticate against the query endpoint.
+    pub password: String,
+
+    /// The cache duration to store the queried version.
+    pub cache_duration: Duration,
+}
+
+/// [TargetDiscovery] hold the target discovery configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TargetDiscovery {
     /// Adapter to retrieve the results.
     pub adapter: String,
 
-    pub fixed: Option<FixedTarget>,
+    /// The config for the fixed target.
+    pub fixed: Option<FixedTargetDiscovery>,
+
+    /// The config for the grpc target.
+    pub grpc: Option<GrpcTargetDiscovery>,
 }
 
-/// [FixedTarget] hold the target discovery configuration for a fixed target.
+/// [FixedTargetDiscovery] hold the target discovery configuration for a fixed target.
 #[derive(Debug, Clone, Deserialize)]
-pub struct FixedTarget {
-    pub identifier: String,
-    pub address: SocketAddr,
+pub struct FixedTargetDiscovery {
+    /// The resource packs that should be served.
+    pub targets: Vec<adapter::target_selection::Target>,
+}
+
+/// [GrpcTargetDiscovery] hold the gRPC target discovery configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GrpcTargetDiscovery {
+    /// The address of the gRPC adapter server.
+    pub address: String,
 }
 
 /// [TargetStrategy] hold the target strategy configuration.
@@ -139,6 +192,16 @@ pub struct FixedTarget {
 pub struct TargetStrategy {
     /// Adapter to retrieve the results.
     pub adapter: String,
+
+    /// The config for the grpc target strategy.
+    pub grpc: Option<GrpcTargetStrategy>,
+}
+
+/// [GrpcTargetStrategy] hold the gRPC target strategy configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GrpcTargetStrategy {
+    /// The address of the gRPC adapter server.
+    pub address: String,
 }
 
 /// [Config] holds all configuration for the application. I.g. one immutable instance is created
@@ -176,7 +239,7 @@ pub struct Config {
     pub resourcepack: Resourcepack,
 
     /// The target discovery configuration.
-    pub target: Target,
+    pub target_discovery: TargetDiscovery,
 
     /// The target strategy configuration.
     pub target_strategy: TargetStrategy,

@@ -1,12 +1,13 @@
+pub mod any;
+pub mod grpc;
+pub mod none;
+
 use crate::adapter::status::Protocol;
-use crate::adapter::target_selection::{Target, TargetIdentifier};
-use crate::connection::Error;
+use crate::adapter::target_selection::Target;
+use crate::adapter::Error;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 use uuid::Uuid;
-
-pub mod any;
-pub mod none;
 
 #[async_trait]
 pub trait TargetSelectorStrategy: Send + Sync {
@@ -18,5 +19,5 @@ pub trait TargetSelectorStrategy: Send + Sync {
         username: &str,
         user_id: &Uuid,
         targets: &[Target],
-    ) -> Result<Option<TargetIdentifier>, Error>;
+    ) -> Result<Option<SocketAddr>, Error>;
 }

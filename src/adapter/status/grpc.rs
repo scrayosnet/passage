@@ -1,19 +1,104 @@
-use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
-use crate::connection::Error;
+use crate::adapter::proto::status_client::StatusClient;
+use crate::adapter::proto::{Address, Players, ProtocolVersion, StatusData, StatusRequest};
+use crate::adapter::status::{
+    Protocol, ServerPlayer, ServerPlayers, ServerStatus, ServerVersion, StatusSupplier,
+};
+use crate::adapter::Error;
 use async_trait::async_trait;
+use serde_json::value::RawValue;
 use std::net::SocketAddr;
+use tonic::transport::Channel;
 
-#[derive(Default)]
-pub struct GrpcStatusSupplier;
+pub struct GrpcStatusSupplier {
+    client: StatusClient<Channel>,
+}
+
+impl GrpcStatusSupplier {
+    pub async fn new(address: String) -> Result<Self, Error> {
+        Ok(Self {
+            client: StatusClient::connect(address).await?,
+        })
+    }
+}
 
 #[async_trait]
 impl StatusSupplier for GrpcStatusSupplier {
     async fn get_status(
         &self,
-        _client_addr: &SocketAddr,
-        _server_addr: (&str, u16),
-        _protocol: Protocol,
+        client_addr: &SocketAddr,
+        server_addr: (&str, u16),
+        protocol: Protocol,
     ) -> Result<Option<ServerStatus>, Error> {
-        Ok(None)
+        let request = tonic::Request::new(StatusRequest {
+            client_address: Some(Address {
+                hostname: client_addr.ip().to_string(),
+                port: client_addr.port() as u32,
+            }),
+            server_address: Some(Address {
+                hostname: server_addr.0.to_string(),
+                port: server_addr.1 as u32,
+            }),
+            protocol: protocol as u64,
+        });
+        let response = self.client.clone().get_status(request).await?;
+
+        Ok(response
+            .into_inner()
+            .status
+            .map(TryInto::try_into)
+            .transpose()?)
+    }
+}
+
+impl TryFrom<StatusData> for ServerStatus {
+    type Error = Error;
+
+    fn try_from(value: StatusData) -> Result<Self, Self::Error> {
+        let description = value.description.map(RawValue::from_string).transpose()?;
+        let favicon = value.favicon.map(String::from_utf8).transpose()?;
+
+        Ok(Self {
+            version: value.version.map(Into::into).ok_or(Error::MissingData {
+                field: "status.version",
+            })?,
+            players: value.players.map(Into::into),
+            description,
+            favicon,
+            enforces_secure_chat: value.enforces_secure_chat,
+        })
+    }
+}
+
+impl From<ProtocolVersion> for ServerVersion {
+    fn from(value: ProtocolVersion) -> Self {
+        Self {
+            name: value.name,
+            protocol: value.protocol,
+        }
+    }
+}
+
+impl From<Players> for ServerPlayers {
+    fn from(value: Players) -> Self {
+        let samples: Option<Vec<ServerPlayer>> = if value.samples.is_empty() {
+            None
+        } else {
+            Some(
+                value
+                    .samples
+                    .iter()
+                    .map(|raw| ServerPlayer {
+                        name: raw.name.to_owned(),
+                        id: raw.id.to_owned(),
+                    })
+                    .collect(),
+            )
+        };
+
+        Self {
+            online: value.online,
+            max: value.max,
+            sample: samples,
+        }
     }
 }

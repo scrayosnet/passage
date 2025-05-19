@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package scrayosnet.passage.adapter;
+
+import "adapter/adapter.proto";
+
+service Resourcepack {
+    rpc GetPacks(PacksRequest) returns (PacksResponse);
+}
+
+message PacksRequest {
+    Address client_address = 1;
+    Address server_address = 2;
+    uint64 protocol = 3;
+    string username = 4;
+    string user_id = 5;
+}
+
+message PacksResponse {
+    repeated Pack packs = 1;
+}
+
+message Pack {
+    string uuid = 1;
+    string url = 2;
+    string hash = 3;
+    bool forced = 4;
+    optional string prompt_message = 5;
+}

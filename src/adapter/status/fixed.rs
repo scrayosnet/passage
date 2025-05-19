@@ -1,6 +1,6 @@
 use crate::adapter::status::{Protocol, ServerStatus, ServerVersion, StatusSupplier};
+use crate::adapter::Error;
 use crate::config::ProtocolRange;
-use crate::connection::Error;
 use async_trait::async_trait;
 use serde_json::value::RawValue;
 use std::net::SocketAddr;

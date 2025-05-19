@@ -2,7 +2,7 @@ pub mod fixed;
 pub mod grpc;
 pub mod none;
 
-use crate::connection::Error;
+use crate::adapter::Error;
 use async_trait::async_trait;
 use packets::VarInt;
 use serde::Serialize;
