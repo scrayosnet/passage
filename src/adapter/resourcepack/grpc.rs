@@ -16,7 +16,12 @@ pub struct GrpcResourcepackSupplier {
 impl GrpcResourcepackSupplier {
     pub async fn new(address: String) -> Result<Self, Error> {
         Ok(Self {
-            client: ResourcepackClient::connect(address).await?,
+            client: ResourcepackClient::connect(address).await.map_err(|err| {
+                Error::FailedInitialization {
+                    adapter_type: "resourcepack",
+                    cause: err.into(),
+                }
+            })?,
         })
     }
 }

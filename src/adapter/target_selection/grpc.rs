@@ -22,7 +22,12 @@ impl GrpcTargetSelector {
     ) -> Result<Self, Error> {
         Ok(Self {
             strategy,
-            client: DiscoveryClient::connect(address).await?,
+            client: DiscoveryClient::connect(address).await.map_err(|err| {
+                Error::FailedInitialization {
+                    adapter_type: "target_selection",
+                    cause: err.into(),
+                }
+            })?,
         })
     }
 }

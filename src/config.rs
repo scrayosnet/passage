@@ -45,11 +45,10 @@ use adapter::status::Protocol;
 use config::{
     ConfigError, Environment, File, FileFormat, FileStoredFormat, Format, Map, Value, ValueKind,
 };
-use reqwest::Url;
 use serde::Deserialize;
 use std::env;
 use std::net::SocketAddr;
-use std::time::Duration;
+use uuid::Uuid;
 
 /// [Sentry] hold the sentry configuration. The release is automatically inferred from cargo.
 #[derive(Debug, Clone, Deserialize)]
@@ -127,7 +126,7 @@ pub struct Resourcepack {
     pub grpc: Option<GrpcResourcepack>,
 
     /// The config for the impackable resourcepack.
-    pub impackable: Option<ImpackableResourcepack>
+    pub impackable: Option<ImpackableResourcepack>,
 }
 
 /// [FixedResourcepack] hold the resourcepack configuration for a fixed set of packs.
@@ -148,7 +147,7 @@ pub struct GrpcResourcepack {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ImpackableResourcepack {
     /// The base URL of the impackable resourcepack server.
-    pub base_url: Url,
+    pub base_url: String,
 
     /// The username to authenticate against the query endpoint.
     pub username: String,
@@ -156,8 +155,17 @@ pub struct ImpackableResourcepack {
     /// The username to authenticate against the query endpoint.
     pub password: String,
 
-    /// The cache duration to store the queried version.
-    pub cache_duration: Duration,
+    /// The channel that should be filtered for the query endpoint.
+    pub channel: String,
+
+    /// The UUID that should be used to identify the resourcepack.
+    pub uuid: Uuid,
+
+    /// Whether the download of the resourcepack should be forced.
+    pub forced: bool,
+
+    /// The cache duration in seconds to store the queried version.
+    pub cache_duration: u64,
 }
 
 /// [TargetDiscovery] hold the target discovery configuration.
@@ -166,11 +174,14 @@ pub struct TargetDiscovery {
     /// Adapter to retrieve the results.
     pub adapter: String,
 
-    /// The config for the fixed target.
+    /// The config for the fixed target discovery configuration.
     pub fixed: Option<FixedTargetDiscovery>,
 
-    /// The config for the grpc target.
+    /// The config for the grpc target discovery configuration.
     pub grpc: Option<GrpcTargetDiscovery>,
+
+    /// The config for the agones target discovery configuration.
+    pub agones: Option<AgonesTargetDiscovery>,
 }
 
 /// [FixedTargetDiscovery] hold the target discovery configuration for a fixed target.
@@ -187,6 +198,13 @@ pub struct GrpcTargetDiscovery {
     pub address: String,
 }
 
+/// [AgonesTargetDiscovery] hold the agones target discovery configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgonesTargetDiscovery {
+    /// The namespace to search for agones game servers.
+    pub namespace: String,
+}
+
 /// [TargetStrategy] hold the target strategy configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TargetStrategy {
@@ -195,6 +213,9 @@ pub struct TargetStrategy {
 
     /// The config for the grpc target strategy.
     pub grpc: Option<GrpcTargetStrategy>,
+
+    /// The config for the player fill target strategy.
+    pub player_fill: Option<PlayerFillTargetStrategy>,
 }
 
 /// [GrpcTargetStrategy] hold the gRPC target strategy configuration.
@@ -202,6 +223,15 @@ pub struct TargetStrategy {
 pub struct GrpcTargetStrategy {
     /// The address of the gRPC adapter server.
     pub address: String,
+}
+
+/// [PlayerFillTargetStrategy] hold the player fill target strategy configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlayerFillTargetStrategy {
+    /// The name of the field that stores the player amount.
+    pub field: String,
+    /// The number of players that will be filled at maximum.
+    pub max_players: u32,
 }
 
 /// [Config] holds all configuration for the application. I.g. one immutable instance is created

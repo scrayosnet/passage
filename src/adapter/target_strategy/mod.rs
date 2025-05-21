@@ -1,6 +1,7 @@
 pub mod any;
 pub mod grpc;
 pub mod none;
+pub mod player_fill;
 
 use crate::adapter::status::Protocol;
 use crate::adapter::target_selection::Target;

@@ -48,17 +48,33 @@ meta = { players = "15", type = "pvp" }
 [target_discovery.grpc]
 address = "http://127.0.0.1:3030"
 
+[target_discovery.agones]
+namespace = "minecraft"
+
 [target_strategy]
 adapter = "any"
 
 [target_strategy.grpc]
 address = "http://127.0.0.1:3030"
 
+[target_strategy.player_fill]
+field = "players"
+max_players = 50
+
 [resourcepack]
-adapter = "fixed"
+adapter = "impackable"
 
 [resourcepack.grpc]
 address = "http://127.0.0.1:3030"
+
+[resourcepack.impackable]
+base_url = "https://impackable.justchunks.net"
+username = "Querying"
+password = ""
+channel = "production"
+uuid = "0e446e8e-9f3d-4b8c-ab6d-5aac42145daf"
+forced = true
+cache_duration = 3
 
 [[resourcepack.fixed.packs]]
 uuid = "9c09eef4-f68d-4387-9751-72bbff53d5a0"

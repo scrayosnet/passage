@@ -17,7 +17,12 @@ pub struct GrpcTargetSelectorStrategy {
 impl GrpcTargetSelectorStrategy {
     pub async fn new(address: String) -> Result<Self, Error> {
         Ok(Self {
-            client: StrategyClient::connect(address).await?,
+            client: StrategyClient::connect(address).await.map_err(|err| {
+                Error::FailedInitialization {
+                    adapter_type: "target_strategy",
+                    cause: err.into(),
+                }
+            })?,
         })
     }
 }

@@ -1,6 +1,7 @@
 pub mod fixed;
 pub mod grpc;
 pub mod none;
+pub mod agones;
 
 use crate::adapter::status::Protocol;
 use crate::adapter::target_strategy::TargetSelectorStrategy;

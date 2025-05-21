@@ -16,7 +16,12 @@ pub struct GrpcStatusSupplier {
 impl GrpcStatusSupplier {
     pub async fn new(address: String) -> Result<Self, Error> {
         Ok(Self {
-            client: StatusClient::connect(address).await?,
+            client: StatusClient::connect(address).await.map_err(|err| {
+                Error::FailedInitialization {
+                    adapter_type: "status",
+                    cause: err.into(),
+                }
+            })?,
         })
     }
 }

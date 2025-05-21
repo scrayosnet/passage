@@ -17,6 +17,7 @@ use crate::adapter::resourcepack::ResourcepackSupplier;
 use crate::adapter::status::grpc::GrpcStatusSupplier;
 use crate::adapter::status::none::NoneStatusSupplier;
 use crate::adapter::status::StatusSupplier;
+use crate::adapter::target_selection::agones::AgonesTargetSelector;
 use crate::adapter::target_selection::fixed::FixedTargetSelector;
 use crate::adapter::target_selection::grpc::GrpcTargetSelector;
 use crate::adapter::target_selection::none::NoneTargetSelector;
@@ -24,6 +25,7 @@ use crate::adapter::target_selection::TargetSelector;
 use crate::adapter::target_strategy::any::AnyTargetSelectorStrategy;
 use crate::adapter::target_strategy::grpc::GrpcTargetSelectorStrategy;
 use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
+use crate::adapter::target_strategy::player_fill::PlayerFillTargetSelectorStrategy;
 use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::config::Config;
 use crate::connection::{Connection, Error};
@@ -195,6 +197,15 @@ async fn start_protocol(
             Arc::new(GrpcTargetSelectorStrategy::new(grpc.address).await?)
                 as Arc<dyn TargetSelectorStrategy>
         }
+        "player_fill" => {
+            let Some(player_fill) = config.target_strategy.player_fill.clone() else {
+                return Err("player_fill target strategy adapter requires a configuration".into());
+            };
+            Arc::new(PlayerFillTargetSelectorStrategy::new(
+                player_fill.field,
+                player_fill.max_players,
+            )) as Arc<dyn TargetSelectorStrategy>
+        }
         "any" => Arc::new(AnyTargetSelectorStrategy),
         _ => return Err("unknown target selector strategy configured".into()),
     };
@@ -207,6 +218,13 @@ async fn start_protocol(
                 return Err("grpc target discovery adapter requires a configuration".into());
             };
             Arc::new(GrpcTargetSelector::new(target_strategy, grpc.address).await?)
+                as Arc<dyn TargetSelector>
+        }
+        "agones" => {
+            let Some(agones) = config.target_discovery.agones.clone() else {
+                return Err("agones target discovery adapter requires a configuration".into());
+            };
+            Arc::new(AgonesTargetSelector::new(target_strategy, agones.namespace).await?)
                 as Arc<dyn TargetSelector>
         }
         "fixed" => {
@@ -232,14 +250,15 @@ async fn start_protocol(
             let Some(impackable) = config.resourcepack.impackable.clone() else {
                 return Err("impackable resourcepack adapter requires a configuration".into());
             };
-            Arc::new(
-                ImpackableResourcepackSupplier::new(
-                    impackable.base_url,
-                    impackable.username,
-                    impackable.password,
-                    impackable.cache_duration,
-                ),
-            ) as Arc<dyn ResourcepackSupplier>
+            Arc::new(ImpackableResourcepackSupplier::new(
+                impackable.base_url,
+                impackable.username,
+                impackable.password,
+                impackable.channel,
+                impackable.uuid,
+                impackable.forced,
+                impackable.cache_duration,
+            )?) as Arc<dyn ResourcepackSupplier>
         }
         "fixed" => {
             let Some(fixed) = config.resourcepack.fixed.clone() else {

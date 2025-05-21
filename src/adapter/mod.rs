@@ -85,6 +85,20 @@ pub enum Error {
     #[error("could not serialize/deserialize JSON: {0}")]
     InvalidJsonEncoding(#[from] serde_json::Error),
 
+    /// The URL could not be successfully fetched.
+    #[error("could not retrieve URL: {0}")]
+    InvalidUrlResponse(#[from] reqwest::Error),
+
+    /// The adapter could not be initialized because of a problem.
+    #[error("failed to initialize {adapter_type} adapter: {cause}")]
+    FailedInitialization {
+        /// The type of adapter that failed to initialize.
+        adapter_type: &'static str,
+        /// The cause of the error that led to the failed initialization.
+        #[source]
+        cause: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     /// A field was expected to be explicitly set but was missing in the adapter response.
     #[error("missing data field: {field}")]
     MissingData {
