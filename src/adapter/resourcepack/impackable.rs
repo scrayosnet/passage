@@ -90,6 +90,7 @@ impl ImpackableResourcepackSupplier {
                 url,
                 hash: pack.hash.clone(),
                 forced,
+                // TODO add support for custom messages with i18n
                 prompt_message: None,
             })
             .into_iter()

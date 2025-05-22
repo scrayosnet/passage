@@ -28,6 +28,20 @@ impl TargetSelectorStrategy for PlayerFillTargetSelectorStrategy {
         _user_id: &Uuid,
         targets: &[Target],
     ) -> Result<Option<SocketAddr>, Error> {
-        Ok(None)
+        let target = targets
+            .iter()
+            .map(|target| {
+                // handle invalid metadata as max players
+                let players = target
+                    .meta
+                    .get(&self.field)
+                    .and_then(|players| players.parse::<u32>().ok())
+                    .unwrap_or(u32::MAX);
+                (target, players)
+            })
+            .filter(|(_, players)| *players < self.max_players)
+            .max_by_key(|(_, players)| *players)
+            .map(|(target, _)| target.address);
+        Ok(target)
     }
 }
