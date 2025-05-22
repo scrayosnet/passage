@@ -3,9 +3,9 @@ pub mod grpc;
 pub mod none;
 pub mod player_fill;
 
+use crate::adapter::Error;
 use crate::adapter::status::Protocol;
 use crate::adapter::target_selection::Target;
-use crate::adapter::Error;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 use uuid::Uuid;

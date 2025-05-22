@@ -120,4 +120,8 @@ pub enum Error {
         /// The explicit message that should be used instead of the default message.
         message: Option<String>,
     },
+
+    /// The adapter is currently unavailable.
+    #[error("adapter is currently unavailable")]
+    AdapterUnavailable,
 }

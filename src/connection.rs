@@ -19,10 +19,10 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::metrics::{
-    ClientLocaleLabels, ConnectionDurationLabels, Guard, MojangDurationLabels, ReceivedPackets,
-    ResourcePackDurationLabels, SentPackets, TransferTargetsLabels, CLIENT_LOCALES,
-    CONNECTION_DURATION, MOJANG_DURATION, RECEIVED_PACKETS, RESOURCEPACK_DURATION, SENT_PACKETS,
-    TRANSFER_TARGETS,
+    CLIENT_LOCALES, CONNECTION_DURATION, ClientLocaleLabels, ConnectionDurationLabels, Guard,
+    MOJANG_DURATION, MojangDurationLabels, RECEIVED_PACKETS, RESOURCEPACK_DURATION,
+    ReceivedPackets, ResourcePackDurationLabels, SENT_PACKETS, SentPackets, TRANSFER_TARGETS,
+    TransferTargetsLabels,
 };
 use crate::mojang::Mojang;
 use packets::configuration::clientbound as conf_out;

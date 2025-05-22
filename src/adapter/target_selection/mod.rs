@@ -1,11 +1,11 @@
+pub mod agones;
 pub mod fixed;
 pub mod grpc;
 pub mod none;
-pub mod agones;
 
+use crate::adapter::Error;
 use crate::adapter::status::Protocol;
 use crate::adapter::target_strategy::TargetSelectorStrategy;
-use crate::adapter::Error;
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::collections::HashMap;

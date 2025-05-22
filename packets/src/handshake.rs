@@ -20,7 +20,7 @@ pub mod serverbound {
     /// This packet causes the server to switch into the target state. It should be sent right after
     /// opening the TCP connection to prevent the server from disconnecting.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Handshake)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Handshake)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct HandshakePacket {

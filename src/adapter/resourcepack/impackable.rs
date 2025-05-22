@@ -1,21 +1,26 @@
+use crate::adapter::Error;
 use crate::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
 use crate::adapter::status::Protocol;
-use crate::adapter::Error;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
+use tokio::select;
+use tokio::sync::{RwLock, oneshot};
+use tracing::{info, warn};
 use uuid::Uuid;
 
+/// The shared http client.
+static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .build()
+        .expect("failed to create http client")
+});
+
 pub struct ImpackableResourcepackSupplier {
-    pub reqwest_client: reqwest::Client,
-    pub base_url: String,
-    pub username: String,
-    pub password: String,
-    pub channel: String,
-    pub uuid: Uuid,
-    pub forced: bool,
-    pub cache_duration: Duration,
+    inner: Arc<RwLock<Option<Vec<Resourcepack>>>>,
+    cancel: Option<oneshot::Sender<()>>,
 }
 
 impl ImpackableResourcepackSupplier {
@@ -28,21 +33,77 @@ impl ImpackableResourcepackSupplier {
         forced: bool,
         cache_duration: u64,
     ) -> Result<Self, Error> {
-        Ok(Self {
-            reqwest_client: reqwest::Client::builder().build().map_err(|err| {
-                Error::FailedInitialization {
-                    adapter_type: "resourcepack",
-                    cause: err.into(),
+        let inner = Arc::new(RwLock::new(None));
+
+        // start refresh
+        let _inner = Arc::clone(&inner);
+        let refresh_interval = Duration::from_secs(cache_duration);
+        let (cancel, mut canceled) = oneshot::channel();
+        let mut interval = tokio::time::interval(refresh_interval);
+        tokio::spawn(async move {
+            info!("Starting impackable resourcepack supplier cache refresh task");
+            loop {
+                select! {
+                    biased;
+                    _ = &mut canceled => break,
+                    _ = interval.tick() => {
+                        let result = ImpackableResourcepackSupplier::refresh(&base_url,&channel,&username,&password,&uuid,forced).await;
+                        match result {
+                            Ok(next) => *_inner.write().await = Some(next),
+                            Err(err) => warn!(err = ?err, "Failed to refresh resourcepack cache")
+                        };
+                    },
                 }
-            })?,
-            base_url: base_url.trim_end_matches('/').to_string(),
-            username,
-            password,
-            channel,
-            uuid,
-            forced,
-            cache_duration: Duration::from_secs(cache_duration),
+            }
+            info!("Stopped impackable resourcepack supplier cache refresh task");
+        });
+
+        Ok(Self {
+            inner,
+            cancel: Some(cancel),
         })
+    }
+
+    async fn refresh(
+        base_url: &str,
+        channel: &str,
+        username: &str,
+        password: &str,
+        uuid: &Uuid,
+        forced: bool,
+    ) -> Result<Vec<Resourcepack>, Error> {
+        let url = format!("{}/query/{}", base_url, channel);
+
+        // issue a request to Mojang's authentication endpoint
+        let response = HTTP_CLIENT
+            .get(&url)
+            .basic_auth(username, Some(password))
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let packs: Vec<ImpackableResourcepack> = response.json().await?;
+        Ok(packs
+            .first()
+            .map(|pack| Resourcepack {
+                uuid: *uuid,
+                url,
+                hash: pack.hash.clone(),
+                forced,
+                prompt_message: None,
+            })
+            .into_iter()
+            .collect())
+    }
+}
+impl Drop for ImpackableResourcepackSupplier {
+    fn drop(&mut self) {
+        let Some(cancel) = self.cancel.take() else {
+            return;
+        };
+        if cancel.send(()).is_err() {
+            warn!("Failed to cancel cache refresh task")
+        }
     }
 }
 
@@ -56,28 +117,11 @@ impl ResourcepackSupplier for ImpackableResourcepackSupplier {
         _username: &str,
         _user_id: &Uuid,
     ) -> Result<Vec<Resourcepack>, Error> {
-        // issue a request to Mojang's authentication endpoint
-        let url = format!("{}/query/{}", self.base_url, self.channel);
-        let response = self
-            .reqwest_client
-            .get(&url)
-            .basic_auth(&self.username, Some(&self.password))
-            .send()
-            .await?
-            .error_for_status()?;
-
-        let packs: Vec<ImpackableResourcepack> = response.json().await?;
-        Ok(packs
-            .first()
-            .map(|pack| Resourcepack {
-                uuid: self.uuid,
-                url: format!("{}/download/{}", self.base_url, pack.id),
-                hash: pack.hash.clone(),
-                forced: self.forced,
-                prompt_message: None,
-            })
-            .into_iter()
-            .collect())
+        self.inner
+            .read()
+            .await
+            .clone()
+            .ok_or(Error::AdapterUnavailable)
     }
 }
 

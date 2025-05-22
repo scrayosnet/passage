@@ -92,7 +92,7 @@ on what that means.
 
 [chat-signing-explanation]:https://gist.github.com/kennytv/ed783dd244ca0321bbd882c347892874
 
-[protocol-docs]: https://minecraft.wiki/w/Java_Edition_protocol
+[protocol-docs]: https://minecraft.wiki/w/Java_Edition_protocol/Packets
 
 [minecraft-1-20-5]: http://minecraft.wiki/w/1.20.5
 
@@ -102,7 +102,7 @@ on what that means.
 
 [pvn-docs]: https://wiki.vg/Protocol_version_numbers
 
-[transfer-packet]: https://minecraft.wiki/w/Java_Edition_protocol#Transfer_(configuration)
+[transfer-packet]: https://minecraft.wiki/w/Java_Edition_protocol/Packets#Transfer_(configuration)
 
 [bungeecord-docs]: https://github.com/SpigotMC/BungeeCord
 

@@ -1,7 +1,7 @@
-use crate::adapter::status::Protocol;
-use crate::adapter::target_selection::{strategize, Target, TargetSelector};
-use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::adapter::Error;
+use crate::adapter::status::Protocol;
+use crate::adapter::target_selection::{Target, TargetSelector, strategize};
+use crate::adapter::target_strategy::TargetSelectorStrategy;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -40,6 +40,6 @@ impl TargetSelector for FixedTargetSelector {
             user_id,
             &self.targets,
         )
-            .await
+        .await
     }
 }

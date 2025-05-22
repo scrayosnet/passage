@@ -21,7 +21,7 @@ pub mod clientbound {
     /// This packet can be received only after a [`StatusRequestPacket`] and will not close the connection, allowing for a
     /// ping sequence to be exchanged afterward.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Status_Response)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Status_Response)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct StatusResponsePacket {
@@ -113,7 +113,7 @@ pub mod serverbound {
     /// The status can only be requested once immediately after the handshake, before any ping. The
     /// server won't respond otherwise.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Status_Request)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Status_Request)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct StatusRequestPacket;
@@ -144,7 +144,7 @@ pub mod serverbound {
 
     /// The [`PingPacket`].
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Ping_Request_(status))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Ping_Request_(status))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct PingPacket {

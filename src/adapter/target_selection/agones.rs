@@ -1,7 +1,7 @@
-use crate::adapter::status::Protocol;
-use crate::adapter::target_selection::{strategize, TargetSelector};
-use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::adapter::Error;
+use crate::adapter::status::Protocol;
+use crate::adapter::target_selection::{TargetSelector, strategize};
+use crate::adapter::target_strategy::TargetSelectorStrategy;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -43,6 +43,6 @@ impl TargetSelector for AgonesTargetSelector {
             user_id,
             &[],
         )
-            .await
+        .await
     }
 }

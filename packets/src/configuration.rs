@@ -22,7 +22,7 @@ pub mod clientbound {
     ///
     /// Requests a cookie that was previously stored.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Request_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Cookie_Request_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct CookieRequestPacket;
@@ -57,7 +57,7 @@ pub mod clientbound {
     /// These internal channels are in the minecraft namespace. More information on how it works on
     /// Dinnerbone's blog. More documentation about internal and popular registered channels is here.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Clientbound_Plugin_Message_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Clientbound_Plugin_Message_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct PluginMessagePacket;
@@ -88,7 +88,7 @@ pub mod clientbound {
 
     /// The clientbound [`DisconnectPacket`].
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Disconnect_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Disconnect_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct DisconnectPacket {
@@ -125,7 +125,7 @@ pub mod clientbound {
 
     /// The clientbound [`FinishConfigurationPacket`].
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Finish_Configuration)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Finish_Configuration)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct FinishConfigurationPacket;
@@ -162,7 +162,7 @@ pub mod clientbound {
     /// any keep-alive for 20 seconds, the client will disconnect and yield a "Timed out" exception.
     /// The vanilla server uses a system-dependent time in milliseconds to generate the keep alive ID value.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Finish_Configuration)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Finish_Configuration)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct KeepAlivePacket {
@@ -208,7 +208,7 @@ pub mod clientbound {
     /// Packet is not used by the vanilla server. When sent to the client, the client responds with
     /// a Pong packet with the same id.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Ping_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Ping_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct PingPacket {
@@ -245,7 +245,7 @@ pub mod clientbound {
 
     /// The clientbound [`ResetChatPacket`]. (Placeholder)
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Reset_Chat)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Reset_Chat)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct ResetChatPacket;
@@ -279,7 +279,7 @@ pub mod clientbound {
     /// Represents certain registries that are sent from the server and are applied on the client.
     /// See Registry Data for details.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Registry_Data_2)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Registry_Data_2)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct RegistryDataPacket;
@@ -310,7 +310,7 @@ pub mod clientbound {
 
     /// The clientbound [`RemoveResourcePackPacket`]. (Placeholder)
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Remove_Resource_Pack_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Remove_Resource_Pack_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct RemoveResourcePackPacket;
@@ -341,7 +341,7 @@ pub mod clientbound {
 
     /// The clientbound [`AddResourcePackPacket`].
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Add_Resource_Pack_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Add_Resource_Pack_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct AddResourcePackPacket {
@@ -408,7 +408,7 @@ pub mod clientbound {
     /// Stores some arbitrary data on the client, which persists between server transfers. The vanilla
     /// client only accepts cookies of up to 5 kiB in size.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Store_Cookie_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Store_Cookie_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct StoreCookiePacket {
@@ -451,7 +451,7 @@ pub mod clientbound {
     /// Notifies the client that it should transfer to the given server. Cookies previously stored are
     /// preserved between server transfers.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Transfer_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Transfer_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct TransferPacket {
@@ -493,7 +493,7 @@ pub mod clientbound {
     ///
     /// Used to enable and disable features, generally experimental ones, on the client.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Feature_Flags)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Feature_Flags)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct FeatureFlagsPacket;
@@ -524,7 +524,7 @@ pub mod clientbound {
 
     /// The clientbound [`UpdateTagsPacket`]. (Placeholder)
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Update_Tags_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Update_Tags_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct UpdateTagsPacket;
@@ -560,7 +560,7 @@ pub mod clientbound {
     /// until it receives a response. The vanilla client requires the minecraft:core pack with version
     /// 1.21.4 for a normal login sequence. This packet must be sent before the Registry Data packets.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Clientbound_Known_Packs)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Clientbound_Known_Packs)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct KnownPacksPacket;
@@ -594,7 +594,7 @@ pub mod clientbound {
     /// Contains a list of key-value text entries that are included in any crash or disconnection report
     /// generated during connection to the server.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Custom_Report_Details_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Custom_Report_Details_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct CustomReportDetailsPacket;
@@ -628,7 +628,7 @@ pub mod clientbound {
     /// This packet contains a list of links that the vanilla client will display in the menu available
     /// from the pause menu. Link labels can be built-in or custom (i.e., any text).
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Server_Links_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Server_Links_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct ServerLinksPacket;
@@ -673,7 +673,7 @@ pub mod serverbound {
     ///
     /// Sent when the player connects or when settings are changed.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Client_Information_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Client_Information_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct ClientInformationPacket {
@@ -747,7 +747,7 @@ pub mod serverbound {
     /// Response to a Cookie Request (configuration) from the server. The vanilla server only accepts
     /// responses of up to 5 kiB in size.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Response_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Cookie_Response_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct CookieResponsePacket;
@@ -785,7 +785,7 @@ pub mod serverbound {
     /// Note that the length of Data is known only from the packet length, since the packet has no length
     /// field of any kind.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Serverbound_Plugin_Message_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Serverbound_Plugin_Message_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct PluginMessagePacket;
@@ -819,7 +819,7 @@ pub mod serverbound {
     /// Sent by the client to notify the server that the configuration process has finished. It is sent
     /// in response to the server's Finish Configuration.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Acknowledge_Finish_Configuration)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Acknowledge_Finish_Configuration)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct AckFinishConfigurationPacket;
@@ -856,7 +856,7 @@ pub mod serverbound {
     /// any keep-alive for 20 seconds, the client will disconnect and yield a "Timed out" exception.
     /// The vanilla server uses a system-dependent time in milliseconds to generate the keep alive ID value.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Finish_Configuration)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Finish_Configuration)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct KeepAlivePacket {
@@ -894,7 +894,7 @@ pub mod serverbound {
     ///
     /// Response to the clientbound packets (Ping) with the same id
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Pong_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Pong_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct PongPacket {
@@ -931,7 +931,7 @@ pub mod serverbound {
 
     /// The serverbound [`ResourcePackResponsePacket`].
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Resource_Pack_Response_(configuration))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Resource_Pack_Response_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct ResourcePackResponsePacket {
@@ -975,7 +975,7 @@ pub mod serverbound {
     /// to Clientbound Known Packs. If the client specifies a pack in this packet, the server should omit
     /// its contained data from the Registry Data packets.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Serverbound_Known_Packs)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Serverbound_Known_Packs)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct KnownPacksPacket;

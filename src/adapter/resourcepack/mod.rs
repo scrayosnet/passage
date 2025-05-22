@@ -1,10 +1,10 @@
 pub mod fixed;
 pub mod grpc;
-pub mod none;
 pub mod impackable;
+pub mod none;
 
-use crate::adapter::status::Protocol;
 use crate::adapter::Error;
+use crate::adapter::status::Protocol;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;

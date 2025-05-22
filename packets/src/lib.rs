@@ -344,7 +344,7 @@ pub trait AsyncWritePacket {
 
     /// Writes a string TextComponent onto this object as described in the official [protocol documentation][protocol-doc].
     ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Java_Edition_protocol#Type:Text_Component
+    /// [protocol-doc]: https://minecraft.wiki/w/Java_Edition_protocol/Packets#Type:Text_Component
     fn write_text_component(&mut self, str: &str) -> impl Future<Output = Result<(), Error>>;
 
     /// Writes a vec of `u8` onto this object as described in the official [protocol documentation][protocol-doc].
@@ -394,7 +394,7 @@ pub trait AsyncReadPacket {
 
     /// Reads a string TextComponent from this object as described in the official [protocol documentation][protocol-doc].
     ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Java_Edition_protocol#Type:Text_Component
+    /// [protocol-doc]: https://minecraft.wiki/w/Java_Edition_protocol/Packets#Type:Text_Component
     fn read_text_component(&mut self) -> impl Future<Output = Result<String, Error>>;
 
     /// Reads a vec of `u8` from this object as described in the official [protocol documentation][protocol-doc].

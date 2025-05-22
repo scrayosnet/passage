@@ -20,7 +20,7 @@ pub mod clientbound {
 
     /// The [`DisconnectPacket`].
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Disconnect_(login))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Disconnect_(login))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct DisconnectPacket {
@@ -58,7 +58,7 @@ pub mod clientbound {
 
     /// The [`EncryptionRequestPacket`].
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Encryption_Request)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Encryption_Request)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct EncryptionRequestPacket {
@@ -114,7 +114,7 @@ pub mod clientbound {
 
     /// The [`LoginSuccessPacket`].
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Success)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Login_Success)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct LoginSuccessPacket {
@@ -165,7 +165,7 @@ pub mod clientbound {
     /// compression will also not be enabled (the vanilla server does not send the packets when compression
     /// is disabled).
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Set_Compression)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Set_Compression)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct SetCompressionPacket;
@@ -201,7 +201,7 @@ pub mod clientbound {
     /// client is expected to respond to a request indicating whether it understood. The vanilla client
     /// always responds that it hasn't understood, and sends an empty payload.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Plugin_Request)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Login_Plugin_Request)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct LoginPluginRequestPacket;
@@ -234,7 +234,7 @@ pub mod clientbound {
     ///
     /// Requests a cookie that was previously stored.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Request_(login))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Cookie_Request_(login))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct CookieRequestPacket {
@@ -284,7 +284,7 @@ pub mod serverbound {
 
     /// The [`LoginStartPacket`].
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Start)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Login_Start)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct LoginStartPacket {
@@ -327,7 +327,7 @@ pub mod serverbound {
 
     /// The [`EncryptionResponsePacket`].
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Encryption_Response)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Encryption_Response)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct EncryptionResponsePacket {
@@ -370,7 +370,7 @@ pub mod serverbound {
 
     /// The [`LoginPluginResponsePacket`]. (Placeholder)
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Plugin_Response)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Login_Plugin_Response)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct LoginPluginResponsePacket;
@@ -401,7 +401,7 @@ pub mod serverbound {
 
     /// The [`LoginAcknowledgedPacket`].
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Login_Acknowledged)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Login_Acknowledged)
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct LoginAcknowledgedPacket;
@@ -432,7 +432,7 @@ pub mod serverbound {
 
     /// The [`CookieResponsePacket`].
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol#Cookie_Response_(login))
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Cookie_Response_(login))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct CookieResponsePacket {
