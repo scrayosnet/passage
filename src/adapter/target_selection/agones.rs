@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use futures_util::stream::StreamExt;
 use kube::runtime::watcher::Config;
 use kube::runtime::{WatchStreamExt, watcher};
-use kube::{Api, Client, CustomResource};
+use kube::{Api, Client, CustomResource, ResourceExt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -18,7 +18,6 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 pub const META_STATE: &str = "state";
-pub const META_PLAYERS: &str = "players";
 
 #[derive(CustomResource, Debug, Serialize, Deserialize, Default, Clone, JsonSchema)]
 #[kube(group = "agones.dev", version = "v1", kind = "GameServer", namespaced)]
@@ -28,38 +27,63 @@ pub struct GameServerSpec {
     #[schemars(length(min = 3))]
     name: String,
     replicas: i32,
+    counters: HashMap<String, GameServerCounter>,
+    lists: HashMap<String, GameServerList>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
+pub struct GameServerCounter {
+    count: Option<u32>,
+    capacity: Option<u32>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
+pub struct GameServerList {
+    capacity: Option<u32>,
+    values: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 pub struct GameServerStatus {
     address: String,
     state: String,
-    players: Option<GameServerPlayerStatus>,
-}
-
-#[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
-pub struct GameServerPlayerStatus {
-    count: i64,
-    capacity: i64,
-    ids: Vec<String>,
 }
 
 impl TryFrom<GameServer> for Target {
     type Error = Error;
 
     fn try_from(server: GameServer) -> Result<Self, Error> {
-        let identifier = server.metadata.uid.ok_or(Error::AdapterUnavailable)?;
-        let status = server.status.ok_or(Error::AdapterUnavailable)?;
+        let identifier = server
+            .metadata
+            .uid
+            .clone()
+            .ok_or(Error::AdapterUnavailable)?;
+        let status = server.status.clone().ok_or(Error::AdapterUnavailable)?;
         let address = status.address.parse()?;
-        let players = status.players.map(|s| s.count).unwrap_or(-1);
+
+        // add meta data
+        let mut meta = HashMap::from([(META_STATE.to_string(), status.state)]);
+
+        // add counters and lists
+        for (name, counter) in &server.spec.counters {
+            meta.insert(name.clone(), counter.count.unwrap_or(0).to_string());
+        }
+        for (name, list) in &server.spec.lists {
+            meta.insert(name.clone(), list.values.join(","));
+        }
+
+        // add labels and annotations
+        for (label, value) in server.labels().iter() {
+            meta.insert(label.clone(), value.clone());
+        }
+        for (annot, value) in server.annotations().iter() {
+            meta.insert(annot.clone(), value.clone());
+        }
 
         Ok(Self {
             identifier,
             address,
-            meta: HashMap::from([
-                (META_STATE.to_string(), status.state),
-                (META_PLAYERS.to_string(), players.to_string()),
-            ]),
+            meta,
         })
     }
 }
