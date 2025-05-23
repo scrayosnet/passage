@@ -224,7 +224,7 @@ async fn start_protocol(
             let Some(agones) = config.target_discovery.agones.clone() else {
                 return Err("agones target discovery adapter requires a configuration".into());
             };
-            Arc::new(AgonesTargetSelector::new(target_strategy, agones.namespace).await?)
+            Arc::new(AgonesTargetSelector::new(target_strategy, &agones.namespace).await?)
                 as Arc<dyn TargetSelector>
         }
         "fixed" => {

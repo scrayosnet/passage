@@ -97,6 +97,7 @@ impl ImpackableResourcepackSupplier {
             .collect())
     }
 }
+
 impl Drop for ImpackableResourcepackSupplier {
     fn drop(&mut self) {
         let Some(cancel) = self.cancel.take() else {
