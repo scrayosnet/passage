@@ -1,7 +1,7 @@
-use crate::adapter::Error;
 use crate::adapter::status::Protocol;
 use crate::adapter::target_selection::Target;
 use crate::adapter::target_strategy::TargetSelectorStrategy;
+use crate::adapter::Error;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -36,7 +36,7 @@ impl TargetSelectorStrategy for PlayerFillTargetSelectorStrategy {
                     .meta
                     .get(&self.field)
                     .and_then(|players| players.parse::<u32>().ok())
-                    .unwrap_or(u32::MAX);
+                    .unwrap_or(0);
                 (target, players)
             })
             .filter(|(_, players)| *players < self.max_players)
