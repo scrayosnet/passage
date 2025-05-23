@@ -35,6 +35,7 @@ impl ResourcepackSupplier for GrpcResourcepackSupplier {
         protocol: Protocol,
         username: &str,
         user_id: &Uuid,
+        _user_locale: &str,
     ) -> Result<Vec<Resourcepack>, Error> {
         let request = tonic::Request::new(PacksRequest {
             client_address: Some(Address {

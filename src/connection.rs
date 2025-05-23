@@ -544,6 +544,29 @@ where
             }
         }
 
+        // wait for a client information packet
+        let client_info = loop {
+            match_packet! { self, keep_alive,
+                // handle keep alive packets
+                packet = conf_in::KeepAlivePacket => {
+                    if !self.keep_alive.replace(packet.id, 0) {
+                        debug!(id = packet.id, "keep alive packet id unknown");
+                    }
+                    continue;
+                },
+                // wait for a client information packet
+                packet = conf_in::ClientInformationPacket => break packet,
+                // ignore unsupported packets but don't throw an error
+                _ = conf_in::PluginMessagePacket => continue,
+            }
+        };
+
+        CLIENT_LOCALES
+            .get_or_create(&ClientLocaleLabels {
+                locale: client_info.locale.clone(),
+            })
+            .inc();
+
         // write resource packs
         let packs = self
             .resourcepack_supplier
@@ -553,6 +576,7 @@ where
                 handshake.protocol_version as Protocol,
                 &login_start.user_name,
                 &login_start.user_id,
+                &client_info.locale,
             )
             .await?;
         let mut pack_ids: HashMap<Uuid, (bool, Instant)> = HashMap::with_capacity(packs.len());
@@ -581,13 +605,7 @@ where
                     continue;
                 },
                 // ignore unsupported packets but don't throw an error
-                packet = conf_in::ClientInformationPacket => {
-                    // caution: this packet is tracked, but not enforced
-                    CLIENT_LOCALES.get_or_create(&ClientLocaleLabels {
-                        locale: packet.locale
-                    }).inc();
-                    continue
-                },
+                _ = conf_in::ClientInformationPacket => continue,
                 _ = conf_in::PluginMessagePacket => continue,
             };
 

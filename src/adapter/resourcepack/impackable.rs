@@ -118,6 +118,7 @@ impl ResourcepackSupplier for ImpackableResourcepackSupplier {
         _protocol: Protocol,
         _username: &str,
         _user_id: &Uuid,
+        _user_locale: &str,
     ) -> Result<Vec<Resourcepack>, Error> {
         self.inner
             .read()

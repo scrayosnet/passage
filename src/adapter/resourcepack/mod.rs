@@ -19,6 +19,7 @@ pub trait ResourcepackSupplier: Send + Sync {
         protocol: Protocol,
         username: &str,
         user_id: &Uuid,
+        user_locale: &str,
     ) -> Result<Vec<Resourcepack>, Error>;
 }
 
