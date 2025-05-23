@@ -111,31 +111,33 @@ impl AgonesTargetSelector {
                 };
 
                 // map to target
-                let mut inner = _inner.write().await;
-                let Some(identifier) = server.metadata.uid.clone() else {
-                    continue;
-                };
-                match server.try_into() {
-                    Ok(target) => {
-                        // replace or push
-                        info!(uid = identifier, "adding game server to cache");
-                        let found = inner.iter_mut().find(|i| i.identifier == identifier);
-                        match found {
-                            Some(found) => *found = target,
-                            None => inner.push(target),
-                        }
-                    }
+                let target: Target = match server.try_into() {
+                    Ok(target) => target,
                     Err(err) => {
-                        // remove
-                        info!(uid = identifier, "removing game server from cache");
-                        let found = inner.iter().position(|i| i.identifier == identifier);
-                        if let Some(found) = found {
-                            inner.remove(found);
-                        }
                         warn!(err = ?err, "error while converting game server to target");
                         continue;
                     }
                 };
+
+                // if ready, replace or push
+                let mut inner = _inner.write().await;
+                let state = target.meta.get(META_STATE).cloned().unwrap_or_default();
+                if state == "Ready" || state == "Allocated" {
+                    info!(uid = target.identifier, "adding game server to cache");
+                    let found = inner.iter_mut().find(|i| i.identifier == target.identifier);
+                    match found {
+                        Some(found) => *found = target,
+                        None => inner.push(target),
+                    }
+                    continue;
+                }
+
+                // remove
+                info!(uid = target.identifier, "removing game server from cache");
+                let found = inner.iter().position(|i| i.identifier == target.identifier);
+                if let Some(found) = found {
+                    inner.remove(found);
+                }
             }
         });
 
