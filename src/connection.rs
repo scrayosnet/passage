@@ -18,12 +18,7 @@ use tokio::time::{Instant, Interval};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::metrics::{
-    CLIENT_LOCALES, CONNECTION_DURATION, ClientLocaleLabels, ConnectionDurationLabels, Guard,
-    MOJANG_DURATION, MojangDurationLabels, RECEIVED_PACKETS, RESOURCEPACK_DURATION,
-    ReceivedPackets, ResourcePackDurationLabels, SENT_PACKETS, SentPackets, TRANSFER_TARGETS,
-    TransferTargetsLabels,
-};
+use crate::metrics::{ClientLocaleLabels, ClientViewDistanceLabels, ConnectionDurationLabels, Guard, MojangDurationLabels, ReceivedPackets, ResourcePackDurationLabels, SentPackets, TransferTargetsLabels, CLIENT_LOCALES, CLIENT_VIEW_DISTANCE, CONNECTION_DURATION, MOJANG_DURATION, RECEIVED_PACKETS, RESOURCEPACK_DURATION, SENT_PACKETS, TRANSFER_TARGETS};
 use crate::mojang::Mojang;
 use packets::configuration::clientbound as conf_out;
 use packets::configuration::serverbound as conf_in;
@@ -566,6 +561,10 @@ where
                 locale: client_info.locale.clone(),
             })
             .inc();
+
+        CLIENT_VIEW_DISTANCE
+            .get_or_create(&ClientViewDistanceLabels {})
+            .observe(client_info.view_distance as f64);
 
         // write resource packs
         let packs = self

@@ -1,6 +1,6 @@
 #[cfg(test)]
 use fake::Dummy;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
@@ -156,6 +156,16 @@ pub enum ChatMode {
     Hidden,
 }
 
+impl Display for ChatMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ChatMode::Enabled => write!(f, "enabled"),
+            ChatMode::CommandsOnly => write!(f, "commands_only"),
+            ChatMode::Hidden => write!(f, "hidden"),
+        }
+    }
+}
+
 impl From<ChatMode> for VarInt {
     fn from(value: ChatMode) -> Self {
         match value {
@@ -223,6 +233,15 @@ pub enum MainHand {
     Right,
 }
 
+impl Display for MainHand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MainHand::Left => write!(f, "left"),
+            MainHand::Right => write!(f, "right"),
+        }
+    }
+}
+
 impl From<MainHand> for VarInt {
     fn from(value: MainHand) -> Self {
         match value {
@@ -253,6 +272,16 @@ pub enum ParticleStatus {
     All,
     Decreased,
     Minimal,
+}
+
+impl Display for ParticleStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParticleStatus::All => write!(f, "all"),
+            ParticleStatus::Decreased => write!(f, "decreased"),
+            ParticleStatus::Minimal => write!(f, "minimal"),
+        }
+    }
 }
 
 impl From<ParticleStatus> for VarInt {

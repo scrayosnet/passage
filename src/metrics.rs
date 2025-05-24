@@ -3,7 +3,7 @@ use prometheus_client::encoding::EncodeLabelSet;
 use prometheus_client::metrics::counter::Counter;
 use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::gauge::Gauge;
-use prometheus_client::metrics::histogram::{Histogram, exponential_buckets};
+use prometheus_client::metrics::histogram::{exponential_buckets, linear_buckets, Histogram};
 use prometheus_client::registry::Registry;
 use std::sync::{Arc, LazyLock};
 
@@ -51,6 +51,13 @@ pub(crate) static MOJANG_DURATION: LazyLock<HistogramFamily<MojangDurationLabels
 pub(crate) static CLIENT_LOCALES: LazyLock<Family<ClientLocaleLabels, Counter>> =
     LazyLock::new(Family::<ClientLocaleLabels, Counter>::default);
 
+pub(crate) static CLIENT_VIEW_DISTANCE: LazyLock<HistogramFamily<ClientViewDistanceLabels>> =
+    LazyLock::new(|| {
+        HistogramFamily::<ClientViewDistanceLabels>::new_with_constructor(|| {
+            Histogram::new(linear_buckets(1.0, 8.0, 32))
+        })
+    });
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct RequestsLabels {
     pub result: &'static str,
@@ -90,6 +97,9 @@ pub struct MojangDurationLabels {
 pub struct ClientLocaleLabels {
     pub locale: String,
 }
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct ClientViewDistanceLabels {}
 
 pub(crate) struct Guard<F: FnOnce()> {
     func: Option<F>,
@@ -152,6 +162,11 @@ fn build_registry() -> Arc<Registry> {
         "client_locales",
         "Number of received client locales",
         CLIENT_LOCALES.clone(),
+    );
+    registry.register(
+        "client_view_distance",
+        "Configured client view distances",
+        CLIENT_VIEW_DISTANCE.clone(),
     );
 
     Arc::new(registry)
