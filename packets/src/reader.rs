@@ -86,9 +86,8 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
             return String::from_utf8(buffer).map_err(|_| Error::InvalidEncoding);
         }
 
-        // TODO reads endlessly?
-        // expect it to take the full buffer
-        let mut buffer = vec![];
+        // expect it to take the full buffer (the text component is the last element in the packet)
+        let mut buffer = vec![tag];
         self.read_to_end(&mut buffer).await?;
         let nbt: Value = fastnbt::from_bytes_with_opts(&buffer, DeOpts::network_nbt())?;
         let json: String = serde_json::to_string(&nbt)?;

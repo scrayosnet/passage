@@ -286,7 +286,7 @@ where
                     let id = authentication::generate_keep_alive();
                     if !self.keep_alive.replace(0, id) {
                         self.send_packet(conf_out::DisconnectPacket {
-                            reason: r#"{"test":"Failed to send keep-alive"}"#.to_string(),
+                            reason: r#"{"text":"Failed to send keep-alive"}"#.to_string(),
                         })
                         .await?;
                         return Err(Error::MissedKeepAlive);

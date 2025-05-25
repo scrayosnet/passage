@@ -6,7 +6,10 @@ use packets::login::clientbound as login_out;
 use packets::login::serverbound as login_in;
 use packets::status::clientbound as status_out;
 use packets::status::serverbound as status_in;
-use packets::{AsyncReadPacket, AsyncWritePacket, ResourcePackResult, State};
+use packets::{
+    AsyncReadPacket, AsyncWritePacket, ChatMode, DisplayedSkinParts, MainHand, ParticleStatus,
+    ResourcePackResult, State,
+};
 use passage::adapter::resourcepack::fixed::FixedResourcePackSupplier;
 use passage::adapter::resourcepack::none::NoneResourcePackSupplier;
 use passage::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
@@ -289,6 +292,21 @@ async fn simulate_transfer_no_configuration() {
         .await
         .expect("send login acknowledged packet failed");
 
+    client_stream
+        .write_packet(conf_in::ClientInformationPacket {
+            locale: "de_DE".to_string(),
+            view_distance: 10,
+            chat_mode: ChatMode::Enabled,
+            chat_colors: false,
+            displayed_skin_parts: DisplayedSkinParts(0),
+            main_hand: MainHand::Left,
+            enable_text_filtering: false,
+            allow_server_listing: false,
+            particle_status: ParticleStatus::All,
+        })
+        .await
+        .expect("send client information packet failed");
+
     // disconnect as no target configured
     let _disconnect_packet: conf_out::DisconnectPacket = client_stream
         .read_packet()
@@ -389,6 +407,21 @@ async fn simulate_login_no_configuration() {
         .write_packet(login_in::LoginAcknowledgedPacket)
         .await
         .expect("send login acknowledged packet failed");
+
+    client_stream
+        .write_packet(conf_in::ClientInformationPacket {
+            locale: "de_DE".to_string(),
+            view_distance: 10,
+            chat_mode: ChatMode::Enabled,
+            chat_colors: false,
+            displayed_skin_parts: DisplayedSkinParts(0),
+            main_hand: MainHand::Left,
+            enable_text_filtering: false,
+            allow_server_listing: false,
+            particle_status: ParticleStatus::All,
+        })
+        .await
+        .expect("send client information packet failed");
 
     // disconnect as no target configured
     let _disconnect_packet: conf_out::DisconnectPacket = client_stream
@@ -516,6 +549,21 @@ async fn sends_keep_alive() {
         .write_packet(login_in::LoginAcknowledgedPacket)
         .await
         .expect("send login acknowledged packet failed");
+
+    client_stream
+        .write_packet(conf_in::ClientInformationPacket {
+            locale: "de_DE".to_string(),
+            view_distance: 10,
+            chat_mode: ChatMode::Enabled,
+            chat_colors: false,
+            displayed_skin_parts: DisplayedSkinParts(0),
+            main_hand: MainHand::Left,
+            enable_text_filtering: false,
+            allow_server_listing: false,
+            particle_status: ParticleStatus::All,
+        })
+        .await
+        .expect("send client information packet failed");
 
     // accept resource pack but wait
     let add_pack: conf_out::AddResourcePackPacket = client_stream
@@ -663,6 +711,21 @@ async fn no_respond_keep_alive() {
         .write_packet(login_in::LoginAcknowledgedPacket)
         .await
         .expect("send login acknowledged packet failed");
+
+    client_stream
+        .write_packet(conf_in::ClientInformationPacket {
+            locale: "de_DE".to_string(),
+            view_distance: 10,
+            chat_mode: ChatMode::Enabled,
+            chat_colors: false,
+            displayed_skin_parts: DisplayedSkinParts(0),
+            main_hand: MainHand::Left,
+            enable_text_filtering: false,
+            allow_server_listing: false,
+            particle_status: ParticleStatus::All,
+        })
+        .await
+        .expect("send client information packet failed");
 
     // accept resource pack but wait
     let _: conf_out::AddResourcePackPacket = client_stream
