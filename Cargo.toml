@@ -20,7 +20,7 @@ edition = "2024"
 rust-version = "1.85.0"
 
 [dependencies]
-tokio = { version = "1.44", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal", "test-util"] }
+tokio = { version = "1.45", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal", "test-util"] }
 tracing = "0.1"
 thiserror = "2.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
