@@ -4,6 +4,8 @@ use std::fmt::{Debug, Display};
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
+pub use fastnbt;
+
 pub mod configuration;
 pub mod handshake;
 pub mod login;
@@ -59,6 +61,14 @@ pub enum Error {
     /// Some array conversion failed.
     #[error("could not convert into array")]
     ArrayConversionFailed,
+
+    /// Some serde_json error.
+    #[error("failed to parse json: {0}")]
+    Json(#[from] serde_json::error::Error),
+
+    /// Some fastnbt error.
+    #[error("failed to parse nbt: {0}")]
+    Nbt(#[from] fastnbt::error::Error),
 }
 
 /// State is the desired state that the connection should be in after the initial handshake.

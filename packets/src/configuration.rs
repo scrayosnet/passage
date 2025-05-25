@@ -106,7 +106,8 @@ pub mod clientbound {
         where
             S: AsyncWrite + Unpin + Send + Sync,
         {
-            buffer.write_string(&self.reason).await?;
+            buffer.write_text_component(&self.reason).await?;
+
             Ok(())
         }
     }
@@ -117,7 +118,7 @@ pub mod clientbound {
         where
             S: AsyncRead + Unpin + Send + Sync,
         {
-            let reason = buffer.read_string().await?;
+            let reason = buffer.read_text_component().await?;
 
             Ok(Self { reason })
         }

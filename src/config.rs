@@ -347,3 +347,6 @@ impl FileStoredFormat for AuthSecretFile {
         &[]
     }
 }
+
+// TODO read messages from config, then select locale by hand, then interpolate using `str::replace`
+// TODO send text components in packets

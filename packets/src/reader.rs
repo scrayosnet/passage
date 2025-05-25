@@ -1,4 +1,5 @@
 use crate::{AsyncReadPacket, Error, ReadPacket, VarInt, VarLong};
+use fastnbt::{DeOpts, Value};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use uuid::Uuid;
 
@@ -74,14 +75,25 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
     }
 
     async fn read_text_component(&mut self) -> Result<String, Error> {
-        // expect a TAG_String (0x08) TextComponent
-        let _tag = self.read_u8().await?;
-        let len = self.read_u16().await?;
+        let tag = self.read_u8().await?;
+        if tag == 0x08 {
+            // expect a TAG_String (0x08) TextComponent
+            let len = self.read_u16().await?;
 
-        let mut buffer = vec![0; len as usize];
-        self.read_exact(&mut buffer).await?;
+            let mut buffer = vec![0; len as usize];
+            self.read_exact(&mut buffer).await?;
 
-        String::from_utf8(buffer).map_err(|_| Error::InvalidEncoding)
+            return String::from_utf8(buffer).map_err(|_| Error::InvalidEncoding);
+        }
+
+        // TODO reads endlessly?
+        // expect it to take the full buffer
+        let mut buffer = vec![];
+        self.read_to_end(&mut buffer).await?;
+        let nbt: Value = fastnbt::from_bytes_with_opts(&buffer, DeOpts::network_nbt())?;
+        let json: String = serde_json::to_string(&nbt)?;
+
+        Ok(json)
     }
 
     async fn read_bytes(&mut self) -> Result<Vec<u8>, Error> {

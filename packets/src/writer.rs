@@ -1,4 +1,6 @@
 use crate::{AsyncWritePacket, Error, INITIAL_BUFFER_SIZE, VarInt, VarLong, WritePacket};
+use fastnbt::SerOpts;
+use serde_json::Value;
 use std::fmt::Debug;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
@@ -83,10 +85,18 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
     }
 
     async fn write_text_component(&mut self, str: &str) -> Result<(), Error> {
-        // writes a TAG_String (0x08) TextComponent
-        self.write_u8(0x08).await?;
-        self.write_u16(str.len() as u16).await?;
-        self.write_all(str.as_bytes()).await?;
+        if !str.starts_with("{") {
+            // writes a TAG_String (0x08) TextComponent
+            self.write_u8(0x08).await?;
+            self.write_u16(str.len() as u16).await?;
+            self.write_all(str.as_bytes()).await?;
+            return Ok(());
+        }
+
+        // writes a TAG_Compound (0x0a) TextComponent
+        let json: Value = serde_json::from_str(str)?;
+        let bytes = fastnbt::to_bytes_with_opts(&json, SerOpts::network_nbt())?;
+        self.write_all(&bytes).await?;
 
         Ok(())
     }

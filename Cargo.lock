@@ -293,6 +293,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cesu8"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
+
+[[package]]
 name = "cfb8"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -803,6 +809,17 @@ dependencies = [
  "dummy",
  "rand 0.9.0",
  "uuid",
+]
+
+[[package]]
+name = "fastnbt"
+version = "2.5.0"
+source = "git+https://github.com/owengage/fastnbt?rev=9e5f6d3c13c063d99bc6f01eabfbb1dd1e6f0fd2#9e5f6d3c13c063d99bc6f01eabfbb1dd1e6f0fd2"
+dependencies = [
+ "byteorder",
+ "cesu8",
+ "serde",
+ "serde_bytes",
 ]
 
 [[package]]
@@ -1876,6 +1893,8 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "fake",
+ "fastnbt",
+ "serde_json",
  "thiserror 2.0.11",
  "tokio",
  "uuid",
@@ -2873,6 +2892,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
  "ordered-float",
+ "serde",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8437fd221bde2d4ca316d61b90e337e9e702b3820b87d63caa9ba6c02bd06d96"
+dependencies = [
  "serde",
 ]
 

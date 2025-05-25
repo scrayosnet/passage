@@ -18,7 +18,12 @@ use tokio::time::{Instant, Interval};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::metrics::{ClientLocaleLabels, ClientViewDistanceLabels, ConnectionDurationLabels, Guard, MojangDurationLabels, ReceivedPackets, ResourcePackDurationLabels, SentPackets, TransferTargetsLabels, CLIENT_LOCALES, CLIENT_VIEW_DISTANCE, CONNECTION_DURATION, MOJANG_DURATION, RECEIVED_PACKETS, RESOURCEPACK_DURATION, SENT_PACKETS, TRANSFER_TARGETS};
+use crate::metrics::{
+    CLIENT_LOCALES, CLIENT_VIEW_DISTANCE, CONNECTION_DURATION, ClientLocaleLabels,
+    ClientViewDistanceLabels, ConnectionDurationLabels, Guard, MOJANG_DURATION,
+    MojangDurationLabels, RECEIVED_PACKETS, RESOURCEPACK_DURATION, ReceivedPackets,
+    ResourcePackDurationLabels, SENT_PACKETS, SentPackets, TRANSFER_TARGETS, TransferTargetsLabels,
+};
 use crate::mojang::Mojang;
 use packets::configuration::clientbound as conf_out;
 use packets::configuration::serverbound as conf_in;
@@ -68,7 +73,7 @@ pub enum Error {
 
     /// The JSON version of a packet content could not be encoded.
     #[error("invalid struct for JSON (encoding problem)")]
-    EncodingFail(#[from] serde_json::Error),
+    Json(#[from] serde_json::Error),
 
     /// Some crypto/authentication request failed.
     #[error("could not encrypt connection: {0}")]
@@ -118,6 +123,10 @@ pub enum Error {
     #[error("could not convert into array")]
     ArrayConversionFailed,
 
+    /// Some fastnbt error.
+    #[error("failed to parse nbt: {0}")]
+    Nbt(#[from] packets::fastnbt::error::Error),
+
     /// An error occurred during the invocation or communication of an adapter.
     #[error("failed to invoke adapter: {0}")]
     AdapterError(#[from] crate::adapter::Error),
@@ -153,6 +162,8 @@ impl From<packets::Error> for Error {
             packets::Error::IllegalPacketId { actual, .. } => Error::UnexpectedPacketId(actual),
             packets::Error::InvalidEncoding => Error::InvalidEncoding,
             packets::Error::ArrayConversionFailed => Error::ArrayConversionFailed,
+            packets::Error::Json(err) => Error::Json(err),
+            packets::Error::Nbt(err) => Error::Nbt(err),
         }
     }
 }
@@ -275,7 +286,7 @@ where
                     let id = authentication::generate_keep_alive();
                     if !self.keep_alive.replace(0, id) {
                         self.send_packet(conf_out::DisconnectPacket {
-                            reason: "Missed Keepalive".to_string(),
+                            reason: r#"{"test":"Failed to send keep-alive"}"#.to_string(),
                         })
                         .await?;
                         return Err(Error::MissedKeepAlive);
@@ -635,9 +646,8 @@ where
 
             // handle pack forced
             if forced && !success {
-                // TODO write actual reason
                 self.send_packet(conf_out::DisconnectPacket {
-                    reason: "".to_string(),
+                    reason: r#"{"text": "Failed to load resource pack"}"#.to_string(),
                 })
                 .await?;
                 return Err(Error::FailedResourcepack);
@@ -664,9 +674,8 @@ where
 
         // disconnect if not target found
         let Some(target) = target else {
-            // TODO write actual message
             self.send_packet(conf_out::DisconnectPacket {
-                reason: "".to_string(),
+                reason: r#"{"text": "No target found"}"#.to_string(),
             })
             .await?;
             return Err(Error::NoTargetFound);
