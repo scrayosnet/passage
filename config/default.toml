@@ -62,7 +62,7 @@ field = "players"
 max_players = 50
 
 [resourcepack]
-adapter = "impackable"
+adapter = "fixed"
 
 [resourcepack.grpc]
 address = "http://127.0.0.1:3030"
