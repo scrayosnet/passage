@@ -42,6 +42,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("auth cookie is enabled");
     }
 
+    let locale = config.localization.localize_default("locale", &[]);
+    info!(locale = locale, "using localization");
+
     // run passage blocking
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()

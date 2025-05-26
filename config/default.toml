@@ -82,3 +82,14 @@ url = "https://impackable.justchunks.net/download/67e3e6e8704c701ec3cf5f8b"
 hash = "c7affa49facf2b14238f1d2f7f04d7d0360bdb1d"
 forced = true
 prompt_message = "Please install!"
+
+[localization]
+default_locale = "en_US"
+
+[localization.messages.en]
+locale = "English"
+resourcepack_impackable_prompt = "The resource pack is required ({size})"
+
+[localization.messages.de]
+locale = "Deutsch"
+resourcepack_impackable_prompt = "Das Ressourcenpacket ist verpflichtend ({size})"

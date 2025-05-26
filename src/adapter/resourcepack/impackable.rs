@@ -1,6 +1,7 @@
 use crate::adapter::Error;
 use crate::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
 use crate::adapter::status::Protocol;
+use crate::config::Localization;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -19,8 +20,12 @@ static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 });
 
 pub struct ImpackableResourcepackSupplier {
-    inner: Arc<RwLock<Option<Vec<Resourcepack>>>>,
+    inner: Arc<RwLock<Option<Option<ImpackableResourcepack>>>>,
     cancel: Option<oneshot::Sender<()>>,
+    url: String,
+    uuid: Uuid,
+    forced: bool,
+    localization: Arc<Localization>,
 }
 
 impl ImpackableResourcepackSupplier {
@@ -32,11 +37,14 @@ impl ImpackableResourcepackSupplier {
         uuid: Uuid,
         forced: bool,
         cache_duration: u64,
+        localization: Arc<Localization>,
     ) -> Result<Self, Error> {
         let inner = Arc::new(RwLock::new(None));
+        let url = format!("{}/query/{}", base_url, channel);
 
         // start refresh
         let _inner = Arc::clone(&inner);
+        let _url = url.clone();
         let refresh_interval = Duration::from_secs(cache_duration);
         let (cancel, mut canceled) = oneshot::channel();
         let mut interval = tokio::time::interval(refresh_interval);
@@ -47,8 +55,7 @@ impl ImpackableResourcepackSupplier {
                     biased;
                     _ = &mut canceled => break,
                     _ = interval.tick() => {
-                        let result = ImpackableResourcepackSupplier::refresh(&base_url,&channel,&username,&password,&uuid,forced).await;
-                        match result {
+                        match Self::refresh(&_url, &username, &password).await {
                             Ok(next) => *_inner.write().await = Some(next),
                             Err(err) => warn!(err = ?err, "Failed to refresh resourcepack cache")
                         };
@@ -61,40 +68,26 @@ impl ImpackableResourcepackSupplier {
         Ok(Self {
             inner,
             cancel: Some(cancel),
+            url,
+            uuid,
+            forced,
+            localization,
         })
     }
 
     async fn refresh(
-        base_url: &str,
-        channel: &str,
+        url: &str,
         username: &str,
         password: &str,
-        uuid: &Uuid,
-        forced: bool,
-    ) -> Result<Vec<Resourcepack>, Error> {
-        let url = format!("{}/query/{}", base_url, channel);
-
-        // issue a request to Mojang's authentication endpoint
+    ) -> Result<Option<ImpackableResourcepack>, Error> {
         let response = HTTP_CLIENT
-            .get(&url)
+            .get(url)
             .basic_auth(username, Some(password))
             .send()
             .await?
             .error_for_status()?;
-
-        let packs: Vec<ImpackableResourcepack> = response.json().await?;
-        Ok(packs
-            .first()
-            .map(|pack| Resourcepack {
-                uuid: *uuid,
-                url,
-                hash: pack.hash.clone(),
-                forced,
-                // TODO add support for custom messages with i18n
-                prompt_message: None,
-            })
-            .into_iter()
-            .collect())
+        let mut packs: Vec<ImpackableResourcepack> = response.json().await?;
+        Ok(packs.pop())
     }
 }
 
@@ -118,13 +111,29 @@ impl ResourcepackSupplier for ImpackableResourcepackSupplier {
         _protocol: Protocol,
         _username: &str,
         _user_id: &Uuid,
-        _user_locale: &str,
+        user_locale: &str,
     ) -> Result<Vec<Resourcepack>, Error> {
-        self.inner
-            .read()
-            .await
-            .clone()
-            .ok_or(Error::AdapterUnavailable)
+        // get fetch result
+        let Some(pack) = self.inner.read().await.clone() else {
+            return Err(Error::AdapterUnavailable);
+        };
+
+        // get available pack if any
+        let Some(first) = pack else { return Ok(vec![]) };
+
+        let prompt_message = self.localization.localize(
+            user_locale,
+            "resourcepack_impackable_prompt",
+            &[("{size}", format!("{} Bytes", first.size))],
+        );
+
+        Ok(vec![Resourcepack {
+            uuid: self.uuid,
+            url: self.url.clone(),
+            hash: first.hash,
+            forced: self.forced,
+            prompt_message: Some(prompt_message),
+        }])
     }
 }
 

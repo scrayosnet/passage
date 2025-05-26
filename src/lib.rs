@@ -63,12 +63,13 @@ use tracing::{debug, error, info, warn};
 /// properly initialized.
 pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let (shutdown, _) = tokio::sync::broadcast::channel(1);
+    let config = Arc::new(config);
 
     // start the metrics server in own thread
     let m_shutdown = shutdown.clone();
-    let m_config = config.clone();
+    let m_config = Arc::clone(&config);
     let metric_server = tokio::spawn(async move {
-        if let Err(err) = start_metrics(m_config.clone(), m_shutdown.subscribe()).await {
+        if let Err(err) = start_metrics(m_config, m_shutdown.subscribe()).await {
             error!(cause = err.to_string(), "metrics server stopped with error");
         }
         m_shutdown.send(()).expect("failed to shut down");
@@ -76,9 +77,9 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 
     // start the protocol server in own thread
     let p_shutdown = shutdown.clone();
-    let p_config = config.clone();
+    let p_config = Arc::clone(&config);
     let protocol_server = tokio::spawn(async move {
-        if let Err(err) = start_protocol(p_config.clone(), p_shutdown.subscribe()).await {
+        if let Err(err) = start_protocol(p_config, p_shutdown.subscribe()).await {
             error!(
                 cause = err.to_string(),
                 "protocol server stopped with error"
@@ -105,7 +106,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn start_metrics(
-    config: Config,
+    config: Arc<Config>,
     mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // start metrics server
@@ -162,12 +163,13 @@ async fn start_metrics(
 }
 
 async fn start_protocol(
-    config: Config,
+    config: Arc<Config>,
     mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // retrieve config params
     let timeout_duration = Duration::from_secs(config.timeout);
-    let auth_secret = config.auth_secret.map(String::into_bytes);
+    let auth_secret = config.auth_secret.clone().map(String::into_bytes);
+    let localization = Arc::new(config.localization.clone());
 
     // initialize status supplier
     let status_supplier = match config.status.adapter.as_str() {
@@ -258,6 +260,7 @@ async fn start_protocol(
                 impackable.uuid,
                 impackable.forced,
                 impackable.cache_duration,
+                localization,
             )?) as Arc<dyn ResourcepackSupplier>
         }
         "fixed" => {
