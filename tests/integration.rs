@@ -21,6 +21,7 @@ use passage::adapter::target_strategy::TargetSelectorStrategy;
 use passage::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use passage::authentication;
 use passage::cipher_stream::CipherStream;
+use passage::config::Localization;
 use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection, Error};
 use passage::mojang::{AuthResponse, Mojang};
 use rand::rngs::OsRng;
@@ -80,6 +81,7 @@ async fn simulate_handshake() {
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
         Arc::new(MojangMock::default()),
+        Arc::new(Localization::default()),
         None,
     );
 
@@ -129,6 +131,7 @@ async fn simulate_status() {
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
         Arc::new(MojangMock::default()),
+        Arc::new(Localization::default()),
         None,
     );
 
@@ -201,6 +204,7 @@ async fn simulate_transfer_no_configuration() {
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
         Arc::new(MojangMock::default()),
+        Arc::new(Localization::default()),
         Some(auth_secret.clone()),
     );
 
@@ -343,6 +347,7 @@ async fn simulate_login_no_configuration() {
             id: user_id,
             name: user_name.clone(),
         })),
+        Arc::new(Localization::default()),
         None,
     );
 
@@ -459,6 +464,7 @@ async fn sends_keep_alive() {
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
         Arc::new(MojangMock::default()),
+        Arc::new(Localization::default()),
         Some(auth_secret.clone()),
     );
 
@@ -622,6 +628,7 @@ async fn no_respond_keep_alive() {
         Arc::clone(&target_selector),
         Arc::clone(&resourcepack_supplier),
         Arc::new(MojangMock::default()),
+        Arc::new(Localization::default()),
         Some(auth_secret.clone()),
     );
 

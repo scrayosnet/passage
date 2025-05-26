@@ -53,7 +53,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 /// [Localization] holds all localizable messages of the application.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Localization {
     /// The locale to be used in case the client locale is unknown or unsupported.
     pub default_locale: String,
@@ -400,6 +400,3 @@ impl FileStoredFormat for AuthSecretFile {
         &[]
     }
 }
-
-// TODO read messages from config, then select locale by hand, then interpolate using `str::replace`
-// TODO send text components in packets

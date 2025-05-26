@@ -88,7 +88,10 @@ default_locale = "en_US"
 
 [localization.messages.en]
 locale = "English"
-resourcepack_impackable_prompt = "The resource pack is required ({size})"
+resourcepack_impackable_prompt = "{\"text\":\"The resource pack is required ({size})\"}"
+disconnect_timeout = "{\"text\":\"Failed to send keep-alive\"}"
+disconnect_failed_resourcepack = "{\"text\":\"Failed to load resource pack\"}"
+disconnect_no_target = "{\"text\":\"No target found\"}"
 
 [localization.messages.de]
 locale = "Deutsch"

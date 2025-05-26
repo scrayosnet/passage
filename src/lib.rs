@@ -260,7 +260,7 @@ async fn start_protocol(
                 impackable.uuid,
                 impackable.forced,
                 impackable.cache_duration,
-                localization,
+                Arc::clone(&localization),
             )?) as Arc<dyn ResourcepackSupplier>
         }
         "fixed" => {
@@ -318,6 +318,7 @@ async fn start_protocol(
         let target_selector = Arc::clone(&target_selector);
         let resourcepack_supplier = Arc::clone(&resourcepack_supplier);
         let mojang = Arc::clone(&mojang);
+        let localization = Arc::clone(&localization);
         let auth_secret = auth_secret.clone();
 
         tokio::spawn(async move {
@@ -328,6 +329,7 @@ async fn start_protocol(
                 Arc::clone(&target_selector),
                 Arc::clone(&resourcepack_supplier),
                 Arc::clone(&mojang),
+                Arc::clone(&localization),
                 auth_secret,
             );
 

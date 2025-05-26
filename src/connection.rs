@@ -18,6 +18,7 @@ use tokio::time::{Instant, Interval};
 use tracing::debug;
 use uuid::Uuid;
 
+use crate::config::Localization;
 use crate::metrics::{
     CLIENT_LOCALES, CLIENT_VIEW_DISTANCE, CONNECTION_DURATION, ClientLocaleLabels,
     ClientViewDistanceLabels, ConnectionDurationLabels, Guard, MOJANG_DURATION,
@@ -227,6 +228,10 @@ pub struct Connection<S> {
     pub mojang: Arc<dyn Mojang>,
     /// Auth cookie secret.
     pub auth_secret: Option<Vec<u8>>,
+    ///
+    pub client_locale: String,
+    /// ...
+    pub localization: Arc<Localization>,
 }
 
 impl<S> Connection<S>
@@ -239,6 +244,7 @@ where
         target_selector: Arc<dyn TargetSelector>,
         resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
         mojang: Arc<dyn Mojang>,
+        localization: Arc<Localization>,
         auth_secret: Option<Vec<u8>>,
     ) -> Connection<S> {
         // start ticker for keep-alive packets (use delay so that we don't miss any)
@@ -258,6 +264,8 @@ where
             resourcepack_supplier,
             mojang,
             auth_secret,
+            client_locale: localization.default_locale.clone(),
+            localization,
         }
     }
 }
@@ -285,10 +293,8 @@ where
                     self.keep_alive.last_sent = Instant::now();
                     let id = authentication::generate_keep_alive();
                     if !self.keep_alive.replace(0, id) {
-                        self.send_packet(conf_out::DisconnectPacket {
-                            reason: r#"{"text":"Failed to send keep-alive"}"#.to_string(),
-                        })
-                        .await?;
+                        let reason = self.localization.localize(&self.client_locale, "disconnect_timeout", &[]);
+                        self.send_packet(conf_out::DisconnectPacket { reason }).await?;
                         return Err(Error::MissedKeepAlive);
                     }
                     let packet = conf_out::KeepAlivePacket { id };
@@ -646,10 +652,13 @@ where
 
             // handle pack forced
             if forced && !success {
-                self.send_packet(conf_out::DisconnectPacket {
-                    reason: r#"{"text": "Failed to load resource pack"}"#.to_string(),
-                })
-                .await?;
+                let reason = self.localization.localize(
+                    &self.client_locale,
+                    "disconnect_failed_resourcepack",
+                    &[],
+                );
+                self.send_packet(conf_out::DisconnectPacket { reason })
+                    .await?;
                 return Err(Error::FailedResourcepack);
             }
         }
@@ -674,10 +683,11 @@ where
 
         // disconnect if not target found
         let Some(target) = target else {
-            self.send_packet(conf_out::DisconnectPacket {
-                reason: r#"{"text": "No target found"}"#.to_string(),
-            })
-            .await?;
+            let reason =
+                self.localization
+                    .localize(&self.client_locale, "disconnect_no_target", &[]);
+            self.send_packet(conf_out::DisconnectPacket { reason })
+                .await?;
             return Err(Error::NoTargetFound);
         };
 
