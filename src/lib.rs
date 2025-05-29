@@ -11,19 +11,24 @@ pub mod mojang;
 pub mod rate_limiter;
 
 use crate::adapter::resourcepack::ResourcepackSupplier;
+#[cfg(feature = "grpc")]
 use crate::adapter::resourcepack::grpc::GrpcResourcepackSupplier;
 use crate::adapter::resourcepack::impackable::ImpackableResourcepackSupplier;
 use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
 use crate::adapter::status::StatusSupplier;
+#[cfg(feature = "grpc")]
 use crate::adapter::status::grpc::GrpcStatusSupplier;
 use crate::adapter::status::none::NoneStatusSupplier;
 use crate::adapter::target_selection::TargetSelector;
+#[cfg(feature = "agones")]
 use crate::adapter::target_selection::agones::AgonesTargetSelector;
 use crate::adapter::target_selection::fixed::FixedTargetSelector;
+#[cfg(feature = "grpc")]
 use crate::adapter::target_selection::grpc::GrpcTargetSelector;
 use crate::adapter::target_selection::none::NoneTargetSelector;
 use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::adapter::target_strategy::any::AnyTargetSelectorStrategy;
+#[cfg(feature = "grpc")]
 use crate::adapter::target_strategy::grpc::GrpcTargetSelectorStrategy;
 use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use crate::adapter::target_strategy::player_fill::PlayerFillTargetSelectorStrategy;
@@ -174,6 +179,7 @@ async fn start_protocol(
     // initialize status supplier
     let status_supplier = match config.status.adapter.as_str() {
         "none" => Arc::new(NoneStatusSupplier) as Arc<dyn StatusSupplier>,
+        #[cfg(feature = "grpc")]
         "grpc" => {
             let Some(grpc) = config.status.grpc.clone() else {
                 return Err("grpc status adapter requires a configuration".into());
@@ -192,6 +198,7 @@ async fn start_protocol(
     // initialize target selector strategy
     let target_strategy = match config.target_strategy.adapter.as_str() {
         "none" => Arc::new(NoneTargetSelectorStrategy) as Arc<dyn TargetSelectorStrategy>,
+        #[cfg(feature = "grpc")]
         "grpc" => {
             let Some(grpc) = config.target_strategy.grpc.clone() else {
                 return Err("grpc target strategy adapter requires a configuration".into());
@@ -215,6 +222,7 @@ async fn start_protocol(
     // initialize target selector
     let target_selector = match config.target_discovery.adapter.as_str() {
         "none" => Arc::new(NoneTargetSelector::new(target_strategy)) as Arc<dyn TargetSelector>,
+        #[cfg(feature = "grpc")]
         "grpc" => {
             let Some(grpc) = config.target_discovery.grpc.clone() else {
                 return Err("grpc target discovery adapter requires a configuration".into());
@@ -222,6 +230,7 @@ async fn start_protocol(
             Arc::new(GrpcTargetSelector::new(target_strategy, grpc.address).await?)
                 as Arc<dyn TargetSelector>
         }
+        #[cfg(feature = "agones")]
         "agones" => {
             let Some(agones) = config.target_discovery.agones.clone() else {
                 return Err("agones target discovery adapter requires a configuration".into());
@@ -241,6 +250,7 @@ async fn start_protocol(
     // initialize resourcepack supplier
     let resourcepack_supplier = match config.resourcepack.adapter.as_str() {
         "none" => Arc::new(NoneResourcePackSupplier) as Arc<dyn ResourcepackSupplier>,
+        #[cfg(feature = "grpc")]
         "grpc" => {
             let Some(grpc) = config.resourcepack.grpc.clone() else {
                 return Err("grpc resourcepack adapter requires a configuration".into());

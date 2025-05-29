@@ -1,4 +1,5 @@
 pub mod fixed;
+#[cfg(feature = "grpc")]
 pub mod grpc;
 pub mod none;
 

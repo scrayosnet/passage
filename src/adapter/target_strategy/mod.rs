@@ -1,4 +1,5 @@
 pub mod any;
+#[cfg(feature = "grpc")]
 pub mod grpc;
 pub mod none;
 pub mod player_fill;

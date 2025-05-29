@@ -13,6 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::new()?;
 
     // initialize sentry
+    #[cfg(feature = "sentry")]
     let _sentry = sentry::init((
         config
             .sentry
@@ -27,13 +28,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     // initialize logging
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().compact())
-        .with(sentry_tracing::layer())
-        // use `RUST_LOG` for logging config
-        .with(EnvFilter::from_default_env())
-        .init();
+    let subscriber =
+        tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().compact());
 
+    #[cfg(feature = "sentry")]
+    let subscriber = subscriber.with(sentry_tracing::layer());
+
+    let subscriber = subscriber.with(EnvFilter::from_default_env());
+
+    subscriber.init();
+
+    #[cfg(feature = "sentry")]
     if _sentry.is_enabled() {
         info!("sentry is enabled");
     }

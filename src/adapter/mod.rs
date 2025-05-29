@@ -10,6 +10,7 @@ pub mod status;
 pub mod target_selection;
 pub mod target_strategy;
 
+#[cfg(feature = "grpc")]
 pub mod proto {
     use crate::adapter::Error;
     use crate::adapter::Error::MissingData;
@@ -107,10 +108,12 @@ pub enum Error {
     },
 
     /// The creation of a gRPC client failed due to connection issues or wrong parameters.
+    #[cfg(feature = "grpc")]
     #[error("could not create gRPC client: {0}")]
     GrpcClientFailed(#[from] tonic::transport::Error),
 
     /// The querying of some adapter over gRPC raised an error that was not expected.
+    #[cfg(feature = "grpc")]
     #[error("failed to retrieve info through gRPC: {0}")]
     GrpcError(#[from] tonic::Status),
 

@@ -228,9 +228,9 @@ pub struct Connection<S> {
     pub mojang: Arc<dyn Mojang>,
     /// Auth cookie secret.
     pub auth_secret: Option<Vec<u8>>,
-    ///
+    /// The currently registered client locale, falls back to the configured default
     pub client_locale: String,
-    /// ...
+    /// The localization handler.
     pub localization: Arc<Localization>,
 }
 
