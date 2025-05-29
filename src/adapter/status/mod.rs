@@ -1,19 +1,21 @@
 pub mod fixed;
 #[cfg(feature = "grpc")]
 pub mod grpc;
+#[cfg(feature = "mongodb")]
+pub mod mongodb;
 pub mod none;
 
 use crate::adapter::Error;
 use async_trait::async_trait;
 use packets::VarInt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::net::SocketAddr;
 
 pub type Protocol = VarInt;
 
 /// The information on the protocol version of a server.
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServerVersion {
     /// The textual protocol version to display this version visually.
     pub name: String,
@@ -31,7 +33,7 @@ impl Default for ServerVersion {
 }
 
 /// The information on a single, sampled player entry.
-#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct ServerPlayer {
     /// The visual name to display this player.
     pub name: String,
@@ -40,7 +42,7 @@ pub struct ServerPlayer {
 }
 
 /// The information on the current, maximum and sampled players.
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServerPlayers {
     /// The current number of players that are online at this moment.
     pub online: u32,
@@ -51,7 +53,7 @@ pub struct ServerPlayers {
 }
 
 /// The self-reported status of a pinged server with all public metadata.
-#[derive(Debug, Serialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ServerStatus {
     /// The version and protocol information of the server.
     pub version: ServerVersion,

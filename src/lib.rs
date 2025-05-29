@@ -18,6 +18,7 @@ use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
 use crate::adapter::status::StatusSupplier;
 #[cfg(feature = "grpc")]
 use crate::adapter::status::grpc::GrpcStatusSupplier;
+use crate::adapter::status::mongodb::MongodbStatusSupplier;
 use crate::adapter::status::none::NoneStatusSupplier;
 use crate::adapter::target_selection::TargetSelector;
 #[cfg(feature = "agones")]
@@ -185,6 +186,22 @@ async fn start_protocol(
                 return Err("grpc status adapter requires a configuration".into());
             };
             Arc::new(GrpcStatusSupplier::new(grpc.address).await?) as Arc<dyn StatusSupplier>
+        }
+        #[cfg(feature = "mongodb")]
+        "mongodb" => {
+            let Some(mongodb) = config.status.mongodb.clone() else {
+                return Err("mongodb status adapter requires a configuration".into());
+            };
+            Arc::new(
+                MongodbStatusSupplier::new(
+                    mongodb.address,
+                    mongodb.database,
+                    mongodb.collection,
+                    mongodb.filter,
+                    mongodb.field_path,
+                )
+                .await?,
+            ) as Arc<dyn StatusSupplier>
         }
         "fixed" => {
             let Some(fixed) = config.status.fixed.clone() else {

@@ -117,6 +117,16 @@ pub enum Error {
     #[error("failed to retrieve info through gRPC: {0}")]
     GrpcError(#[from] tonic::Status),
 
+    /// Some mongodb error.
+    #[cfg(feature = "mongodb")]
+    #[error("failed mongodb operation: {0}")]
+    MongodbError(#[from] mongodb::error::Error),
+
+    /// Some mongodb bson error.
+    #[cfg(feature = "mongodb")]
+    #[error("failed mongodb bson operation: {0}")]
+    BsonError(#[from] mongodb::bson::de::Error),
+
     /// No server could be found from the adapter, so the player will be disconnected.
     #[error("failed to retrieve target server: {message:#?}")]
     NoServerFound {

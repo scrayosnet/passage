@@ -145,6 +145,9 @@ pub struct Status {
 
     /// The config for the grpc status.
     pub grpc: Option<GrpcStatus>,
+
+    /// The config for the mongodb status.
+    pub mongodb: Option<MongodbStatus>,
 }
 
 /// [FixedStatus] hold the fixed status (ping) configuration.
@@ -161,6 +164,25 @@ pub struct FixedStatus {
 pub struct GrpcStatus {
     /// The address of the gRPC adapter server.
     pub address: String,
+}
+
+/// [MongodbStatus] hold the mongodb status (ping) configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MongodbStatus {
+    /// The address of the mongodb adapter server.
+    pub address: String,
+
+    /// The database of the mongodb adapter server.
+    pub database: String,
+
+    /// The collection of the mongodb adapter server.
+    pub collection: String,
+
+    /// The filter on the collection to get the document(s).
+    pub filter: String,
+
+    /// The field path of the filtered document(s).
+    pub field_path: Vec<String>,
 }
 
 /// [Resourcepack] hold the resourcepack configuration.
