@@ -17,7 +17,7 @@ homepage = "https://passage.scrayos.net"
 keywords = ["minecraft", "prometheus", "monitoring", "exporter", "ping"]
 categories = ["emulators", "network-programming"]
 edition = "2024"
-rust-version = "1.87.0"
+rust-version = "1.85.0"
 
 [dependencies]
 packets = { path = "./packets", features = ["server"] }
