@@ -1,0 +1,3 @@
+[advisories]
+# rsa module is vulnerable, but no new version available
+ignore = ["RUSTSEC-2023-0071"]
