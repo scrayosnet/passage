@@ -134,7 +134,6 @@ async fn start_metrics(
                 break;
             },
         };
-        debug!(addr = addr.to_string(), "received metrics connection");
 
         let io = TokioIo::new(stream);
 
@@ -145,10 +144,6 @@ async fn start_metrics(
             id = connection_id.to_string(),
         );
 
-        debug!(
-            addr = addr.to_string(),
-            "moving metrics connection to a new task"
-        );
         tokio::task::spawn(
             async move {
                 if let Err(err) = http1::Builder::new()
