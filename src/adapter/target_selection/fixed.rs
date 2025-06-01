@@ -2,6 +2,7 @@ use crate::adapter::Error;
 use crate::adapter::status::Protocol;
 use crate::adapter::target_selection::{Target, TargetSelector, strategize};
 use crate::adapter::target_strategy::TargetSelectorStrategy;
+use crate::config::FixedTargetDiscovery as FixedConfig;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -13,10 +14,10 @@ pub struct FixedTargetSelector {
 }
 
 impl FixedTargetSelector {
-    pub fn new(strategy: Arc<dyn TargetSelectorStrategy>, targets: impl Into<Vec<Target>>) -> Self {
+    pub fn new(strategy: Arc<dyn TargetSelectorStrategy>, config: FixedConfig) -> Self {
         Self {
             strategy,
-            targets: targets.into(),
+            targets: config.targets,
         }
     }
 }

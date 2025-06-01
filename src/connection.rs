@@ -15,15 +15,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::{Instant, Interval};
-use tracing::debug;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::config::Localization;
 use crate::metrics::{
-    CLIENT_LOCALES, CLIENT_VIEW_DISTANCE, CONNECTION_DURATION, ClientLocaleLabels,
-    ClientViewDistanceLabels, ConnectionDurationLabels, Guard, MOJANG_DURATION,
-    MojangDurationLabels, RECEIVED_PACKETS, RESOURCEPACK_DURATION, ReceivedPackets,
-    ResourcePackDurationLabels, SENT_PACKETS, SentPackets, TRANSFER_TARGETS, TransferTargetsLabels,
+    ClientLocaleLabels, ClientViewDistanceLabels, ConnectionDurationLabels, Guard,
+    MojangDurationLabels, ReceivedPackets, ResourcePackDurationLabels, SentPackets,
+    TransferTargetsLabels, CLIENT_LOCALES, CLIENT_VIEW_DISTANCE, CONNECTION_DURATION,
+    MOJANG_DURATION, RECEIVED_PACKETS, RESOURCEPACK_DURATION, SENT_PACKETS, TRANSFER_TARGETS,
 };
 use crate::mojang::Mojang;
 use packets::configuration::clientbound as conf_out;
@@ -228,7 +228,7 @@ pub struct Connection<S> {
     pub mojang: Arc<dyn Mojang>,
     /// Auth cookie secret.
     pub auth_secret: Option<Vec<u8>>,
-    /// The currently registered client locale, falls back to the configured default
+    /// The currently registered client locale. It falls back to the globally configured default.
     pub client_locale: String,
     /// The localization handler.
     pub localization: Arc<Localization>,
@@ -290,6 +290,7 @@ where
                 // await the next timer tick for keep-alive
                 _ = interval.tick() => {
                     if !keep_alive { continue; }
+                    debug!("checking that keep-alive packet was received");
                     self.keep_alive.last_sent = Instant::now();
                     let id = authentication::generate_keep_alive();
                     if !self.keep_alive.replace(0, id) {
@@ -297,6 +298,7 @@ where
                         self.send_packet(conf_out::DisconnectPacket { reason }).await?;
                         return Err(Error::MissedKeepAlive);
                     }
+                    debug!("sending next keep-alive packet");
                     let packet = conf_out::KeepAlivePacket { id };
                     self.send_packet(packet).await?;
                 },
@@ -307,7 +309,9 @@ where
             }
         };
 
-        RECEIVED_PACKETS.get_or_create(&ReceivedPackets {}).inc();
+        RECEIVED_PACKETS
+            .get_or_create(&ReceivedPackets {})
+            .observe(length as f64);
 
         // check the length of the packet for any following content
         if length == 0 || length > MAX_PACKET_LENGTH {
@@ -354,6 +358,7 @@ where
         let start = Instant::now();
 
         // handle handshake
+        debug!("awaiting handshake packet");
         let handshake = match_packet! { self,
             packet = hand_in::HandshakePacket => packet,
         };
@@ -364,6 +369,7 @@ where
             State::Login => "login",
             State::Transfer => "transfer",
         };
+        debug!(next_state = variant, "received handshake packet");
 
         let _timer = Guard::on_drop(|| {
             CONNECTION_DURATION
@@ -376,10 +382,12 @@ where
 
         // handle status request
         if handshake.next_state == State::Status {
+            debug!("awaiting status request packet");
             let _ = match_packet! { self,
                 packet = status_in::StatusRequestPacket => packet,
             };
 
+            debug!("getting status from supplier");
             let status = self
                 .status_supplier
                 .get_status(
@@ -389,15 +397,18 @@ where
                 )
                 .await?;
 
+            debug!("sending status response packet");
             self.send_packet(status_out::StatusResponsePacket {
                 body: serde_json::to_string(&status)?,
             })
             .await?;
 
+            debug!("awaiting ping packet");
             let ping = match_packet! { self,
                 packet = status_in::PingPacket => packet,
             };
 
+            debug!("sending pong packet");
             self.send_packet(status_out::PongPacket {
                 payload: ping.payload,
             })
@@ -407,37 +418,50 @@ where
         }
 
         // handle login request
+        debug!("awaiting login start packet");
         let mut login_start = match_packet! { self,
             packet = login_in::LoginStartPacket => packet,
         };
+
+        info!(
+            user_name = login_start.user_name,
+            user_id = login_start.user_id.to_string(),
+            "handling login"
+        );
 
         // in case of transfer, use the auth cookie
         let mut should_authenticate = true;
         'transfer: {
             if handshake.next_state == State::Transfer {
                 if self.auth_secret.is_none() {
+                    debug!("no auth secret configured, skipping auth cookie");
                     break 'transfer;
                 }
 
+                debug!("sending auth cookie request packet");
                 self.send_packet(login_out::CookieRequestPacket {
                     key: AUTH_COOKIE_KEY.to_string(),
                 })
                 .await?;
 
+                debug!("awaiting auth cookie response packet");
                 let cookie = match_packet! { self,
                     packet = login_in::CookieResponsePacket => packet,
                 };
 
                 let Some(signed) = cookie.payload else {
+                    debug!("no auth cookie received, skipping auth cookie");
                     break 'transfer;
                 };
 
                 let Some(secret) = &self.auth_secret else {
+                    debug!("no auth cookie received, skipping auth cookie");
                     break 'transfer;
                 };
 
                 let (ok, message) = authentication::verify(&signed, secret);
                 if !ok {
+                    debug!("invalid auth cookie signature received, skipping auth cookie");
                     break 'transfer;
                 }
 
@@ -449,6 +473,7 @@ where
                     + AUTH_COOKIE_EXPIRY_SECS;
 
                 if cookie.client_addr.ip() != client_address.ip() || cookie.timestamp > expires_at {
+                    debug!("invalid auth cookie payload received, skipping auth cookie");
                     break 'transfer;
                 }
 
@@ -463,6 +488,7 @@ where
         // handle encryption
         let verify_token = authentication::generate_token()?;
 
+        debug!("sending encryption request packet");
         self.send_packet(login_out::EncryptionRequestPacket {
             server_id: "".to_owned(),
             public_key: authentication::ENCODED_PUB.clone(),
@@ -471,6 +497,7 @@ where
         })
         .await?;
 
+        debug!("awaiting encryption response packet");
         let encrypt = match_packet! { self,
             packet = login_in::EncryptionResponsePacket => packet,
         };
@@ -482,10 +509,12 @@ where
             authentication::decrypt(&authentication::KEY_PAIR.0, &encrypt.verify_token)?;
 
         // verify the token is correct
+        debug!("verifying verify token");
         authentication::verify_token(verify_token, &decrypted_verify_token)?;
 
         // handle authentication if not already authenticated by the token
         if should_authenticate {
+            debug!("authenticating with mojang");
             let start = Instant::now();
             let auth_response = self
                 .mojang
@@ -520,12 +549,14 @@ where
         // enable encryption for the connection using the shared secret
         self.apply_encryption(&shared_secret)?;
 
+        debug!("sending login success packet");
         self.send_packet(login_out::LoginSuccessPacket {
             user_name: login_start.user_name.clone(),
             user_id: login_start.user_id,
         })
         .await?;
 
+        debug!("awaiting login acknowledged packet");
         let _ = match_packet! { self,
             packet = login_in::LoginAcknowledgedPacket => packet,
         };
@@ -533,7 +564,10 @@ where
         // write auth cookie
         'auth_cookie: {
             if should_authenticate {
+                debug!("writing auth cookie");
+
                 let Some(secret) = &self.auth_secret else {
+                    debug!("no auth secret configured, skipping auth cookie");
                     break 'auth_cookie;
                 };
 
@@ -548,6 +582,7 @@ where
                 };
 
                 let auth_payload = serde_json::to_vec(&cookie)?;
+                debug!("sending auth cookie packet");
                 self.send_packet(conf_out::StoreCookiePacket {
                     key: AUTH_COOKIE_KEY.to_string(),
                     payload: authentication::sign(&auth_payload, secret),
@@ -557,6 +592,7 @@ where
         }
 
         // wait for a client information packet
+        debug!("awaiting client information packet");
         let client_info = loop {
             match_packet! { self, keep_alive,
                 // handle keep alive packets
@@ -584,6 +620,7 @@ where
             .observe(client_info.view_distance as f64);
 
         // write resource packs
+        debug!("getting resource packs from supplier");
         let packs = self
             .resourcepack_supplier
             .get_resourcepacks(
@@ -597,6 +634,7 @@ where
             .await?;
         let mut pack_ids: HashMap<Uuid, (bool, Instant)> = HashMap::with_capacity(packs.len());
 
+        debug!(len = pack_ids.len(), "sending resource pack packet(s)");
         for pack in packs {
             let packet = conf_out::AddResourcePackPacket {
                 uuid: pack.uuid,
@@ -610,6 +648,7 @@ where
         }
 
         // wait for resource packs to be accepted
+        debug!("awaiting resource pack response packet(s)");
         while !pack_ids.is_empty() {
             let packet = match_packet! { self, keep_alive,
                 packet = conf_in::ResourcePackResponsePacket => packet,
@@ -652,11 +691,14 @@ where
 
             // handle pack forced
             if forced && !success {
+                debug!("client failed to load forced resource pack");
                 let reason = self.localization.localize(
                     &self.client_locale,
                     "disconnect_failed_resourcepack",
                     &[],
                 );
+
+                debug!("sending disconnect packet");
                 self.send_packet(conf_out::DisconnectPacket { reason })
                     .await?;
                 return Err(Error::FailedResourcepack);
@@ -664,6 +706,7 @@ where
         }
 
         // transfer
+        debug!("getting target from supplier");
         let target = self
             .target_selector
             .select(
@@ -683,9 +726,11 @@ where
 
         // disconnect if not target found
         let Some(target) = target else {
+            debug!("no transfer target found");
             let reason =
                 self.localization
                     .localize(&self.client_locale, "disconnect_no_target", &[]);
+            debug!("sending disconnect packet");
             self.send_packet(conf_out::DisconnectPacket { reason })
                 .await?;
             return Err(Error::NoTargetFound);
@@ -696,6 +741,7 @@ where
             host: target.ip().to_string(),
             port: target.port(),
         };
+        debug!("sending transfer packet");
         self.send_packet(transfer).await?;
 
         Ok(())

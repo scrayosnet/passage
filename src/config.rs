@@ -53,7 +53,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 /// [Localization] holds all localizable messages of the application.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Localization {
     /// The locale to be used in case the client locale is unknown or unsupported.
     pub default_locale: String,
@@ -97,6 +97,15 @@ impl Localization {
             message = message.replace(param_key, param_val);
         }
         message
+    }
+}
+
+impl Default for Localization {
+    fn default() -> Self {
+        Self {
+            default_locale: "en_US".to_string(),
+            messages: HashMap::new(),
+        }
     }
 }
 

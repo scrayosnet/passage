@@ -4,6 +4,7 @@ use crate::adapter::proto::{Address, Players, ProtocolVersion, StatusData, Statu
 use crate::adapter::status::{
     Protocol, ServerPlayer, ServerPlayers, ServerStatus, ServerVersion, StatusSupplier,
 };
+use crate::config::GrpcStatus as GrpcConfig;
 use async_trait::async_trait;
 use serde_json::value::RawValue;
 use std::net::SocketAddr;
@@ -14,9 +15,9 @@ pub struct GrpcStatusSupplier {
 }
 
 impl GrpcStatusSupplier {
-    pub async fn new(address: String) -> Result<Self, Error> {
+    pub async fn new(config: GrpcConfig) -> Result<Self, Error> {
         Ok(Self {
-            client: StatusClient::connect(address).await.map_err(|err| {
+            client: StatusClient::connect(config.address).await.map_err(|err| {
                 Error::FailedInitialization {
                     adapter_type: "status",
                     cause: err.into(),

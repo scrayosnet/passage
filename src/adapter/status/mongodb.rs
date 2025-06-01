@@ -1,5 +1,6 @@
 use crate::adapter::Error;
 use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
+use crate::config::MongodbStatus as MongodbConfig;
 use async_trait::async_trait;
 use mongodb::bson::{Document, from_document};
 use mongodb::{Client, Collection};
@@ -12,22 +13,16 @@ pub struct MongodbStatusSupplier {
 }
 
 impl MongodbStatusSupplier {
-    pub async fn new(
-        address: String,
-        database: String,
-        collection: String,
-        filter: String,
-        field_path: Vec<String>,
-    ) -> Result<Self, Error> {
-        let client = Client::with_uri_str(&address).await?;
-        let database = client.database(&database);
-        let collection = database.collection(&collection);
-        let filter: Document = serde_json::from_str(&filter)?;
+    pub async fn new(config: MongodbConfig) -> Result<Self, Error> {
+        let client = Client::with_uri_str(&config.address).await?;
+        let database = client.database(&config.database);
+        let collection = database.collection(&config.collection);
+        let filter: Document = serde_json::from_str(&config.filter)?;
 
         Ok(Self {
             collection,
             filter,
-            field_path,
+            field_path: config.field_path,
         })
     }
 }

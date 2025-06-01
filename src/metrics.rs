@@ -25,8 +25,12 @@ pub(crate) static CONNECTION_DURATION: LazyLock<HistogramFamily<ConnectionDurati
         })
     });
 
-pub(crate) static RECEIVED_PACKETS: LazyLock<Family<ReceivedPackets, Counter>> =
-    LazyLock::new(Family::<ReceivedPackets, Counter>::default);
+pub(crate) static RECEIVED_PACKETS: LazyLock<HistogramFamily<ReceivedPackets>> =
+    LazyLock::new(|| {
+        HistogramFamily::<ReceivedPackets>::new_with_constructor(|| {
+            Histogram::new(linear_buckets(0.0, 512.0, 10))
+        })
+    });
 
 pub(crate) static SENT_PACKETS: LazyLock<Family<SentPackets, Counter>> =
     LazyLock::new(Family::<SentPackets, Counter>::default);

@@ -2,6 +2,7 @@ use crate::adapter::Error;
 use crate::adapter::status::Protocol;
 use crate::adapter::target_selection::{Target, TargetSelector, strategize};
 use crate::adapter::target_strategy::TargetSelectorStrategy;
+use crate::config::AgonesTargetDiscovery as AgonesConfig;
 use async_trait::async_trait;
 use futures_util::stream::StreamExt;
 use kube::runtime::watcher::Config;
@@ -97,7 +98,7 @@ pub struct AgonesTargetSelector {
 impl AgonesTargetSelector {
     pub async fn new(
         strategy: Arc<dyn TargetSelectorStrategy>,
-        namespace: &str,
+        config: AgonesConfig,
     ) -> Result<Self, Error> {
         let inner: Arc<RwLock<Vec<Target>>> = Arc::new(RwLock::new(Vec::new()));
 
@@ -105,7 +106,7 @@ impl AgonesTargetSelector {
         let client = Client::try_default()
             .await
             .expect("failed to create k8s client");
-        let servers: Api<GameServer> = Api::namespaced(client.clone(), namespace);
+        let servers: Api<GameServer> = Api::namespaced(client.clone(), &config.namespace);
         // TODO allow for filters (using config)
         let mut stream = watcher(servers, Config::default())
             .default_backoff()

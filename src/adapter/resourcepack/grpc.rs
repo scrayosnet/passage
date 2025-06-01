@@ -3,6 +3,7 @@ use crate::adapter::proto::resourcepack_client::ResourcepackClient;
 use crate::adapter::proto::{Address, Pack, PacksRequest};
 use crate::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
 use crate::adapter::status::Protocol;
+use crate::config::GrpcResourcepack as GrpcConfig;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -14,14 +15,14 @@ pub struct GrpcResourcepackSupplier {
 }
 
 impl GrpcResourcepackSupplier {
-    pub async fn new(address: String) -> Result<Self, Error> {
+    pub async fn new(config: GrpcConfig) -> Result<Self, Error> {
         Ok(Self {
-            client: ResourcepackClient::connect(address).await.map_err(|err| {
-                Error::FailedInitialization {
+            client: ResourcepackClient::connect(config.address)
+                .await
+                .map_err(|err| Error::FailedInitialization {
                     adapter_type: "resourcepack",
                     cause: err.into(),
-                }
-            })?,
+                })?,
         })
     }
 }

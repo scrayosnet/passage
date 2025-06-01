@@ -55,7 +55,6 @@ fn criterion_benchmark(c: &mut Criterion) {
             b.to_async(&runtime).iter(|| {
                 rw_packet(
                     status::clientbound::StatusResponsePacket {
-                        // TODO provide better body
                         body: "JustChunks".to_string(),
                     },
                     buf.clone(),

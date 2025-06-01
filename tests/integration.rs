@@ -21,7 +21,7 @@ use passage::adapter::target_strategy::TargetSelectorStrategy;
 use passage::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use passage::authentication;
 use passage::cipher_stream::CipherStream;
-use passage::config::Localization;
+use passage::config::{FixedResourcepack, Localization};
 use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection, Error};
 use passage::mojang::{AuthResponse, Mojang};
 use rand::rngs::OsRng;
@@ -453,9 +453,10 @@ async fn sends_keep_alive() {
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
     let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
-    let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(
-        FixedResourcePackSupplier::new(vec![Resourcepack::default()]),
-    );
+    let resourcepack_supplier: Arc<dyn ResourcepackSupplier> =
+        Arc::new(FixedResourcePackSupplier::new(FixedResourcepack {
+            packs: vec![Resourcepack::default()],
+        }));
 
     // build connection
     let mut server = Connection::new(
@@ -617,9 +618,10 @@ async fn no_respond_keep_alive() {
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
     let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
-    let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(
-        FixedResourcePackSupplier::new(vec![Resourcepack::default()]),
-    );
+    let resourcepack_supplier: Arc<dyn ResourcepackSupplier> =
+        Arc::new(FixedResourcePackSupplier::new(FixedResourcepack {
+            packs: vec![Resourcepack::default()],
+        }));
 
     // build connection
     let mut server = Connection::new(

@@ -55,7 +55,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::time::timeout;
-use tracing::{debug, error, info, warn};
+use tracing::{Instrument, debug, error, info, warn};
 
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
 ///
@@ -115,6 +115,8 @@ async fn start_metrics(
     config: Arc<Config>,
     mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    debug!("starting metrics server");
+
     // start metrics server
     info!(
         addr = config.metrics_address.to_string(),
@@ -131,37 +133,53 @@ async fn start_metrics(
                 break;
             },
         };
+        debug!(addr = addr.to_string(), "received metrics connection");
 
         let io = TokioIo::new(stream);
-        tokio::task::spawn(async move {
-            if let Err(err) = http1::Builder::new()
-                .timer(TokioTimer::new())
-                .serve_connection(
-                    io,
-                    service_fn(|_| async {
-                        let mut buf = String::new();
-                        encode(&mut buf, &metrics::REGISTRY).expect("failed to encode metrics");
 
-                        let response = Response::builder()
-                            .header(
-                                hyper::header::CONTENT_TYPE,
-                                "application/openmetrics-text; version=1.0.0; charset=utf-8",
-                            )
-                            .body(Full::<Bytes>::from(buf))
-                            .expect("failed to build response");
+        let connection_id = uuid::Uuid::new_v4();
+        let connection_span = tracing::info_span!(
+            "metrics",
+            addr = addr.to_string(),
+            id = connection_id.to_string(),
+        );
 
-                        Ok::<Response<Full<Bytes>>, Infallible>(response)
-                    }),
-                )
-                .await
-            {
-                warn!(
-                    cause = err.to_string(),
-                    addr = &addr.to_string(),
-                    "failure communicating with a client"
-                );
+        debug!(
+            addr = addr.to_string(),
+            "moving metrics connection to a new task"
+        );
+        tokio::task::spawn(
+            async move {
+                if let Err(err) = http1::Builder::new()
+                    .timer(TokioTimer::new())
+                    .serve_connection(
+                        io,
+                        service_fn(|_| async {
+                            let mut buf = String::new();
+                            encode(&mut buf, &metrics::REGISTRY).expect("failed to encode metrics");
+
+                            let response = Response::builder()
+                                .header(
+                                    hyper::header::CONTENT_TYPE,
+                                    "application/openmetrics-text; version=1.0.0; charset=utf-8",
+                                )
+                                .body(Full::<Bytes>::from(buf))
+                                .expect("failed to build response");
+
+                            Ok::<Response<Full<Bytes>>, Infallible>(response)
+                        }),
+                    )
+                    .await
+                {
+                    warn!(
+                        cause = err.to_string(),
+                        addr = &addr.to_string(),
+                        "failure communicating with a client"
+                    );
+                }
             }
-        });
+            .instrument(connection_span),
+        );
     }
 
     info!("metrics server stopped successfully");
@@ -172,12 +190,18 @@ async fn start_protocol(
     config: Arc<Config>,
     mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    debug!("starting protocol server");
+
     // retrieve config params
     let timeout_duration = Duration::from_secs(config.timeout);
     let auth_secret = config.auth_secret.clone().map(String::into_bytes);
     let localization = Arc::new(config.localization.clone());
 
     // initialize status supplier
+    debug!(
+        adaper = config.status.adapter.as_str(),
+        "initializing status supplier"
+    );
     let status_supplier = match config.status.adapter.as_str() {
         "none" => Arc::new(NoneStatusSupplier) as Arc<dyn StatusSupplier>,
         #[cfg(feature = "grpc")]
@@ -185,34 +209,31 @@ async fn start_protocol(
             let Some(grpc) = config.status.grpc.clone() else {
                 return Err("grpc status adapter requires a configuration".into());
             };
-            Arc::new(GrpcStatusSupplier::new(grpc.address).await?) as Arc<dyn StatusSupplier>
+            Arc::new(GrpcStatusSupplier::new(grpc).await?) as Arc<dyn StatusSupplier>
         }
         #[cfg(feature = "mongodb")]
         "mongodb" => {
             let Some(mongodb) = config.status.mongodb.clone() else {
                 return Err("mongodb status adapter requires a configuration".into());
             };
-            Arc::new(
-                MongodbStatusSupplier::new(
-                    mongodb.address,
-                    mongodb.database,
-                    mongodb.collection,
-                    mongodb.filter,
-                    mongodb.field_path,
-                )
-                .await?,
-            ) as Arc<dyn StatusSupplier>
+            Arc::new(MongodbStatusSupplier::new(mongodb).await?) as Arc<dyn StatusSupplier>
         }
         "fixed" => {
             let Some(fixed) = config.status.fixed.clone() else {
                 return Err("fixed status adapter requires a configuration".into());
             };
-            Arc::new(FixedStatusSupplier::new(config.protocol.clone(), fixed))
+            // TODO maybe move protocol to fixed config?
+            Arc::new(FixedStatusSupplier::new(fixed, config.protocol.clone()))
+                as Arc<dyn StatusSupplier>
         }
         _ => return Err("unknown status supplier configured".into()),
     };
 
     // initialize target selector strategy
+    debug!(
+        adaper = config.target_strategy.adapter.as_str(),
+        "initializing target selector strategy"
+    );
     let target_strategy = match config.target_strategy.adapter.as_str() {
         "none" => Arc::new(NoneTargetSelectorStrategy) as Arc<dyn TargetSelectorStrategy>,
         #[cfg(feature = "grpc")]
@@ -220,23 +241,25 @@ async fn start_protocol(
             let Some(grpc) = config.target_strategy.grpc.clone() else {
                 return Err("grpc target strategy adapter requires a configuration".into());
             };
-            Arc::new(GrpcTargetSelectorStrategy::new(grpc.address).await?)
+            Arc::new(GrpcTargetSelectorStrategy::new(grpc).await?)
                 as Arc<dyn TargetSelectorStrategy>
         }
         "player_fill" => {
             let Some(player_fill) = config.target_strategy.player_fill.clone() else {
                 return Err("player_fill target strategy adapter requires a configuration".into());
             };
-            Arc::new(PlayerFillTargetSelectorStrategy::new(
-                player_fill.field,
-                player_fill.max_players,
-            )) as Arc<dyn TargetSelectorStrategy>
+            Arc::new(PlayerFillTargetSelectorStrategy::new(player_fill))
+                as Arc<dyn TargetSelectorStrategy>
         }
-        "any" => Arc::new(AnyTargetSelectorStrategy),
+        "any" => Arc::new(AnyTargetSelectorStrategy) as Arc<dyn TargetSelectorStrategy>,
         _ => return Err("unknown target selector strategy configured".into()),
     };
 
     // initialize target selector
+    debug!(
+        adaper = config.target_discovery.adapter.as_str(),
+        "initializing target selector"
+    );
     let target_selector = match config.target_discovery.adapter.as_str() {
         "none" => Arc::new(NoneTargetSelector::new(target_strategy)) as Arc<dyn TargetSelector>,
         #[cfg(feature = "grpc")]
@@ -244,7 +267,7 @@ async fn start_protocol(
             let Some(grpc) = config.target_discovery.grpc.clone() else {
                 return Err("grpc target discovery adapter requires a configuration".into());
             };
-            Arc::new(GrpcTargetSelector::new(target_strategy, grpc.address).await?)
+            Arc::new(GrpcTargetSelector::new(target_strategy, grpc).await?)
                 as Arc<dyn TargetSelector>
         }
         #[cfg(feature = "agones")]
@@ -252,19 +275,23 @@ async fn start_protocol(
             let Some(agones) = config.target_discovery.agones.clone() else {
                 return Err("agones target discovery adapter requires a configuration".into());
             };
-            Arc::new(AgonesTargetSelector::new(target_strategy, &agones.namespace).await?)
+            Arc::new(AgonesTargetSelector::new(target_strategy, agones).await?)
                 as Arc<dyn TargetSelector>
         }
         "fixed" => {
             let Some(fixed) = config.target_discovery.fixed.clone() else {
                 return Err("fixed target selector adapter requires a configuration".into());
             };
-            Arc::new(FixedTargetSelector::new(target_strategy, fixed.targets))
+            Arc::new(FixedTargetSelector::new(target_strategy, fixed)) as Arc<dyn TargetSelector>
         }
         _ => return Err("unknown target selector strategy configured".into()),
     };
 
     // initialize resourcepack supplier
+    debug!(
+        adaper = config.resourcepack.adapter.as_str(),
+        "initializing resource pack supplier"
+    );
     let resourcepack_supplier = match config.resourcepack.adapter.as_str() {
         "none" => Arc::new(NoneResourcePackSupplier) as Arc<dyn ResourcepackSupplier>,
         #[cfg(feature = "grpc")]
@@ -272,21 +299,14 @@ async fn start_protocol(
             let Some(grpc) = config.resourcepack.grpc.clone() else {
                 return Err("grpc resourcepack adapter requires a configuration".into());
             };
-            Arc::new(GrpcResourcepackSupplier::new(grpc.address).await?)
-                as Arc<dyn ResourcepackSupplier>
+            Arc::new(GrpcResourcepackSupplier::new(grpc).await?) as Arc<dyn ResourcepackSupplier>
         }
         "impackable" => {
             let Some(impackable) = config.resourcepack.impackable.clone() else {
                 return Err("impackable resourcepack adapter requires a configuration".into());
             };
             Arc::new(ImpackableResourcepackSupplier::new(
-                impackable.base_url,
-                impackable.username,
-                impackable.password,
-                impackable.channel,
-                impackable.uuid,
-                impackable.forced,
-                impackable.cache_duration,
+                impackable,
                 Arc::clone(&localization),
             )?) as Arc<dyn ResourcepackSupplier>
         }
@@ -294,19 +314,24 @@ async fn start_protocol(
             let Some(fixed) = config.resourcepack.fixed.clone() else {
                 return Err("fixed resourcepack adapter requires a configuration".into());
             };
-            Arc::new(FixedResourcePackSupplier::new(fixed.packs))
+            Arc::new(FixedResourcePackSupplier::new(fixed)) as Arc<dyn ResourcepackSupplier>
         }
         _ => return Err("unknown target selector strategy configured".into()),
     };
 
     // initialize mojang client
+    debug!("initializing mojang client");
     let mojang = Arc::new(Api::default()) as Arc<dyn Mojang>;
 
     // bind the socket address on all interfaces
     info!(addr = config.address.to_string(), "binding socket address");
     let listener = TcpListener::bind(&config.address).await?;
 
-    // setup rate limiting and timeout
+    // initialize rate limiting and timeout
+    debug!(
+        enabled = config.rate_limiter.enabled,
+        "initializing rate limiter"
+    );
     let rate_limiter_enabled = config.rate_limiter.enabled;
     let mut rate_limiter = RateLimiter::new(
         Duration::from_secs(config.rate_limiter.duration),
@@ -321,10 +346,11 @@ async fn start_protocol(
                 break;
             },
         };
+        debug!(addr = addr.to_string(), "received protocol connection");
 
         // check rate limiter
         if rate_limiter_enabled && !rate_limiter.enqueue(&addr.ip()) {
-            debug!(addr = addr.to_string(), "rate limited client");
+            info!(addr = addr.to_string(), "rate limited client");
 
             metrics::REQUESTS
                 .get_or_create(&RequestsLabels { result: "rejected" })
@@ -348,49 +374,62 @@ async fn start_protocol(
         let localization = Arc::clone(&localization);
         let auth_secret = auth_secret.clone();
 
-        tokio::spawn(async move {
-            // build connection wrapper for stream
-            let mut con = Connection::new(
-                &mut stream,
-                Arc::clone(&status_supplier),
-                Arc::clone(&target_selector),
-                Arc::clone(&resourcepack_supplier),
-                Arc::clone(&mojang),
-                Arc::clone(&localization),
-                auth_secret,
-            );
+        let connection_id = uuid::Uuid::new_v4();
+        let connection_span = tracing::info_span!(
+            "protocol",
+            addr = addr.to_string(),
+            id = connection_id.to_string(),
+        );
 
-            // handle the client connection (ignore connection closed by client)
-            let timeout = timeout(timeout_duration, con.listen(addr)).await;
-            let result = match timeout {
-                Ok(Err(Error::ConnectionClosed(_))) => "connection-closed",
-                Ok(Err(err)) => {
-                    warn!(
+        tokio::spawn(
+            async move {
+                info!("accepted new connection");
+
+                // build connection wrapper for stream
+                let mut con = Connection::new(
+                    &mut stream,
+                    Arc::clone(&status_supplier),
+                    Arc::clone(&target_selector),
+                    Arc::clone(&resourcepack_supplier),
+                    Arc::clone(&mojang),
+                    Arc::clone(&localization),
+                    auth_secret,
+                );
+
+                // handle the client connection (ignore connection closed by the client)
+                debug!(addr = addr.to_string(), "handling connection");
+                let timeout = timeout(timeout_duration, con.listen(addr)).await;
+                let result = match timeout {
+                    Ok(Err(Error::ConnectionClosed(_))) => "connection-closed",
+                    Ok(Err(err)) => {
+                        warn!(
+                            cause = err.to_string(),
+                            addr = &addr.to_string(),
+                            "failure communicating with a client"
+                        );
+                        err.as_label()
+                    }
+                    Ok(_) => "success",
+                    Err(_) => "timeout",
+                };
+
+                // flush connection and shutdown
+                if let Err(err) = stream.shutdown().await {
+                    debug!(
                         cause = err.to_string(),
                         addr = &addr.to_string(),
-                        "failure communicating with a client"
+                        "failed to close a client connection"
                     );
-                    err.as_label()
                 }
-                Ok(_) => "success",
-                Err(_) => "timeout",
-            };
 
-            // flush connection and shutdown
-            if let Err(err) = stream.shutdown().await {
-                debug!(
-                    cause = err.to_string(),
-                    addr = &addr.to_string(),
-                    "failed to close a client connection"
-                );
+                metrics::REQUESTS
+                    .get_or_create(&RequestsLabels { result })
+                    .inc();
+
+                debug!(addr = &addr.to_string(), "closed connection with a client");
             }
-
-            metrics::REQUESTS
-                .get_or_create(&RequestsLabels { result })
-                .inc();
-
-            debug!(addr = &addr.to_string(), "closed connection with a client");
-        });
+            .instrument(connection_span),
+        );
     }
 
     info!("protocol server stopped successfully");

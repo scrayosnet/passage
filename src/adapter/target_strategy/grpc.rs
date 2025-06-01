@@ -4,6 +4,7 @@ use crate::adapter::proto::{Address, SelectRequest};
 use crate::adapter::status::Protocol;
 use crate::adapter::target_selection::Target;
 use crate::adapter::target_strategy::TargetSelectorStrategy;
+use crate::config::GrpcTargetStrategy as GrpcConfig;
 use async_trait::async_trait;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
@@ -15,14 +16,14 @@ pub struct GrpcTargetSelectorStrategy {
 }
 
 impl GrpcTargetSelectorStrategy {
-    pub async fn new(address: String) -> Result<Self, Error> {
+    pub async fn new(config: GrpcConfig) -> Result<Self, Error> {
         Ok(Self {
-            client: StrategyClient::connect(address).await.map_err(|err| {
-                Error::FailedInitialization {
+            client: StrategyClient::connect(config.address)
+                .await
+                .map_err(|err| Error::FailedInitialization {
                     adapter_type: "target_strategy",
                     cause: err.into(),
-                }
-            })?,
+                })?,
         })
     }
 }

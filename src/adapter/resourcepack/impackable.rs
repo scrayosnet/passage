@@ -1,6 +1,7 @@
 use crate::adapter::Error;
 use crate::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
 use crate::adapter::status::Protocol;
+use crate::config::ImpackableResourcepack as ImpackableConfig;
 use crate::config::Localization;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -19,8 +20,10 @@ static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .expect("failed to create http client")
 });
 
+type Fetched = Option<ImpackableResourcepack>;
+
 pub struct ImpackableResourcepackSupplier {
-    inner: Arc<RwLock<Option<Option<ImpackableResourcepack>>>>,
+    inner: Arc<RwLock<Option<Fetched>>>,
     cancel: Option<oneshot::Sender<()>>,
     url: String,
     uuid: Uuid,
@@ -29,23 +32,14 @@ pub struct ImpackableResourcepackSupplier {
 }
 
 impl ImpackableResourcepackSupplier {
-    pub fn new(
-        base_url: String,
-        username: String,
-        password: String,
-        channel: String,
-        uuid: Uuid,
-        forced: bool,
-        cache_duration: u64,
-        localization: Arc<Localization>,
-    ) -> Result<Self, Error> {
+    pub fn new(config: ImpackableConfig, localization: Arc<Localization>) -> Result<Self, Error> {
         let inner = Arc::new(RwLock::new(None));
-        let url = format!("{}/query/{}", base_url, channel);
+        let url = format!("{}/query/{}", config.base_url, config.channel);
 
         // start refresh
         let _inner = Arc::clone(&inner);
         let _url = url.clone();
-        let refresh_interval = Duration::from_secs(cache_duration);
+        let refresh_interval = Duration::from_secs(config.cache_duration);
         let (cancel, mut canceled) = oneshot::channel();
         let mut interval = tokio::time::interval(refresh_interval);
         tokio::spawn(async move {
@@ -55,7 +49,7 @@ impl ImpackableResourcepackSupplier {
                     biased;
                     _ = &mut canceled => break,
                     _ = interval.tick() => {
-                        match Self::refresh(&_url, &username, &password).await {
+                        match Self::refresh(&_url, &config.username, &config.password).await {
                             Ok(next) => *_inner.write().await = Some(next),
                             Err(err) => warn!(err = ?err, "Failed to refresh resourcepack cache")
                         };
@@ -69,8 +63,8 @@ impl ImpackableResourcepackSupplier {
             inner,
             cancel: Some(cancel),
             url,
-            uuid,
-            forced,
+            uuid: config.uuid,
+            forced: config.forced,
             localization,
         })
     }

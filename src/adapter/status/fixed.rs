@@ -1,5 +1,6 @@
 use crate::adapter::Error;
 use crate::adapter::status::{Protocol, ServerStatus, ServerVersion, StatusSupplier};
+use crate::config::FixedStatus as FixedConfig;
 use crate::config::ProtocolRange;
 use async_trait::async_trait;
 use serde_json::value::RawValue;
@@ -12,21 +13,21 @@ pub struct FixedStatusSupplier {
 }
 
 impl FixedStatusSupplier {
-    pub fn new(protocol: ProtocolRange, status: crate::config::FixedStatus) -> Self {
-        let description = status
+    pub fn new(config: FixedConfig, protocol: ProtocolRange) -> Self {
+        let description = config
             .description
             .and_then(|str| RawValue::from_string(str).ok());
         Self {
             protocol,
             status: Some(ServerStatus {
                 version: ServerVersion {
-                    name: status.name,
+                    name: config.name,
                     protocol: 0,
                 },
                 players: None,
                 description,
-                favicon: status.favicon,
-                enforces_secure_chat: status.enforces_secure_chat,
+                favicon: config.favicon,
+                enforces_secure_chat: config.enforces_secure_chat,
             }),
         }
     }
