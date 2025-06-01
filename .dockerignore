@@ -4,3 +4,6 @@
 !src
 !config
 !proto
+!packets/Cargo.toml
+!packets/Cargo.lock
+!packets/src
