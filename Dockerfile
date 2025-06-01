@@ -1,5 +1,8 @@
 FROM rust:alpine@sha256:126df0f2a57e675f9306fe180b833982ffb996e90a92a793bb75253cfeed5475 AS builder
 
+# specify rust features
+ARG FEATURES="default"
+
 # specify our build directory
 WORKDIR /usr/src/passage
 
@@ -9,7 +12,7 @@ COPY . .
 # install dev dependencies and perform build process
 RUN set -eux \
  && apk add --no-cache libressl-dev musl-dev protobuf-dev protoc \
- && cargo build --release
+ && cargo build --release --features "${FEATURES}"
 
 
 FROM scratch
