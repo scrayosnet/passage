@@ -634,7 +634,7 @@ where
             .await?;
         let mut pack_ids: HashMap<Uuid, (bool, Instant)> = HashMap::with_capacity(packs.len());
 
-        debug!(len = pack_ids.len(), "sending resource pack packet(s)");
+        debug!(len = packs.len(), "sending resource pack packet(s)");
         for pack in packs {
             let packet = conf_out::AddResourcePackPacket {
                 uuid: pack.uuid,
