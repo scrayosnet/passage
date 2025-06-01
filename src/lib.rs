@@ -35,7 +35,7 @@ use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use crate::adapter::target_strategy::player_fill::PlayerFillTargetSelectorStrategy;
 use crate::config::Config;
 use crate::connection::{Connection, Error};
-use crate::metrics::RequestsLabels;
+use crate::metrics::{OPEN_CONNECTIONS, OpenConnectionsLabels, RequestsLabels};
 use crate::mojang::Api;
 use crate::mojang::Mojang;
 use crate::rate_limiter::RateLimiter;
@@ -47,6 +47,7 @@ use hyper::body::Bytes;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioIo, TokioTimer};
+use metrics::REQUESTS;
 use prometheus_client::encoding::text::encode;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -352,7 +353,7 @@ async fn start_protocol(
         if rate_limiter_enabled && !rate_limiter.enqueue(&addr.ip()) {
             info!(addr = addr.to_string(), "rate limited client");
 
-            metrics::REQUESTS
+            REQUESTS
                 .get_or_create(&RequestsLabels { result: "rejected" })
                 .inc();
 
@@ -384,6 +385,9 @@ async fn start_protocol(
         tokio::spawn(
             async move {
                 info!("accepted new connection");
+                OPEN_CONNECTIONS
+                    .get_or_create(&OpenConnectionsLabels {})
+                    .inc();
 
                 // build connection wrapper for stream
                 let mut con = Connection::new(
@@ -397,14 +401,12 @@ async fn start_protocol(
                 );
 
                 // handle the client connection (ignore connection closed by the client)
-                debug!(addr = addr.to_string(), "handling connection");
                 let timeout = timeout(timeout_duration, con.listen(addr)).await;
                 let result = match timeout {
                     Ok(Err(Error::ConnectionClosed(_))) => "connection-closed",
                     Ok(Err(err)) => {
                         warn!(
                             cause = err.to_string(),
-                            addr = &addr.to_string(),
                             "failure communicating with a client"
                         );
                         err.as_label()
@@ -417,16 +419,17 @@ async fn start_protocol(
                 if let Err(err) = stream.shutdown().await {
                     debug!(
                         cause = err.to_string(),
-                        addr = &addr.to_string(),
                         "failed to close a client connection"
                     );
                 }
 
-                metrics::REQUESTS
-                    .get_or_create(&RequestsLabels { result })
-                    .inc();
+                REQUESTS.get_or_create(&RequestsLabels { result }).inc();
 
-                debug!(addr = &addr.to_string(), "closed connection with a client");
+                OPEN_CONNECTIONS
+                    .get_or_create(&OpenConnectionsLabels {})
+                    .dec();
+
+                debug!("closed connection with a client");
             }
             .instrument(connection_span),
         );

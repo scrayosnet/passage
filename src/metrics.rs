@@ -18,6 +18,9 @@ pub(crate) static REQUESTS: LazyLock<Family<RequestsLabels, Counter>> =
 pub(crate) static RATE_LIMITER: LazyLock<Family<RateLimiterLabels, Gauge>> =
     LazyLock::new(Family::<RateLimiterLabels, Gauge>::default);
 
+pub(crate) static OPEN_CONNECTIONS: LazyLock<Family<OpenConnectionsLabels, Gauge>> =
+    LazyLock::new(Family::<OpenConnectionsLabels, Gauge>::default);
+
 pub(crate) static CONNECTION_DURATION: LazyLock<HistogramFamily<ConnectionDurationLabels>> =
     LazyLock::new(|| {
         HistogramFamily::<ConnectionDurationLabels>::new_with_constructor(|| {
@@ -69,6 +72,9 @@ pub struct RequestsLabels {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct RateLimiterLabels {}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct OpenConnectionsLabels {}
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct ConnectionDurationLabels {
@@ -131,6 +137,11 @@ fn build_registry() -> Arc<Registry> {
         "rate_limiter_size",
         "The number of entries in the rate limiter",
         RATE_LIMITER.clone(),
+    );
+    registry.register(
+        "open_connections",
+        "The number of currently open connections",
+        OPEN_CONNECTIONS.clone(),
     );
     registry.register(
         "connection_duration_seconds",
