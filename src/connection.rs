@@ -567,7 +567,7 @@ where
                 debug!("writing auth cookie");
 
                 let Some(secret) = &self.auth_secret else {
-                    debug!("no auth secret configured, skipping auth cookie");
+                    debug!("no auth secret configured, skipping writing auth cookie");
                     break 'auth_cookie;
                 };
 
