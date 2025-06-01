@@ -1,7 +1,7 @@
 use passage::config::Config;
 use std::borrow::Cow::Owned;
 use tracing::info;
-use tracing::log::LevelFilter;
+use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
 
@@ -29,17 +29,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     // initialize logging
-    let subscriber =
-        tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().compact());
+    let subscriber = tracing_subscriber::registry().with(
+        tracing_subscriber::fmt::layer().compact().with_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        ),
+    );
 
     #[cfg(feature = "sentry")]
     let subscriber = subscriber.with(sentry_tracing::layer());
-
-    let subscriber = subscriber.with(
-        EnvFilter::builder()
-            .with_default_directive(LevelFilter::Info.into())
-            .from_env_lossy(),
-    );
 
     subscriber.init();
 
