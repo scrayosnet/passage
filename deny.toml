@@ -7,7 +7,8 @@ no-default-features = false
 feature-depth = 1
 
 [advisories]
-ignore = []
+# rsa module is vulnerable, but no new version available
+ignored = ["RUSTSEC-2023-0071"]
 
 [licenses]
 allow = [
