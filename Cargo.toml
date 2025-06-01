@@ -66,3 +66,6 @@ agones = ["dep:kube", "dep:k8s-openapi", "dep:schemars"]
 grpc = ["dep:tonic", "dep:tonic-build", "dep:prost", "dep:prost-types"]
 mongodb = ["dep:mongodb"]
 sentry = ["dep:sentry", "dep:sentry-tracing"]
+
+[package.metadata.cargo-machete]
+ignored = ["prost", "prost-types", "tonic-build", "k8s-openapi"]
