@@ -39,7 +39,7 @@ config = { version = "0.15" }
 sentry = { version = "0.38", default-features = false, features = ["backtrace", "contexts", "panic", "debug-images", "reqwest", "rustls", "tower"], optional = true }
 sentry-tracing = { version = "0.38", optional = true }
 async-trait = "0.1"
-sha2 = { version = "0.10.8" }
+sha2 = { version = "0.10.9" }
 hmac = { version = "0.12.1" }
 prometheus-client = { version = "0.23.1" }
 hyper = { version = "1.6.0", default-features = false, features = ["server"] }
