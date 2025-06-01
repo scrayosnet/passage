@@ -68,6 +68,9 @@ jobs:
     - name: Install required cargo crates
       run: cargo install --locked clippy-sarif sarif-fmt cargo-machete cargo-deny cargo-audit
 
+    - name: Check OpenSSL
+      run: (! cargo tree -i openssl 2> /dev/null)
+
     - name: Check formatting
       run: cargo fmt --all -- --check
 
