@@ -2,8 +2,10 @@
 !Cargo.toml
 !Cargo.lock
 !src
+!benches
 !config
 !proto
 !packets/Cargo.toml
 !packets/Cargo.lock
 !packets/src
+!packets/benches
