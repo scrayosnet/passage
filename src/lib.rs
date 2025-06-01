@@ -405,10 +405,7 @@ async fn start_protocol(
                 let result = match timeout {
                     Ok(Err(Error::ConnectionClosed(_))) => "connection-closed",
                     Ok(Err(err)) => {
-                        warn!(
-                            cause = err.to_string(),
-                            "failure communicating with a client"
-                        );
+                        warn!(cause = err.to_string(), "failed to handle connection");
                         err.as_label()
                     }
                     Ok(_) => "success",
@@ -417,10 +414,7 @@ async fn start_protocol(
 
                 // flush connection and shutdown
                 if let Err(err) = stream.shutdown().await {
-                    debug!(
-                        cause = err.to_string(),
-                        "failed to close a client connection"
-                    );
+                    warn!(cause = err.to_string(), "failed to shutdown connection");
                 }
 
                 REQUESTS.get_or_create(&RequestsLabels { result }).inc();
@@ -429,7 +423,7 @@ async fn start_protocol(
                     .get_or_create(&OpenConnectionsLabels {})
                     .dec();
 
-                debug!("closed connection with a client");
+                debug!("closed connection");
             }
             .instrument(connection_span),
         );
