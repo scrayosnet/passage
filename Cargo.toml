@@ -58,11 +58,11 @@ mongodb = { version = "3.2.3", optional = true }
 packets = { path = "./packets", features = ["server", "client"] }
 
 [build-dependencies]
-tonic-build = { version = "0.13", features = ["prost"] }
+tonic-build = { version = "0.13", features = ["prost"], optional = true }
 
 [features]
 default = ["agones", "grpc", "mongodb", "sentry"]
 agones = ["dep:kube", "dep:k8s-openapi", "dep:schemars"]
-grpc = ["dep:tonic", "dep:prost", "dep:prost-types"]
+grpc = ["dep:tonic", "dep:tonic-build", "dep:prost", "dep:prost-types"]
 mongodb = ["dep:mongodb"]
 sentry = ["dep:sentry", "dep:sentry-tracing"]
