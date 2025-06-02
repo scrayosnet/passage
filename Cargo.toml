@@ -51,7 +51,7 @@ prost = { version = "0.13", optional = true }
 prost-types = { version = "0.13", optional = true }
 kube = { version = "1.0", features = ["runtime", "derive"], optional = true }
 k8s-openapi = { version = "0.25", features = ["latest"], optional = true }
-schemars = { version = "0.8", optional = true }
+schemars = { version = "0.9", optional = true }
 mongodb = { version = "3.2", optional = true }
 
 [dev-dependencies]
