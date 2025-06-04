@@ -33,17 +33,27 @@ adapter = "fixed"
 name = "Passage"
 description = "Minecraft Server Transfer Router"
 enforces_secure_chat = true
+preferred_version = 769
+min_version = 0
+max_version = 1_000
 
 [status.grpc]
 address = "http://127.0.0.1:3030"
+
+[status.mongodb]
+address = "http://127.0.0.1:3030"
+database = "minecraft"
+collection = "status"
+filter = "{}"
+field_path = "motd"
 
 [target_discovery]
 adapter = "fixed"
 
 [[target_discovery.fixed.targets]]
-identifier = "passage-test"
-address = "116.202.130.184:26426"
-meta = { players = "15", type = "pvp" }
+identifier = "hub_01"
+address = "127.0.0.1:25565"
+meta = { type = "hub", players = "15" }
 
 [target_discovery.grpc]
 address = "http://127.0.0.1:3030"
@@ -62,26 +72,26 @@ field = "players"
 max_players = 50
 
 [resourcepack]
-adapter = "fixed"
+adapter = "none"
+
+[[resourcepack.fixed.packs]]
+uuid = "00000000-0000-0000-0000-000000000000"
+url = "https://example.com/resourcepack.zip"
+hash = "c7affa49facf2b14238f1d2f7f04d7d0360bdb1d"
+forced = true
+prompt_message = "Please install!"
 
 [resourcepack.grpc]
 address = "http://127.0.0.1:3030"
 
 [resourcepack.impackable]
-base_url = "https://impackable.justchunks.net"
+base_url = "https://impackable.example.com"
 username = "Querying"
 password = ""
 channel = "production"
-uuid = "0e446e8e-9f3d-4b8c-ab6d-5aac42145daf"
+uuid = "00000000-0000-0000-0000-000000000000"
 forced = true
 cache_duration = 3
-
-[[resourcepack.fixed.packs]]
-uuid = "9c09eef4-f68d-4387-9751-72bbff53d5a0"
-url = "https://impackable.justchunks.net/download/67e3e6e8704c701ec3cf5f8b"
-hash = "c7affa49facf2b14238f1d2f7f04d7d0360bdb1d"
-forced = true
-prompt_message = "Please install!"
 
 [localization]
 default_locale = "en_US"

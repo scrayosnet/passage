@@ -10,42 +10,42 @@ mod metrics;
 pub mod mojang;
 pub mod rate_limiter;
 
-use crate::adapter::resourcepack::ResourcepackSupplier;
 #[cfg(feature = "grpc")]
 use crate::adapter::resourcepack::grpc::GrpcResourcepackSupplier;
 use crate::adapter::resourcepack::impackable::ImpackableResourcepackSupplier;
 use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
-use crate::adapter::status::StatusSupplier;
+use crate::adapter::resourcepack::ResourcepackSupplier;
 #[cfg(feature = "grpc")]
 use crate::adapter::status::grpc::GrpcStatusSupplier;
 use crate::adapter::status::mongodb::MongodbStatusSupplier;
 use crate::adapter::status::none::NoneStatusSupplier;
-use crate::adapter::target_selection::TargetSelector;
+use crate::adapter::status::StatusSupplier;
 #[cfg(feature = "agones")]
 use crate::adapter::target_selection::agones::AgonesTargetSelector;
 use crate::adapter::target_selection::fixed::FixedTargetSelector;
 #[cfg(feature = "grpc")]
 use crate::adapter::target_selection::grpc::GrpcTargetSelector;
 use crate::adapter::target_selection::none::NoneTargetSelector;
-use crate::adapter::target_strategy::TargetSelectorStrategy;
+use crate::adapter::target_selection::TargetSelector;
 use crate::adapter::target_strategy::any::AnyTargetSelectorStrategy;
 #[cfg(feature = "grpc")]
 use crate::adapter::target_strategy::grpc::GrpcTargetSelectorStrategy;
 use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use crate::adapter::target_strategy::player_fill::PlayerFillTargetSelectorStrategy;
+use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::config::Config;
 use crate::connection::{Connection, Error};
-use crate::metrics::{OPEN_CONNECTIONS, OpenConnectionsLabels, RequestsLabels};
+use crate::metrics::{OpenConnectionsLabels, RequestsLabels, OPEN_CONNECTIONS};
 use crate::mojang::Api;
 use crate::mojang::Mojang;
 use crate::rate_limiter::RateLimiter;
 use adapter::resourcepack::fixed::FixedResourcePackSupplier;
 use adapter::status::fixed::FixedStatusSupplier;
 use http_body_util::Full;
-use hyper::Response;
 use hyper::body::Bytes;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
+use hyper::Response;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use metrics::REQUESTS;
 use prometheus_client::encoding::text::encode;
@@ -56,7 +56,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::time::timeout;
-use tracing::{Instrument, debug, error, info, warn};
+use tracing::{debug, error, info, warn, Instrument};
 
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
 ///
@@ -224,7 +224,7 @@ async fn start_protocol(
                 return Err("fixed status adapter requires a configuration".into());
             };
             // TODO maybe move protocol to fixed config?
-            Arc::new(FixedStatusSupplier::new(fixed, config.protocol.clone()))
+            Arc::new(FixedStatusSupplier::new(fixed))
                 as Arc<dyn StatusSupplier>
         }
         _ => return Err("unknown status supplier configured".into()),

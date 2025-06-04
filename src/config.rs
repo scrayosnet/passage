@@ -135,14 +135,6 @@ pub struct RateLimiter {
     pub size: usize,
 }
 
-/// [ProtocolRange] hold the protocol limitation and
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct ProtocolRange {
-    pub preferred: Protocol,
-    pub min: Protocol,
-    pub max: Protocol,
-}
-
 /// [Status] hold the status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Status {
@@ -166,6 +158,9 @@ pub struct FixedStatus {
     pub description: Option<String>,
     pub favicon: Option<String>,
     pub enforces_secure_chat: Option<bool>,
+    pub preferred_version: Protocol,
+    pub min_version: Protocol,
+    pub max_version: Protocol,
 }
 
 /// [GrpcStatus] hold the gRPC status (ping) configuration.
@@ -339,9 +334,6 @@ pub struct Config {
 
     /// The auth cookie secret, disabled if empty.
     pub auth_secret: Option<String>,
-
-    /// The supported protocol version.
-    pub protocol: ProtocolRange,
 
     /// The status (ping) configuration.
     pub status: Status,

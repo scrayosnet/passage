@@ -26,7 +26,7 @@ pub struct ServerVersion {
 impl Default for ServerVersion {
     fn default() -> Self {
         Self {
-            name: "JustChunks".to_owned(),
+            name: "Passage".to_owned(),
             protocol: 0,
         }
     }
