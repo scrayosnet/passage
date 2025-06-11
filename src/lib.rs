@@ -224,8 +224,7 @@ async fn start_protocol(
                 return Err("fixed status adapter requires a configuration".into());
             };
             // TODO maybe move protocol to fixed config?
-            Arc::new(FixedStatusSupplier::new(fixed))
-                as Arc<dyn StatusSupplier>
+            Arc::new(FixedStatusSupplier::new(fixed)) as Arc<dyn StatusSupplier>
         }
         _ => return Err("unknown status supplier configured".into()),
     };
