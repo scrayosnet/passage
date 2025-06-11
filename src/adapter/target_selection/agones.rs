@@ -24,8 +24,6 @@ pub const META_STATE: &str = "state";
 #[kube(group = "agones.dev", version = "v1", kind = "GameServer", namespaced)]
 #[kube(status = "GameServerStatus")]
 pub struct GameServerSpec {
-    #[schemars(length(min = 3))]
-    name: String,
     counters: HashMap<String, GameServerCounter>,
     lists: HashMap<String, GameServerList>,
 }
@@ -54,7 +52,7 @@ impl TryFrom<GameServer> for Target {
     fn try_from(server: GameServer) -> Result<Self, Error> {
         let identifier = server
             .metadata
-            .uid
+            .name
             .clone()
             .ok_or(Error::AdapterUnavailable)?;
         let status = server.status.clone().ok_or(Error::AdapterUnavailable)?;
