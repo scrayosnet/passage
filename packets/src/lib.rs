@@ -62,7 +62,7 @@ pub enum Error {
     #[error("could not convert into array")]
     ArrayConversionFailed,
 
-    /// Some serde_json error.
+    /// Some `serde_json` error.
     #[error("failed to parse json: {0}")]
     Json(#[from] serde_json::error::Error),
 
@@ -207,30 +207,37 @@ impl TryFrom<VarInt> for ChatMode {
 pub struct DisplayedSkinParts(pub u8);
 
 impl DisplayedSkinParts {
+    #[must_use]
     pub fn cape_enabled(&self) -> bool {
         self.0 & 0x01 != 0
     }
 
+    #[must_use]
     pub fn jacket_enabled(&self) -> bool {
         self.0 & 0x02 != 0
     }
 
+    #[must_use]
     pub fn left_sleeve_enabled(&self) -> bool {
         self.0 & 0x04 != 0
     }
 
+    #[must_use]
     pub fn right_sleeve_enabled(&self) -> bool {
         self.0 & 0x08 != 0
     }
 
+    #[must_use]
     pub fn left_pants_enabled(&self) -> bool {
         self.0 & 0x10 != 0
     }
 
+    #[must_use]
     pub fn right_pants_enabled(&self) -> bool {
         self.0 & 0x20 != 0
     }
 
+    #[must_use]
     pub fn hat_enabled(&self) -> bool {
         self.0 & 0x40 != 0
     }
@@ -381,7 +388,7 @@ pub trait AsyncWritePacket {
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Boolean
     fn write_bool(&mut self, bool: bool) -> impl Future<Output = Result<(), Error>>;
 
-    /// Writes a string TextComponent onto this object as described in the official [protocol documentation][protocol-doc].
+    /// Writes a string `TextComponent` onto this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Java_Edition_protocol/Packets#Type:Text_Component
     fn write_text_component(&mut self, str: &str) -> impl Future<Output = Result<(), Error>>;
@@ -431,7 +438,7 @@ pub trait AsyncReadPacket {
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:UUID
     fn read_uuid(&mut self) -> impl Future<Output = Result<Uuid, Error>>;
 
-    /// Reads a string TextComponent from this object as described in the official [protocol documentation][protocol-doc].
+    /// Reads a string `TextComponent` from this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Java_Edition_protocol/Packets#Type:Text_Component
     fn read_text_component(&mut self) -> impl Future<Output = Result<String, Error>>;

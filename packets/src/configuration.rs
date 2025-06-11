@@ -3,16 +3,16 @@ use crate::Error;
 use crate::Packet;
 use crate::VarInt;
 use crate::{ChatMode, DisplayedSkinParts, MainHand, ParticleStatus, ResourcePackResult};
-#[cfg(test)]
-use fake::Dummy;
 use uuid::Uuid;
 
 pub mod clientbound {
-    use super::*;
+    use super::{Error, Packet, Uuid, VarInt};
     #[cfg(feature = "client")]
     use crate::{AsyncReadPacket, ReadPacket};
     #[cfg(feature = "server")]
     use crate::{AsyncWritePacket, WritePacket};
+    #[cfg(test)]
+    use fake::Dummy;
     #[cfg(feature = "client")]
     use tokio::io::{AsyncRead, AsyncReadExt};
     #[cfg(feature = "server")]
@@ -171,6 +171,7 @@ pub mod clientbound {
     }
 
     impl KeepAlivePacket {
+        #[must_use]
         pub const fn new(id: u64) -> Self {
             Self { id }
         }
@@ -471,7 +472,7 @@ pub mod clientbound {
             S: AsyncWrite + Unpin + Send + Sync,
         {
             buffer.write_string(&self.host).await?;
-            buffer.write_varint(self.port as VarInt).await?;
+            buffer.write_varint(VarInt::from(self.port)).await?;
 
             Ok(())
         }
@@ -660,11 +661,16 @@ pub mod clientbound {
 }
 
 pub mod serverbound {
-    use super::*;
+    use super::{
+        ChatMode, DisplayedSkinParts, Error, MainHand, Packet, ParticleStatus, ResourcePackResult,
+        Uuid, VarInt,
+    };
     #[cfg(feature = "server")]
     use crate::{AsyncReadPacket, ReadPacket};
     #[cfg(feature = "client")]
     use crate::{AsyncWritePacket, WritePacket};
+    #[cfg(test)]
+    use fake::Dummy;
     #[cfg(feature = "server")]
     use tokio::io::{AsyncRead, AsyncReadExt};
     #[cfg(feature = "client")]

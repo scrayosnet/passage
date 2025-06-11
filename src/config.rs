@@ -33,7 +33,7 @@
 //!
 //! # Usage
 //!
-//! The application configuration can be created by using [Config::new]. This loads/overrides the
+//! The application configuration can be created by using [`Config::new`]. This loads/overrides the
 //! configuration fields layer-by-layer.
 //!
 //! ```rs
@@ -63,10 +63,12 @@ pub struct Localization {
 }
 
 impl Localization {
+    #[must_use]
     pub fn localize_default(&self, key: &str, params: &[(&'static str, String)]) -> String {
         self.localize(&self.default_locale, key, params)
     }
 
+    #[must_use]
     pub fn localize(&self, locale: &str, key: &str, params: &[(&'static str, String)]) -> String {
         let locales = [
             locale,
@@ -76,7 +78,7 @@ impl Localization {
         ];
 
         let mut locale_messages = None;
-        for locale in locales.iter() {
+        for locale in &locales {
             locale_messages = self.messages.get(*locale);
             if locale_messages.is_some() {
                 break;
@@ -126,7 +128,7 @@ pub struct Sentry {
     pub environment: String,
 }
 
-/// [RateLimiter] hold the connection rate limiting configuration.
+/// [`RateLimiter`] hold the connection rate limiting configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RateLimiter {
     pub enabled: bool,
@@ -135,7 +137,7 @@ pub struct RateLimiter {
     pub size: usize,
 }
 
-/// [Status] hold the status (ping) configuration.
+/// [`Status`] hold the status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Status {
     /// Adapter to retrieve the results.
@@ -151,7 +153,7 @@ pub struct Status {
     pub mongodb: Option<MongodbStatus>,
 }
 
-/// [FixedStatus] hold the fixed status (ping) configuration.
+/// [`FixedStatus`] hold the fixed status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixedStatus {
     pub name: String,
@@ -163,14 +165,14 @@ pub struct FixedStatus {
     pub max_version: Protocol,
 }
 
-/// [GrpcStatus] hold the gRPC status (ping) configuration.
+/// [`GrpcStatus`] hold the gRPC status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GrpcStatus {
     /// The address of the gRPC adapter server.
     pub address: String,
 }
 
-/// [MongodbStatus] hold the mongodb status (ping) configuration.
+/// [`MongodbStatus`] hold the mongodb status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MongodbStatus {
     /// The address of the mongodb adapter server.
@@ -189,7 +191,7 @@ pub struct MongodbStatus {
     pub field_path: Vec<String>,
 }
 
-/// [Resourcepack] hold the resourcepack configuration.
+/// [`Resourcepack`] hold the resourcepack configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Resourcepack {
     /// Adapter to retrieve the results.
@@ -205,21 +207,21 @@ pub struct Resourcepack {
     pub impackable: Option<ImpackableResourcepack>,
 }
 
-/// [FixedResourcepack] hold the resourcepack configuration for a fixed set of packs.
+/// [`FixedResourcepack`] hold the resourcepack configuration for a fixed set of packs.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixedResourcepack {
     /// The resource packs that should be served.
     pub packs: Vec<adapter::resourcepack::Resourcepack>,
 }
 
-/// [GrpcResourcepack] hold the gRPC resourcepack configuration.
+/// [`GrpcResourcepack`] hold the gRPC resourcepack configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GrpcResourcepack {
     /// The address of the gRPC adapter server.
     pub address: String,
 }
 
-/// [ImpackableResourcepack] hold the impackable resourcepack configuration.
+/// [`ImpackableResourcepack`] hold the impackable resourcepack configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ImpackableResourcepack {
     /// The base URL of the impackable resourcepack server.
@@ -244,7 +246,7 @@ pub struct ImpackableResourcepack {
     pub cache_duration: u64,
 }
 
-/// [TargetDiscovery] hold the target discovery configuration.
+/// [`TargetDiscovery`] hold the target discovery configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TargetDiscovery {
     /// Adapter to retrieve the results.
@@ -260,28 +262,28 @@ pub struct TargetDiscovery {
     pub agones: Option<AgonesTargetDiscovery>,
 }
 
-/// [FixedTargetDiscovery] hold the target discovery configuration for a fixed target.
+/// [`FixedTargetDiscovery`] hold the target discovery configuration for a fixed target.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixedTargetDiscovery {
     /// The resource packs that should be served.
     pub targets: Vec<adapter::target_selection::Target>,
 }
 
-/// [GrpcTargetDiscovery] hold the gRPC target discovery configuration.
+/// [`GrpcTargetDiscovery`] hold the gRPC target discovery configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GrpcTargetDiscovery {
     /// The address of the gRPC adapter server.
     pub address: String,
 }
 
-/// [AgonesTargetDiscovery] hold the agones target discovery configuration.
+/// [`AgonesTargetDiscovery`] hold the agones target discovery configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgonesTargetDiscovery {
     /// The namespace to search for agones game servers.
     pub namespace: String,
 }
 
-/// [TargetStrategy] hold the target strategy configuration.
+/// [`TargetStrategy`] hold the target strategy configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TargetStrategy {
     /// Adapter to retrieve the results.
@@ -294,14 +296,14 @@ pub struct TargetStrategy {
     pub player_fill: Option<PlayerFillTargetStrategy>,
 }
 
-/// [GrpcTargetStrategy] hold the gRPC target strategy configuration.
+/// [`GrpcTargetStrategy`] hold the gRPC target strategy configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GrpcTargetStrategy {
     /// The address of the gRPC adapter server.
     pub address: String,
 }
 
-/// [PlayerFillTargetStrategy] hold the player fill target strategy configuration.
+/// [`PlayerFillTargetStrategy`] hold the player fill target strategy configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlayerFillTargetStrategy {
     /// The name of the field that stores the player amount.
@@ -310,7 +312,7 @@ pub struct PlayerFillTargetStrategy {
     pub max_players: u32,
 }
 
-/// [Config] holds all configuration for the application. I.g. one immutable instance is created
+/// [`Config`] holds all configuration for the application. I.g. one immutable instance is created
 /// on startup and then shared among the application components.
 ///
 /// If both the grpc and rest server are disabled, the application will exit immediately after startup

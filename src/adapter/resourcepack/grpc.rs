@@ -1,8 +1,8 @@
-use crate::adapter::Error;
 use crate::adapter::proto::resourcepack_client::ResourcepackClient;
 use crate::adapter::proto::{Address, Pack, PacksRequest};
 use crate::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
 use crate::adapter::status::Protocol;
+use crate::adapter::Error;
 use crate::config::GrpcResourcepack as GrpcConfig;
 use async_trait::async_trait;
 use std::net::SocketAddr;
@@ -41,11 +41,11 @@ impl ResourcepackSupplier for GrpcResourcepackSupplier {
         let request = tonic::Request::new(PacksRequest {
             client_address: Some(Address {
                 hostname: client_addr.ip().to_string(),
-                port: client_addr.port() as u32,
+                port: u32::from(client_addr.port()),
             }),
             server_address: Some(Address {
                 hostname: server_addr.0.to_string(),
-                port: server_addr.1 as u32,
+                port: u32::from(server_addr.1),
             }),
             protocol: protocol as u64,
             username: username.to_string(),

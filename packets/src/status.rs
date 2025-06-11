@@ -2,15 +2,15 @@
 use crate::Error;
 use crate::Packet;
 use crate::VarInt;
-#[cfg(test)]
-use fake::Dummy;
 
 pub mod clientbound {
-    use super::*;
+    use super::{Error, Packet, VarInt};
     #[cfg(feature = "client")]
     use crate::{AsyncReadPacket, ReadPacket};
     #[cfg(feature = "server")]
     use crate::{AsyncWritePacket, WritePacket};
+    #[cfg(test)]
+    use fake::Dummy;
     #[cfg(feature = "client")]
     use tokio::io::{AsyncRead, AsyncReadExt};
     #[cfg(feature = "server")]
@@ -98,10 +98,12 @@ pub mod clientbound {
 }
 
 pub mod serverbound {
-    use super::*;
+    use super::{Error, Packet, VarInt};
     use crate::ReadPacket;
     #[cfg(feature = "client")]
     use crate::WritePacket;
+    #[cfg(test)]
+    use fake::Dummy;
     #[cfg(feature = "server")]
     use tokio::io::AsyncRead;
     #[cfg(feature = "client")]

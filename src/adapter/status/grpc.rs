@@ -1,9 +1,9 @@
-use crate::adapter::Error;
 use crate::adapter::proto::status_client::StatusClient;
 use crate::adapter::proto::{Address, Players, ProtocolVersion, StatusData, StatusRequest};
 use crate::adapter::status::{
     Protocol, ServerPlayer, ServerPlayers, ServerStatus, ServerVersion, StatusSupplier,
 };
+use crate::adapter::Error;
 use crate::config::GrpcStatus as GrpcConfig;
 use async_trait::async_trait;
 use serde_json::value::RawValue;
@@ -38,11 +38,11 @@ impl StatusSupplier for GrpcStatusSupplier {
         let request = tonic::Request::new(StatusRequest {
             client_address: Some(Address {
                 hostname: client_addr.ip().to_string(),
-                port: client_addr.port() as u32,
+                port: u32::from(client_addr.port()),
             }),
             server_address: Some(Address {
                 hostname: server_addr.0.to_string(),
-                port: server_addr.1 as u32,
+                port: u32::from(server_addr.1),
             }),
             protocol: protocol as u64,
         });
@@ -94,8 +94,8 @@ impl From<Players> for ServerPlayers {
                     .samples
                     .iter()
                     .map(|raw| ServerPlayer {
-                        name: raw.name.to_owned(),
-                        id: raw.id.to_owned(),
+                        name: raw.name.clone(),
+                        id: raw.id.clone(),
                     })
                     .collect(),
             )

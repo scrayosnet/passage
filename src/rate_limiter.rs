@@ -1,4 +1,4 @@
-use crate::metrics::{RATE_LIMITER, RateLimiterLabels};
+use crate::metrics::{RateLimiterLabels, RATE_LIMITER};
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use tokio::time::{Duration, Instant};
@@ -81,7 +81,7 @@ where
     fn cleanup(&mut self) {
         let mut expired = vec![];
 
-        for (key, value) in self.entries.iter_mut() {
+        for (key, value) in &mut self.entries {
             while value
                 .front()
                 .is_some_and(|time| time.elapsed() > Duration::from_secs(10))

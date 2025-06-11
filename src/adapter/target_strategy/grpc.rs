@@ -1,9 +1,9 @@
-use crate::adapter::Error;
 use crate::adapter::proto::strategy_client::StrategyClient;
 use crate::adapter::proto::{Address, SelectRequest};
 use crate::adapter::status::Protocol;
 use crate::adapter::target_selection::Target;
 use crate::adapter::target_strategy::TargetSelectorStrategy;
+use crate::adapter::Error;
 use crate::config::GrpcTargetStrategy as GrpcConfig;
 use async_trait::async_trait;
 use std::net::{IpAddr, SocketAddr};
@@ -42,11 +42,11 @@ impl TargetSelectorStrategy for GrpcTargetSelectorStrategy {
         let request = tonic::Request::new(SelectRequest {
             client_address: Some(Address {
                 hostname: client_addr.ip().to_string(),
-                port: client_addr.port() as u32,
+                port: u32::from(client_addr.port()),
             }),
             server_address: Some(Address {
                 hostname: server_addr.0.to_string(),
-                port: server_addr.1 as u32,
+                port: u32::from(server_addr.1),
             }),
             protocol: protocol as u64,
             username: username.to_string(),

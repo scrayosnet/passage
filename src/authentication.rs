@@ -54,6 +54,7 @@ pub enum Error {
 
 /// Signs a message with a secret. Returns the signed message. Use [`verify`] to verify and destruct
 /// the signed message.
+#[must_use]
 pub fn sign(message: &[u8], secret: &[u8]) -> Vec<u8> {
     let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size!");
     mac.update(message);
@@ -69,6 +70,7 @@ pub fn sign(message: &[u8], secret: &[u8]) -> Vec<u8> {
 
 /// Verifies a signed message with a secret. Returns whether the signature is valid, as well as the
 /// inner message. Use [`sign`] to create a signed message.
+#[must_use]
 pub fn verify<'a>(signed: &'a [u8], secret: &[u8]) -> (bool, &'a [u8]) {
     if signed.len() < 32 {
         return (false, b"");
@@ -81,6 +83,7 @@ pub fn verify<'a>(signed: &'a [u8], secret: &[u8]) -> (bool, &'a [u8]) {
 }
 
 /// Generates a random id for a keep alive packet.
+#[must_use]
 pub fn generate_keep_alive() -> u64 {
     // retrieve a new mutable instance of an OS RNG
     let mut rng = OsRng;
@@ -148,6 +151,7 @@ pub fn create_ciphers(shared_secret: &[u8]) -> Result<(Aes128Cfb8Enc, Aes128Cfb8
 }
 
 /// Creates hash for the Minecraft protocol.
+#[must_use]
 pub fn minecraft_hash(server_id: &str, shared_secret: &[u8], encoded_public: &[u8]) -> String {
     // create a new hasher instance
     let mut hasher = Sha1::new();

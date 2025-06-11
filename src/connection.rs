@@ -20,10 +20,10 @@ use uuid::Uuid;
 
 use crate::config::Localization;
 use crate::metrics::{
-    CLIENT_LOCALES, CLIENT_VIEW_DISTANCE, CONNECTION_DURATION, ClientLocaleLabels,
-    ClientViewDistanceLabels, ConnectionDurationLabels, Guard, MOJANG_DURATION,
-    MojangDurationLabels, RECEIVED_PACKETS, RESOURCEPACK_DURATION, ReceivedPackets,
-    ResourcePackDurationLabels, SENT_PACKETS, SentPackets, TRANSFER_TARGETS, TransferTargetsLabels,
+    ClientLocaleLabels, ClientViewDistanceLabels, ConnectionDurationLabels, Guard,
+    MojangDurationLabels, ReceivedPackets, ResourcePackDurationLabels, SentPackets,
+    TransferTargetsLabels, CLIENT_LOCALES, CLIENT_VIEW_DISTANCE, CONNECTION_DURATION,
+    MOJANG_DURATION, RECEIVED_PACKETS, RESOURCEPACK_DURATION, SENT_PACKETS, TRANSFER_TARGETS,
 };
 use crate::mojang::Mojang;
 use packets::configuration::clientbound as conf_out;
@@ -202,7 +202,7 @@ pub struct KeepAlive<const SIZE: usize> {
 
 impl<const SIZE: usize> KeepAlive<SIZE> {
     pub fn replace(&mut self, from: u64, to: u64) -> bool {
-        for entry in self.packets.iter_mut() {
+        for entry in &mut self.packets {
             if *entry == from {
                 *entry = to;
                 return true;
@@ -311,7 +311,7 @@ where
 
         RECEIVED_PACKETS
             .get_or_create(&ReceivedPackets {})
-            .observe(length as f64);
+            .observe(f64::from(length));
 
         // check the length of the packet for any following content
         if length == 0 || length > MAX_PACKET_LENGTH {
@@ -490,7 +490,7 @@ where
 
         debug!("sending encryption request packet");
         self.send_packet(login_out::EncryptionRequestPacket {
-            server_id: "".to_owned(),
+            server_id: String::new(),
             public_key: authentication::ENCODED_PUB.clone(),
             verify_token,
             should_authenticate,
@@ -617,7 +617,7 @@ where
 
         CLIENT_VIEW_DISTANCE
             .get_or_create(&ClientViewDistanceLabels {})
-            .observe(client_info.view_distance as f64);
+            .observe(f64::from(client_info.view_distance));
 
         // write resource packs
         debug!("getting resource packs from supplier");

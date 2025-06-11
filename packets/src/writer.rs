@@ -1,4 +1,4 @@
-use crate::{AsyncWritePacket, Error, INITIAL_BUFFER_SIZE, VarInt, VarLong, WritePacket};
+use crate::{AsyncWritePacket, Error, VarInt, VarLong, WritePacket, INITIAL_BUFFER_SIZE};
 use fastnbt::SerOpts;
 use serde_json::Value;
 use std::fmt::Debug;
@@ -79,13 +79,13 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
     }
 
     async fn write_bool(&mut self, bool: bool) -> Result<(), Error> {
-        self.write_u8(bool as u8).await?;
+        self.write_u8(u8::from(bool)).await?;
 
         Ok(())
     }
 
     async fn write_text_component(&mut self, str: &str) -> Result<(), Error> {
-        if !str.starts_with("{") {
+        if !str.starts_with('{') {
             // writes a TAG_String (0x08) TextComponent
             self.write_u8(0x08).await?;
             self.write_u16(str.len() as u16).await?;

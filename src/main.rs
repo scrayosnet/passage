@@ -2,8 +2,8 @@ use passage::config::Config;
 use std::borrow::Cow::Owned;
 use tracing::info;
 use tracing::level_filters::LevelFilter;
-use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::EnvFilter;
 
 /// Initializes the application and invokes passage.
 ///
@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // initialize sentry
     #[cfg(feature = "sentry")]
-    let _sentry = sentry::init((
+    let sentry_instance = sentry::init((
         config
             .sentry
             .enabled
@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     subscriber.init();
 
     #[cfg(feature = "sentry")]
-    if _sentry.is_enabled() {
+    if sentry_instance.is_enabled() {
         info!("sentry is enabled");
     }
 

@@ -25,7 +25,7 @@ pub mod proto {
                 identifier: value.identifier.clone(),
                 address: Some(Address {
                     hostname: value.address.ip().to_string(),
-                    port: value.address.port() as u32,
+                    port: u32::from(value.address.port()),
                 }),
                 meta: value
                     .meta

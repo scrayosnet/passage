@@ -53,11 +53,11 @@ impl StatusSupplier for MongodbStatusSupplier {
                     Ok(json_str) => json_str,
                 };
                 return Ok(Some(serde_json::from_str::<ServerStatus>(json_string)?));
-            } else {
-                match status_doc.get_document(field) {
-                    Err(_) => return Ok(None),
-                    Ok(found) => status_doc = found,
-                }
+            }
+
+            match status_doc.get_document(field) {
+                Err(_) => return Ok(None),
+                Ok(found) => status_doc = found,
             }
         }
 

@@ -33,7 +33,7 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
         let mut ans = 0;
         for i in 0..5 {
             self.read_exact(&mut buf).await?;
-            ans |= ((buf[0] & 0b0111_1111) as i32) << (7 * i);
+            ans |= (i32::from(buf[0] & 0b0111_1111)) << (7 * i);
             if buf[0] & 0b1000_0000 == 0 {
                 break;
             }
@@ -46,7 +46,7 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
         let mut ans = 0;
         for i in 0..9 {
             self.read_exact(&mut buf).await?;
-            ans |= ((buf[0] & 0b0111_1111) as i64) << (7 * i);
+            ans |= (i64::from(buf[0] & 0b0111_1111)) << (7 * i);
             if buf[0] & 0b1000_0000 == 0 {
                 break;
             }

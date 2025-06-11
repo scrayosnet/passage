@@ -1,6 +1,6 @@
-use crate::adapter::Error;
 use crate::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
 use crate::adapter::status::Protocol;
+use crate::adapter::Error;
 use crate::config::FixedResourcepack as FixedConfig;
 use async_trait::async_trait;
 use std::net::SocketAddr;
@@ -12,6 +12,7 @@ pub struct FixedResourcePackSupplier {
 }
 
 impl FixedResourcePackSupplier {
+    #[must_use]
     pub fn new(config: FixedConfig) -> Self {
         Self {
             packs: config.packs,

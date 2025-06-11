@@ -1,15 +1,15 @@
 #[cfg(any(feature = "server", feature = "client"))]
 use crate::Error;
 use crate::{Packet, State, VarInt};
-#[cfg(test)]
-use fake::Dummy;
 
 pub mod serverbound {
-    use super::*;
+    use super::{Error, Packet, State, VarInt};
     #[cfg(feature = "server")]
     use crate::{AsyncReadPacket, ReadPacket};
     #[cfg(feature = "client")]
     use crate::{AsyncWritePacket, WritePacket};
+    #[cfg(test)]
+    use fake::Dummy;
     #[cfg(feature = "server")]
     use tokio::io::{AsyncRead, AsyncReadExt};
     #[cfg(feature = "client")]

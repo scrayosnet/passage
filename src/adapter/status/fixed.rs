@@ -14,6 +14,7 @@ pub struct FixedStatusSupplier {
 }
 
 impl FixedStatusSupplier {
+    #[must_use]
     pub fn new(config: FixedConfig) -> Self {
         let description = config
             .description

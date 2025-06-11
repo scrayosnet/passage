@@ -1,12 +1,12 @@
-use crate::adapter::Error;
 use crate::adapter::status::Protocol;
-use crate::adapter::target_selection::{Target, TargetSelector, strategize};
+use crate::adapter::target_selection::{strategize, Target, TargetSelector};
 use crate::adapter::target_strategy::TargetSelectorStrategy;
+use crate::adapter::Error;
 use crate::config::AgonesTargetDiscovery as AgonesConfig;
 use async_trait::async_trait;
 use futures_util::stream::StreamExt;
 use kube::runtime::watcher::Config;
-use kube::runtime::{WatchStreamExt, watcher};
+use kube::runtime::{watcher, WatchStreamExt};
 use kube::{Api, Client, CustomResource, ResourceExt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::select;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::{oneshot, RwLock};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -74,10 +74,10 @@ impl TryFrom<GameServer> for Target {
         }
 
         // add labels and annotations
-        for (label, value) in server.labels().iter() {
+        for (label, value) in server.labels() {
             meta.insert(label.clone(), value.clone());
         }
-        for (annot, value) in server.annotations().iter() {
+        for (annot, value) in server.annotations() {
             meta.insert(annot.clone(), value.clone());
         }
 
@@ -105,9 +105,12 @@ impl AgonesTargetSelector {
         // get stream with of game servers
         let client = Client::try_default()
             .await
-            .expect("failed to create k8s client");
+            .map_err(|err| Error::FailedInitialization {
+                adapter_type: "target_strategy",
+                cause: err.into(),
+            })?;
         let servers: Api<GameServer> = Api::namespaced(client.clone(), &config.namespace);
-        // TODO allow for filters (using config)
+
         let mut stream = watcher(servers, Config::default())
             .default_backoff()
             .applied_objects()
@@ -180,7 +183,7 @@ impl Drop for AgonesTargetSelector {
             return;
         };
         if cancel.send(()).is_err() {
-            warn!("Failed to cancel cache watcher")
+            warn!("Failed to cancel cache watcher");
         }
     }
 }
