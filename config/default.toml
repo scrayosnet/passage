@@ -45,7 +45,7 @@ address = "http://127.0.0.1:3030"
 database = "minecraft"
 collection = "status"
 filter = "{}"
-field_path = "motd"
+field_path = ["motd"]
 
 [target_discovery]
 adapter = "fixed"
