@@ -24,10 +24,8 @@ pub const META_STATE: &str = "state";
 #[kube(group = "agones.dev", version = "v1", kind = "GameServer", namespaced)]
 #[kube(status = "GameServerStatus")]
 pub struct GameServerSpec {
-    info: String,
     #[schemars(length(min = 3))]
     name: String,
-    replicas: i32,
     counters: HashMap<String, GameServerCounter>,
     lists: HashMap<String, GameServerList>,
 }
