@@ -1,5 +1,5 @@
-use crate::adapter::status::{Protocol, ServerStatus, ServerVersion, StatusSupplier};
 use crate::adapter::Error;
+use crate::adapter::status::{Protocol, ServerStatus, ServerVersion, StatusSupplier};
 use crate::config::FixedStatus as FixedConfig;
 use async_trait::async_trait;
 use serde_json::value::RawValue;

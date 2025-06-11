@@ -1,5 +1,5 @@
-use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
 use crate::adapter::Error;
+use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
 use crate::config::MongodbStatus as MongodbConfig;
 use async_trait::async_trait;
 use mongodb::bson::Document;

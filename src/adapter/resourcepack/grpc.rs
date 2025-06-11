@@ -1,8 +1,8 @@
+use crate::adapter::Error;
 use crate::adapter::proto::resourcepack_client::ResourcepackClient;
 use crate::adapter::proto::{Address, Pack, PacksRequest};
 use crate::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
 use crate::adapter::status::Protocol;
-use crate::adapter::Error;
 use crate::config::GrpcResourcepack as GrpcConfig;
 use async_trait::async_trait;
 use std::net::SocketAddr;

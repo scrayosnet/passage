@@ -1,9 +1,9 @@
+use crate::adapter::Error;
 use crate::adapter::proto::status_client::StatusClient;
 use crate::adapter::proto::{Address, Players, ProtocolVersion, StatusData, StatusRequest};
 use crate::adapter::status::{
     Protocol, ServerPlayer, ServerPlayers, ServerStatus, ServerVersion, StatusSupplier,
 };
-use crate::adapter::Error;
 use crate::config::GrpcStatus as GrpcConfig;
 use async_trait::async_trait;
 use serde_json::value::RawValue;

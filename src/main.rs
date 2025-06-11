@@ -2,8 +2,8 @@ use passage::config::Config;
 use std::borrow::Cow::Owned;
 use tracing::info;
 use tracing::level_filters::LevelFilter;
-use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::prelude::*;
 
 /// Initializes the application and invokes passage.
 ///

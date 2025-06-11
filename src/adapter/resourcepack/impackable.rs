@@ -1,6 +1,6 @@
+use crate::adapter::Error;
 use crate::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
 use crate::adapter::status::Protocol;
-use crate::adapter::Error;
 use crate::config::ImpackableResourcepack as ImpackableConfig;
 use crate::config::Localization;
 use async_trait::async_trait;
@@ -9,7 +9,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use tokio::select;
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{RwLock, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
 

@@ -1,12 +1,12 @@
-use crate::adapter::status::Protocol;
-use crate::adapter::target_selection::{strategize, Target, TargetSelector};
-use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::adapter::Error;
+use crate::adapter::status::Protocol;
+use crate::adapter::target_selection::{Target, TargetSelector, strategize};
+use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::config::AgonesTargetDiscovery as AgonesConfig;
 use async_trait::async_trait;
 use futures_util::stream::StreamExt;
 use kube::runtime::watcher::Config;
-use kube::runtime::{watcher, WatchStreamExt};
+use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Api, Client, CustomResource, ResourceExt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::select;
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{RwLock, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
 

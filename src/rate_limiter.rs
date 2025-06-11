@@ -1,4 +1,4 @@
-use crate::metrics::{RateLimiterLabels, RATE_LIMITER};
+use crate::metrics::{RATE_LIMITER, RateLimiterLabels};
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use tokio::time::{Duration, Instant};

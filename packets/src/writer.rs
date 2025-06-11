@@ -1,4 +1,4 @@
-use crate::{AsyncWritePacket, Error, VarInt, VarLong, WritePacket, INITIAL_BUFFER_SIZE};
+use crate::{AsyncWritePacket, Error, INITIAL_BUFFER_SIZE, VarInt, VarLong, WritePacket};
 use fastnbt::SerOpts;
 use serde_json::Value;
 use std::fmt::Debug;
