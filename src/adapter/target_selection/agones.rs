@@ -23,10 +23,7 @@ pub const META_STATE: &str = "state";
 #[derive(CustomResource, Debug, Serialize, Deserialize, Default, Clone, JsonSchema)]
 #[kube(group = "agones.dev", version = "v1", kind = "GameServer", namespaced)]
 #[kube(status = "GameServerStatus")]
-pub struct GameServerSpec {
-    counters: HashMap<String, GameServerCounter>,
-    lists: HashMap<String, GameServerList>,
-}
+pub struct GameServerSpec;
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 pub struct GameServerCounter {
@@ -44,6 +41,8 @@ pub struct GameServerList {
 pub struct GameServerStatus {
     address: String,
     state: String,
+    counters: Option<HashMap<String, GameServerCounter>>,
+    lists: Option<HashMap<String, GameServerList>>,
 }
 
 impl TryFrom<GameServer> for Target {
@@ -62,11 +61,15 @@ impl TryFrom<GameServer> for Target {
         let mut meta = HashMap::from([(META_STATE.to_string(), status.state)]);
 
         // add counters and lists
-        for (name, counter) in &server.spec.counters {
-            meta.insert(name.clone(), counter.count.unwrap_or(0).to_string());
+        if let Some(counters) = &status.counters {
+            for (name, counter) in counters {
+                meta.insert(name.clone(), counter.count.unwrap_or(0).to_string());
+            }
         }
-        for (name, list) in &server.spec.lists {
-            meta.insert(name.clone(), list.values.join(","));
+        if let Some(lists) = &status.lists {
+            for (name, list) in lists {
+                meta.insert(name.clone(), list.values.join(","));
+            }
         }
 
         // add labels and annotations

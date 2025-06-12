@@ -4,7 +4,7 @@ members = ['packets']
 [package]
 name = "passage"
 description = "Minecraft Server Transfer Router"
-version = "0.1.3"
+version = "0.1.4"
 authors = [
     "Joshua Dean Küpper <admin@joshua-kuepper.de>",
     "Paul Wagner <contact@paulwagner.dev>",
