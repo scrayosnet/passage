@@ -184,11 +184,11 @@ pub struct MongodbStatus {
     /// The collection of the mongodb adapter server.
     pub collection: String,
 
-    /// The filter on the collection to get the document(s).
-    pub filter: String,
+    /// The aggregation specification on the collection to get the document(s).
+    pub aggregation: String,
 
-    /// The field path of the filtered document(s).
-    pub field_path: Vec<String>,
+    /// The cache duration in seconds to store the queried status.
+    pub cache_duration: u64,
 }
 
 /// [`Resourcepack`] hold the resourcepack configuration.

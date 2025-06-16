@@ -44,8 +44,8 @@ address = "http://127.0.0.1:3030"
 address = "http://127.0.0.1:3030"
 database = "minecraft"
 collection = "status"
-filter = "{}"
-field_path = ["motd"]
+aggregation = "{}"
+cache_duration = 3
 
 [target_discovery]
 adapter = "fixed"

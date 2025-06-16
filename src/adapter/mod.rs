@@ -137,4 +137,11 @@ pub enum Error {
     /// The adapter is currently unavailable.
     #[error("adapter is currently unavailable")]
     AdapterUnavailable,
+
+    /// The server is not public, so the player cannot be connected.
+    #[error("server is not public: {identifier}")]
+    ServerNotPublic {
+        /// The identifier of the server that is not public.
+        identifier: String,
+    },
 }

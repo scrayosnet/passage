@@ -2,15 +2,20 @@ use crate::adapter::Error;
 use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
 use crate::config::MongodbStatus as MongodbConfig;
 use async_trait::async_trait;
-use mongodb::bson::Document;
+use futures_util::StreamExt;
+use mongodb::bson::{Document, from_document};
 use mongodb::options::ClientOptions;
 use mongodb::{Client, Collection};
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::select;
+use tokio::sync::{RwLock, oneshot};
+use tracing::{info, warn};
 
 pub struct MongodbStatusSupplier {
-    collection: Collection<Document>,
-    filter: Document,
-    field_path: Vec<String>,
+    inner: Arc<RwLock<Option<ServerStatus>>>,
+    cancel: Option<oneshot::Sender<()>>,
 }
 
 impl MongodbStatusSupplier {
@@ -19,15 +24,65 @@ impl MongodbStatusSupplier {
         options.app_name = Some("passage".to_string());
 
         let client = Client::with_options(options)?;
-        let database = client.database(&config.database);
-        let collection = database.collection(&config.collection);
-        let filter: Document = serde_json::from_str(&config.filter)?;
+        let inner: Arc<RwLock<Option<ServerStatus>>> = Arc::new(RwLock::new(None));
+
+        let _inner = Arc::clone(&inner);
+        let refresh_interval = Duration::from_secs(config.cache_duration);
+        let (cancel, mut canceled) = oneshot::channel();
+        let mut interval = tokio::time::interval(refresh_interval);
+        tokio::spawn(async move {
+            info!("Starting mongodb status supplier cache refresh task");
+            loop {
+                select! {
+                    biased;
+                    _ = &mut canceled => break,
+                    _ = interval.tick() => {
+                        match Self::refresh(&client, &config.database, &config.collection, &config.aggregation).await {
+                            Ok(next) => *_inner.write().await = next,
+                            Err(err) => warn!(err = ?err, "Failed to refresh status cache")
+                        };
+                    },
+                }
+            }
+            info!("Stopped mongodb status supplier cache refresh task");
+        });
 
         Ok(Self {
-            collection,
-            filter,
-            field_path: config.field_path,
+            inner,
+            cancel: Some(cancel),
         })
+    }
+
+    async fn refresh(
+        client: &Client,
+        database: &str,
+        collection: &str,
+        aggregate: &str,
+    ) -> Result<Option<ServerStatus>, Error> {
+        // prepare the mongo settings and query
+        let mongo_db = client.database(database);
+        let mongo_coll: Collection<Document> = mongo_db.collection(collection);
+        let aggregate: Vec<Document> = serde_json::from_str(aggregate)?;
+
+        // execute the aggregation pipeline and get the first result
+        let mut cursor = mongo_coll.aggregate(aggregate.clone()).await?;
+        let Some(document) = cursor.next().await.transpose()? else {
+            return Ok(None);
+        };
+
+        // convert the document to a status
+        Ok(from_document(document)?)
+    }
+}
+
+impl Drop for MongodbStatusSupplier {
+    fn drop(&mut self) {
+        let Some(cancel) = self.cancel.take() else {
+            return;
+        };
+        if cancel.send(()).is_err() {
+            warn!("Failed to cancel cache refresh task");
+        }
     }
 }
 
@@ -39,28 +94,6 @@ impl StatusSupplier for MongodbStatusSupplier {
         _server_addr: (&str, u16),
         _protocol: Protocol,
     ) -> Result<Option<ServerStatus>, Error> {
-        let Some(document) = self.collection.find_one(self.filter.clone()).await? else {
-            return Ok(None);
-        };
-
-        // does not support dots in path
-        let mut status_doc = &document;
-        for (i, field) in self.field_path.iter().enumerate() {
-            if i == self.field_path.len() - 1 {
-                // Last iteration - get string instead of document
-                let json_string = match status_doc.get_str(field) {
-                    Err(_) => return Ok(None),
-                    Ok(json_str) => json_str,
-                };
-                return Ok(Some(serde_json::from_str::<ServerStatus>(json_string)?));
-            }
-
-            match status_doc.get_document(field) {
-                Err(_) => return Ok(None),
-                Ok(found) => status_doc = found,
-            }
-        }
-
-        Ok(None)
+        Ok(self.inner.read().await.clone())
     }
 }

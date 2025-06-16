@@ -11,7 +11,7 @@ use kube::{Api, Client, CustomResource, ResourceExt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{RwLock, oneshot};
@@ -23,7 +23,27 @@ pub const META_STATE: &str = "state";
 #[derive(CustomResource, Debug, Serialize, Deserialize, Default, Clone, JsonSchema)]
 #[kube(group = "agones.dev", version = "v1", kind = "GameServer", namespaced)]
 #[kube(status = "GameServerStatus")]
-pub struct GameServerSpec;
+pub struct GameServerSpec {
+    #[serde(flatten)]
+    pub additional_fields: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
+pub struct GameServerStatus {
+    address: String,
+    ports: Vec<GameServerPort>,
+    state: String,
+    counters: Option<HashMap<String, GameServerCounter>>,
+    lists: Option<HashMap<String, GameServerList>>,
+    #[serde(flatten)]
+    pub additional_fields: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
+pub struct GameServerPort {
+    pub name: String,
+    pub port: u16,
+}
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 pub struct GameServerCounter {
@@ -37,14 +57,6 @@ pub struct GameServerList {
     values: Vec<String>,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
-pub struct GameServerStatus {
-    address: String,
-    state: String,
-    counters: Option<HashMap<String, GameServerCounter>>,
-    lists: Option<HashMap<String, GameServerList>>,
-}
-
 impl TryFrom<GameServer> for Target {
     type Error = Error;
 
@@ -55,7 +67,18 @@ impl TryFrom<GameServer> for Target {
             .clone()
             .ok_or(Error::AdapterUnavailable)?;
         let status = server.status.clone().ok_or(Error::AdapterUnavailable)?;
-        let address = status.address.parse()?;
+
+        // Parse IP address
+        let ip: IpAddr = status.address.parse()?;
+        // Extract port from the typed ports field
+        let port = status
+            .ports
+            .first()
+            .map(|p| p.port)
+            .ok_or(Error::ServerNotPublic {
+                identifier: identifier.clone(),
+            })?;
+        let address = SocketAddr::new(ip, port);
 
         // add meta data
         let mut meta = HashMap::from([(META_STATE.to_string(), status.state)]);
