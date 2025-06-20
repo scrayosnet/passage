@@ -1,7 +1,7 @@
-use crate::adapter::resourcepack::impackable::ImpackableResourcepackSupplier;
 use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
 use crate::adapter::Error;
 use crate::config::HttpStatus as HttpStatusConfig;
+use async_trait::async_trait;
 use std::net::SocketAddr;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -22,7 +22,7 @@ pub struct HttpStatusSupplier {
 }
 
 impl HttpStatusSupplier {
-    pub fn new(config: HttpStatusConfig) -> Result<Self, Error> {
+    pub async fn new(config: HttpStatusConfig) -> Result<Self, Error> {
         let inner: Arc<RwLock<Option<ServerStatus>>> = Arc::new(RwLock::new(None));
 
         let _inner = Arc::clone(&inner);
@@ -73,6 +73,7 @@ impl Drop for HttpStatusSupplier {
     }
 }
 
+#[async_trait]
 impl StatusSupplier for HttpStatusSupplier {
     async fn get_status(
         &self,
