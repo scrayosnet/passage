@@ -4,6 +4,7 @@ pub mod grpc;
 #[cfg(feature = "mongodb")]
 pub mod mongodb;
 pub mod none;
+pub mod http;
 
 use crate::adapter::Error;
 use async_trait::async_trait;

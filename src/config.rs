@@ -153,6 +153,9 @@ pub struct Status {
 
     /// The config for the mongodb status.
     pub mongodb: Option<MongodbStatus>,
+
+    /// The config for the http status.
+    pub http: Option<HttpStatus>,
 }
 
 /// [`FixedStatus`] hold the fixed status (ping) configuration.
@@ -185,6 +188,17 @@ pub struct MongodbStatus {
 
     /// The queries that should be executed to get the full status.
     pub queries: Vec<MongodbStatusQuery>,
+}
+
+
+/// [`HttpStatus`] hold the http status (ping) configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct HttpStatus {
+    /// The address of the http adapter server.
+    pub address: String,
+
+    /// The cache duration in seconds to store the queried status.
+    pub cache_duration: u64,
 }
 
 /// [`MongodbStatusQuery`] holds a single query to get the mongodb status (ping) information.
