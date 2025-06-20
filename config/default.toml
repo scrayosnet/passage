@@ -50,6 +50,10 @@ database = "minecraft"
 collection = "status"
 aggregation = "{}"
 
+[status.http]
+address = "https://charon.justchunks.net/v1/server/status"
+cache_duration = 3
+
 [target_discovery]
 adapter = "fixed"
 
