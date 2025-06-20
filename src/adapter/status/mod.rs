@@ -8,7 +8,7 @@ pub mod none;
 use crate::adapter::Error;
 use async_trait::async_trait;
 use packets::VarInt;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
 use std::net::SocketAddr;
 
@@ -60,12 +60,27 @@ pub struct ServerStatus {
     /// The current, maximum and sampled players of the server.
     pub players: Option<ServerPlayers>,
     /// The description (MOTD) of this server.
+    #[serde(deserialize_with = "deserialize_description")]
     pub description: Option<Box<RawValue>>,
     /// The optional favicon of the server.
     pub favicon: Option<String>,
     /// Whether the server enforces the use of secure chat.
     #[serde(rename = "enforcesSecureChat")]
     pub enforces_secure_chat: Option<bool>,
+}
+
+fn deserialize_description<'de, D>(deserializer: D) -> Result<Option<Box<RawValue>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt: Option<String> = Option::deserialize(deserializer)?;
+    if let Some(value) = opt {
+        Ok(Some(
+            RawValue::from_string(value).map_err(serde::de::Error::custom)?,
+        ))
+    } else {
+        Ok(None)
+    }
 }
 
 #[async_trait]

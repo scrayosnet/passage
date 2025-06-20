@@ -131,9 +131,11 @@ pub struct Sentry {
 /// [`RateLimiter`] hold the connection rate limiting configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RateLimiter {
+    /// Whether the rate limiter should be enabled.
     pub enabled: bool,
-    /// Duration in seconds
+    /// Duration in seconds.
     pub duration: u64,
+    /// Maximum amount of connections per duration.
     pub size: usize,
 }
 
@@ -178,17 +180,24 @@ pub struct MongodbStatus {
     /// The address of the mongodb adapter server.
     pub address: String,
 
-    /// The database of the mongodb adapter server.
+    /// The cache duration in seconds to store the queried status.
+    pub cache_duration: u64,
+
+    /// The queries that should be executed to get the full status.
+    pub queries: Vec<MongodbStatusQuery>,
+}
+
+/// [`MongodbStatusQuery`] holds a single query to get the mongodb status (ping) information.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MongodbStatusQuery {
+    /// The database of this specific query.
     pub database: String,
 
-    /// The collection of the mongodb adapter server.
+    /// The collection of this specific query.
     pub collection: String,
 
     /// The aggregation specification on the collection to get the document(s).
     pub aggregation: String,
-
-    /// The cache duration in seconds to store the queried status.
-    pub cache_duration: u64,
 }
 
 /// [`Resourcepack`] hold the resourcepack configuration.

@@ -84,7 +84,7 @@ where
         for (key, value) in &mut self.entries {
             while value
                 .front()
-                .is_some_and(|time| time.elapsed() > Duration::from_secs(10))
+                .is_some_and(|time| time.elapsed() > self.duration)
             {
                 value.pop_front();
                 self.size -= 1;

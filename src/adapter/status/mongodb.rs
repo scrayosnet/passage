@@ -1,9 +1,9 @@
 use crate::adapter::Error;
 use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
-use crate::config::MongodbStatus as MongodbConfig;
+use crate::config::{MongodbStatus as MongodbConfig, MongodbStatusQuery};
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use mongodb::bson::{Document, from_document};
+use mongodb::bson::Document;
 use mongodb::options::ClientOptions;
 use mongodb::{Client, Collection};
 use std::net::SocketAddr;
@@ -37,7 +37,7 @@ impl MongodbStatusSupplier {
                     biased;
                     _ = &mut canceled => break,
                     _ = interval.tick() => {
-                        match Self::refresh(&client, &config.database, &config.collection, &config.aggregation).await {
+                        match Self::refresh(&client, &config.queries).await {
                             Ok(next) => *_inner.write().await = next,
                             Err(err) => warn!(err = ?err, "Failed to refresh status cache")
                         };
@@ -55,23 +55,32 @@ impl MongodbStatusSupplier {
 
     async fn refresh(
         client: &Client,
-        database: &str,
-        collection: &str,
-        aggregate: &str,
+        queries: &[MongodbStatusQuery],
     ) -> Result<Option<ServerStatus>, Error> {
-        // prepare the mongo settings and query
-        let mongo_db = client.database(database);
-        let mongo_coll: Collection<Document> = mongo_db.collection(collection);
-        let aggregate: Vec<Document> = serde_json::from_str(aggregate)?;
+        let mut results = Vec::with_capacity(queries.len());
+        for query in queries {
+            // prepare the mongo settings and query
+            let db = client.database(&query.database);
+            let coll: Collection<Document> = db.collection(&query.collection);
+            let agg: Vec<Document> = serde_json::from_str(&query.aggregation)?;
 
-        // execute the aggregation pipeline and get the first result
-        let mut cursor = mongo_coll.aggregate(aggregate.clone()).await?;
-        let Some(document) = cursor.next().await.transpose()? else {
-            return Ok(None);
-        };
+            // execute the aggregation pipeline
+            let mut cursor = coll.aggregate(agg.clone()).await?;
+
+            // if there is a result, add it to the merge set
+            if let Some(document) = cursor.next().await.transpose()? {
+                results.push(document);
+            }
+        }
+
+        // merge the results into a single document
+        let document = results.into_iter().fold(Document::new(), |mut acc, next| {
+            acc.extend(next);
+            acc
+        });
 
         // convert the document to a status
-        Ok(from_document(document)?)
+        Ok(serde_json::from_str(&serde_json::to_string(&document)?).ok())
     }
 }
 

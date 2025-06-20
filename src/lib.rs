@@ -223,7 +223,6 @@ async fn start_protocol(
             let Some(fixed) = config.status.fixed.clone() else {
                 return Err("fixed status adapter requires a configuration".into());
             };
-            // TODO maybe move protocol to fixed config?
             Arc::new(FixedStatusSupplier::new(fixed)) as Arc<dyn StatusSupplier>
         }
         _ => return Err("unknown status supplier configured".into()),
@@ -284,7 +283,7 @@ async fn start_protocol(
             };
             Arc::new(FixedTargetSelector::new(target_strategy, fixed)) as Arc<dyn TargetSelector>
         }
-        _ => return Err("unknown target selector strategy configured".into()),
+        _ => return Err("unknown target selector discovery configured".into()),
     };
 
     // initialize resourcepack supplier
@@ -316,7 +315,7 @@ async fn start_protocol(
             };
             Arc::new(FixedResourcePackSupplier::new(fixed)) as Arc<dyn ResourcepackSupplier>
         }
-        _ => return Err("unknown target selector strategy configured".into()),
+        _ => return Err("unknown resourcepack supplier configured".into()),
     };
 
     // initialize mojang client
