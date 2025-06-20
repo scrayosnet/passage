@@ -190,7 +190,6 @@ pub struct MongodbStatus {
     pub queries: Vec<MongodbStatusQuery>,
 }
 
-
 /// [`HttpStatus`] hold the http status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct HttpStatus {

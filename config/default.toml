@@ -51,7 +51,7 @@ collection = "status"
 aggregation = "{}"
 
 [status.http]
-address = "https://charon.justchunks.net/v1/server/status"
+address = "https://charon-staging.justchunks.net/v1/server/status"
 cache_duration = 3
 
 [target_discovery]

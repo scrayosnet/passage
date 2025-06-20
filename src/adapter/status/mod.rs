@@ -1,10 +1,10 @@
 pub mod fixed;
 #[cfg(feature = "grpc")]
 pub mod grpc;
+pub mod http;
 #[cfg(feature = "mongodb")]
 pub mod mongodb;
 pub mod none;
-pub mod http;
 
 use crate::adapter::Error;
 use async_trait::async_trait;

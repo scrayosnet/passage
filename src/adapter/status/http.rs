@@ -1,12 +1,12 @@
-use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
 use crate::adapter::Error;
+use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
 use crate::config::HttpStatus as HttpStatusConfig;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use tokio::select;
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{RwLock, oneshot};
 use tracing::{info, warn};
 
 /// The shared http client.
@@ -53,11 +53,7 @@ impl HttpStatusSupplier {
     }
 
     async fn refresh(url: &str) -> Result<Option<ServerStatus>, Error> {
-        let response = HTTP_CLIENT
-            .get(url)
-            .send()
-            .await?
-            .error_for_status()?;
+        let response = HTTP_CLIENT.get(url).send().await?.error_for_status()?;
         Ok(response.json().await?)
     }
 }
