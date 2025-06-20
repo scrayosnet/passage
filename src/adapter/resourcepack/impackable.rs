@@ -25,7 +25,7 @@ type Fetched = Option<ImpackableResourcepack>;
 pub struct ImpackableResourcepackSupplier {
     inner: Arc<RwLock<Option<Fetched>>>,
     cancel: Option<oneshot::Sender<()>>,
-    url: String,
+    base_url: String,
     uuid: Uuid,
     forced: bool,
     localization: Arc<Localization>,
@@ -34,11 +34,10 @@ pub struct ImpackableResourcepackSupplier {
 impl ImpackableResourcepackSupplier {
     pub fn new(config: ImpackableConfig, localization: Arc<Localization>) -> Result<Self, Error> {
         let inner = Arc::new(RwLock::new(None));
-        let url = format!("{}/query/{}", config.base_url, config.channel);
+        let query_url = format!("{}/query/{}", config.base_url, config.channel);
 
         // start refresh
         let _inner = Arc::clone(&inner);
-        let _url = url.clone();
         let refresh_interval = Duration::from_secs(config.cache_duration);
         let (cancel, mut canceled) = oneshot::channel();
         let mut interval = tokio::time::interval(refresh_interval);
@@ -49,7 +48,7 @@ impl ImpackableResourcepackSupplier {
                     biased;
                     _ = &mut canceled => break,
                     _ = interval.tick() => {
-                        match Self::refresh(&_url, &config.username, &config.password).await {
+                        match Self::refresh(&query_url, &config.username, &config.password).await {
                             Ok(next) => *_inner.write().await = Some(next),
                             Err(err) => warn!(err = ?err, "Failed to refresh resourcepack cache")
                         };
@@ -62,7 +61,7 @@ impl ImpackableResourcepackSupplier {
         Ok(Self {
             inner,
             cancel: Some(cancel),
-            url,
+            base_url: config.base_url,
             uuid: config.uuid,
             forced: config.forced,
             localization,
@@ -123,7 +122,7 @@ impl ResourcepackSupplier for ImpackableResourcepackSupplier {
 
         Ok(vec![Resourcepack {
             uuid: self.uuid,
-            url: self.url.clone(),
+            url: format!("{}/download/{}", self.base_url, first.id),
             hash: first.hash,
             forced: self.forced,
             prompt_message: Some(prompt_message),

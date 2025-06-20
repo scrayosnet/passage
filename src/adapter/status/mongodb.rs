@@ -68,7 +68,7 @@ impl MongodbStatusSupplier {
             let mut cursor = coll.aggregate(agg.clone()).await?;
 
             // if there is a result, add it to the merge set
-            if let Some(document) = cursor.next().await.transpose()? {
+            while let Some(document) = cursor.next().await.transpose()? {
                 results.push(document);
             }
         }
