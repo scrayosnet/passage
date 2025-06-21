@@ -1,5 +1,5 @@
 use crate::adapter::Error;
-use crate::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
+use crate::adapter::resourcepack::{Resourcepack, ResourcepackSupplier, format_size};
 use crate::adapter::status::Protocol;
 use crate::config::ImpackableResourcepack as ImpackableConfig;
 use crate::config::Localization;
@@ -117,7 +117,7 @@ impl ResourcepackSupplier for ImpackableResourcepackSupplier {
         let prompt_message = self.localization.localize(
             user_locale,
             "resourcepack_impackable_prompt",
-            &[("{size}", format!("{} Bytes", first.size))],
+            &[("{size}", format_size(first.size))],
         );
 
         Ok(vec![Resourcepack {
