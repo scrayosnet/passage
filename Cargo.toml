@@ -4,7 +4,7 @@ members = ['packets']
 [package]
 name = "passage"
 description = "Minecraft Server Transfer Router"
-version = "0.1.8"
+version = "0.1.9"
 authors = [
     "Joshua Dean Küpper <admin@joshua-kuepper.de>",
     "Paul Wagner <contact@paulwagner.dev>",
@@ -22,6 +22,7 @@ rust-version = "1.85.0"
 [dependencies]
 packets = { path = "./packets", features = ["server"] }
 tokio = { version = "1.45", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal", "test-util"] }
+tokio-util = { version = "0.7.15", features = ["rt"] }
 tracing = { version = "0.1" }
 thiserror = { version = "2.0" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

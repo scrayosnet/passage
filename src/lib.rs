@@ -57,6 +57,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use tracing::{Instrument, debug, error, info, warn};
 
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
@@ -70,52 +72,53 @@ use tracing::{Instrument, debug, error, info, warn};
 /// Will return an appropriate error if the socket cannot be bound to the supplied address, or the TCP server cannot be
 /// properly initialized.
 pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
-    let (shutdown, _) = tokio::sync::broadcast::channel(1);
     let config = Arc::new(config);
 
+    let tracker = TaskTracker::new();
+    let token = CancellationToken::new();
+
     // start the metrics server in own thread
-    let m_shutdown = shutdown.clone();
+    let m_token = token.clone();
     let m_config = Arc::clone(&config);
-    let metric_server = tokio::spawn(async move {
-        if let Err(err) = start_metrics(m_config, m_shutdown.subscribe()).await {
+    tracker.spawn(async move {
+        if let Err(err) = start_metrics(m_config, m_token.clone()).await {
             error!(cause = err.to_string(), "metrics server stopped with error");
         }
-        m_shutdown.send(()).expect("failed to shut down");
+        m_token.cancel();
     });
 
     // start the protocol server in own thread
-    let p_shutdown = shutdown.clone();
+    let p_token = token.clone();
     let p_config = Arc::clone(&config);
-    let protocol_server = tokio::spawn(async move {
-        if let Err(err) = start_protocol(p_config, p_shutdown.subscribe()).await {
+    tracker.spawn(async move {
+        if let Err(err) = start_protocol(p_config, p_token.clone()).await {
             error!(
                 cause = err.to_string(),
                 "protocol server stopped with error"
             );
         }
-        p_shutdown.send(()).expect("failed to shut down");
+        p_token.cancel();
     });
 
     // wait for either a shutdown signal (from error) or a ctrl-c
-    let mut shutdown_signal = shutdown.subscribe();
     select!(
-        _ = shutdown_signal.recv() => {},
+        _ = token.cancelled() => {},
         _ = tokio::signal::ctrl_c() => {
             info!("received ctrl-c signal, shutting down");
-            shutdown.send(()).expect("failed to shut down");
+            token.cancel();
         },
     );
 
-    // wait for threads to shut down
-    _ = metric_server.await;
-    _ = protocol_server.await;
+    // wait for graceful shutdown
+    tracker.close();
+    tracker.wait().await;
 
     Ok(())
 }
 
 async fn start_metrics(
     config: Arc<Config>,
-    mut shutdown: tokio::sync::broadcast::Receiver<()>,
+    shutdown: CancellationToken,
 ) -> Result<(), Box<dyn std::error::Error>> {
     debug!("starting metrics server");
 
@@ -131,7 +134,7 @@ async fn start_metrics(
         // accept the next incoming connection
         let (stream, addr) = select! {
             accepted = listener.accept() => accepted?,
-            _ = shutdown.recv() => {
+            _ = shutdown.cancelled() => {
                 break;
             },
         };
@@ -185,7 +188,7 @@ async fn start_metrics(
 
 async fn start_protocol(
     config: Arc<Config>,
-    mut shutdown: tokio::sync::broadcast::Receiver<()>,
+    shutdown: CancellationToken,
 ) -> Result<(), Box<dyn std::error::Error>> {
     debug!("starting protocol server");
 
@@ -339,11 +342,14 @@ async fn start_protocol(
         config.rate_limiter.size,
     );
 
+    // initialize connection tracker
+    let tracker = TaskTracker::new();
+
     loop {
         // accept the next incoming connection
         let (mut stream, addr) = select! {
             accepted = listener.accept() => accepted?,
-            _ = shutdown.recv() => {
+            _ = shutdown.cancelled() => {
                 break;
             },
         };
@@ -382,7 +388,7 @@ async fn start_protocol(
             id = connection_id.to_string(),
         );
 
-        tokio::spawn(
+        tracker.spawn(
             async move {
                 info!("accepted new connection");
                 OPEN_CONNECTIONS
@@ -428,6 +434,10 @@ async fn start_protocol(
             .instrument(connection_span),
         );
     }
+
+    // wait for all connections to finish
+    tracker.close();
+    tracker.wait().await;
 
     info!("protocol server stopped successfully");
     Ok(())
