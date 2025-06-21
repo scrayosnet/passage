@@ -105,11 +105,43 @@ default_locale = "en_US"
 
 [localization.messages.en]
 locale = "English"
-resourcepack_impackable_prompt = "{\"text\":\"The resource pack is required ({size})\"}"
-disconnect_timeout = "{\"text\":\"Failed to send keep-alive\"}"
-disconnect_failed_resourcepack = "{\"text\":\"Failed to load resource pack\"}"
-disconnect_no_target = "{\"text\":\"No target found\"}"
+resourcepack_impackable_prompt = "{\"text\":\"This server requires a resource pack ({size}) to join\"}"
+disconnect_timeout = "{\"text\":\"Disconnected: No response from client (keep-alive timeout)\"}"
+disconnect_failed_resourcepack = "{\"text\":\"Disconnected: Resource pack was not loaded by the client\"}"
+disconnect_no_target = "{\"text\":\"Disconnected: No available server to handle your connection\"}"
+
+[localization.messages.es]
+locale = "Español"
+resourcepack_impackable_prompt = "{\"text\":\"Este servidor requiere un paquete de recursos ({size}) para unirse\"}"
+disconnect_timeout = "{\"text\":\"Desconectado: No hubo respuesta del cliente (tiempo de espera agotado)\"}"
+disconnect_failed_resourcepack = "{\"text\":\"Desconectado: El cliente no cargó el paquete de recursos\"}"
+disconnect_no_target = "{\"text\":\"Desconectado: No hay un servidor disponible para manejar tu conexión\"}"
+
+[localization.messages.fr]
+locale = "Français"
+resourcepack_impackable_prompt = "{\"text\":\"Ce serveur nécessite un pack de ressources ({size}) pour se connecter\"}"
+disconnect_timeout = "{\"text\":\"Déconnecté : aucune réponse du client (délai de keep-alive dépassé)\"}"
+disconnect_failed_resourcepack = "{\"text\":\"Déconnecté : le pack de ressources n’a pas été chargé par le client\"}"
+disconnect_no_target = "{\"text\":\"Déconnecté : aucun serveur disponible pour traiter votre connexion\"}"
 
 [localization.messages.de]
 locale = "Deutsch"
-resourcepack_impackable_prompt = "Das Ressourcenpacket ist verpflichtend ({size})"
+resourcepack_impackable_prompt = "{\"text\":\"Dieser Server erfordert ein Ressourcenpaket ({size}) zum Beitreten\"}"
+disconnect_timeout = "{\"text\":\"Verbindung getrennt: Keine Antwort vom Client (Keep-Alive-Timeout)\"}"
+disconnect_failed_resourcepack = "{\"text\":\"Verbindung getrennt: Ressourcenpaket wurde vom Client nicht geladen\"}"
+disconnect_no_target = "{\"text\":\"Verbindung getrennt: Kein verfügbarer Server für diese Verbindung\"}"
+
+[localization.messages.zh-CN]
+locale = "简体中文"
+resourcepack_impackable_prompt = "{\"text\":\"此服务器需要资源包（{size}）才能加入\"}"
+disconnect_timeout = "{\"text\":\"已断开连接：客户端无响应（保持连接超时）\"}"
+disconnect_failed_resourcepack = "{\"text\":\"已断开连接：客户端未加载资源包\"}"
+disconnect_no_target = "{\"text\":\"已断开连接：没有可用的服务器来处理你的连接\"}"
+
+[localization.messages.ru]
+locale = "Русский"
+resourcepack_impackable_prompt = "{\"text\":\"Для подключения к этому серверу требуется ресурс-пакет ({size})\"}"
+disconnect_timeout = "{\"text\":\"Отключено: нет ответа от клиента (тайм-аут keep-alive)\"}"
+disconnect_failed_resourcepack = "{\"text\":\"Отключено: клиент не загрузил ресурс-пакет\"}"
+disconnect_no_target = "{\"text\":\"Отключено: нет доступного сервера для обработки подключения\"}"
+
