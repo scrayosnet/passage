@@ -48,7 +48,7 @@ hyper-util = { version = "0.1" }
 http-body-util = { version = "0.1" }
 futures-util = { version = "0.3" }
 tonic = { version = "0.13", optional = true }
-prost = { version = "0.13", optional = true }
+prost = { version = "0.14", optional = true }
 prost-types = { version = "0.13", optional = true }
 kube = { version = "1.0", features = ["runtime", "derive"], optional = true }
 k8s-openapi = { version = "0.25", features = ["latest"], optional = true }
