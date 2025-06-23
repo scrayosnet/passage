@@ -303,6 +303,8 @@ pub struct GrpcTargetDiscovery {
 pub struct AgonesTargetDiscovery {
     /// The namespace to search for agones game servers.
     pub namespace: String,
+    /// The labels to search for agones game servers.
+    pub label_selector: Option<String>,
 }
 
 /// [`TargetStrategy`] hold the target strategy configuration.

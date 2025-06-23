@@ -5,7 +5,7 @@ use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::config::AgonesTargetDiscovery as AgonesConfig;
 use async_trait::async_trait;
 use futures_util::stream::StreamExt;
-use kube::runtime::watcher::Config;
+use kube::runtime::watcher::{Config, InitialListStrategy, ListSemantic};
 use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Api, Client, CustomResource, ResourceExt};
 use schemars::JsonSchema;
@@ -133,7 +133,19 @@ impl AgonesTargetSelector {
             })?;
         let servers: Api<GameServer> = Api::namespaced(client.clone(), &config.namespace);
 
-        let mut stream = watcher(servers, Config::default())
+        // create the filtering config
+        let watch_config = Config {
+            bookmarks: true,
+            label_selector: config.label_selector,
+            field_selector: None,
+            timeout: None,
+            list_semantic: ListSemantic::default(),
+            page_size: Some(500),
+            initial_list_strategy: InitialListStrategy::default(),
+        };
+
+        // create the watch stream
+        let mut stream = watcher(servers, watch_config)
             .default_backoff()
             .applied_objects()
             .boxed();
