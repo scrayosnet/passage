@@ -1,13 +1,14 @@
-use crate::adapter::Error;
+use crate::adapter::refresh::Refreshable;
 use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
+use crate::adapter::Error;
 use crate::config::HttpStatus as HttpStatusConfig;
+use crate::refresh;
 use async_trait::async_trait;
 use std::net::SocketAddr;
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::select;
-use tokio::sync::{RwLock, oneshot};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// The shared http client.
 static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
@@ -17,55 +18,25 @@ static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 });
 
 pub struct HttpStatusSupplier {
-    inner: Arc<RwLock<Option<ServerStatus>>>,
-    cancel: Option<oneshot::Sender<()>>,
+    inner: Refreshable<Option<ServerStatus>>,
 }
 
 impl HttpStatusSupplier {
     pub async fn new(config: HttpStatusConfig) -> Result<Self, Error> {
-        let inner: Arc<RwLock<Option<ServerStatus>>> = Arc::new(RwLock::new(None));
-
-        let _inner = Arc::clone(&inner);
         let refresh_interval = Duration::from_secs(config.cache_duration);
-        let (cancel, mut canceled) = oneshot::channel();
-        let mut interval = tokio::time::interval(refresh_interval);
-        tokio::spawn(async move {
-            info!("Starting http status supplier cache refresh task");
-            loop {
-                select! {
-                    biased;
-                    _ = &mut canceled => break,
-                    _ = interval.tick() => {
-                        match Self::refresh(&config.address).await {
-                            Ok(next) => *_inner.write().await = next,
-                            Err(err) => warn!(err = ?err, "Failed to refresh status cache")
-                        };
-                    },
-                }
-            }
-            info!("Stopped http status supplier cache refresh task");
-        });
+        let inner = Refreshable::new(None);
 
-        Ok(Self {
-            inner,
-            cancel: Some(cancel),
-        })
+        // start thread coupled to 'inner' to refresh it
+        refresh! {
+            inner = refresh_interval => Self::fetch(&config.address)
+        }
+
+        Ok(Self { inner })
     }
 
-    async fn refresh(url: &str) -> Result<Option<ServerStatus>, Error> {
+    async fn fetch(url: &str) -> Result<Option<ServerStatus>, Error> {
         let response = HTTP_CLIENT.get(url).send().await?.error_for_status()?;
         Ok(response.json().await?)
-    }
-}
-
-impl Drop for HttpStatusSupplier {
-    fn drop(&mut self) {
-        let Some(cancel) = self.cancel.take() else {
-            return;
-        };
-        if cancel.send(()).is_err() {
-            warn!("Failed to cancel cache refresh task");
-        }
     }
 }
 

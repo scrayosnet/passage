@@ -1,15 +1,16 @@
-use crate::adapter::Error;
-use crate::adapter::resourcepack::{Resourcepack, ResourcepackSupplier, format_size};
+use crate::adapter::refresh::Refreshable;
+use crate::adapter::resourcepack::{format_size, Resourcepack, ResourcepackSupplier};
 use crate::adapter::status::Protocol;
+use crate::adapter::Error;
 use crate::config::ImpackableResourcepack as ImpackableConfig;
 use crate::config::Localization;
+use crate::refresh;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use tokio::select;
-use tokio::sync::{RwLock, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -20,11 +21,8 @@ static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .expect("failed to create http client")
 });
 
-type Fetched = Option<ImpackableResourcepack>;
-
 pub struct ImpackableResourcepackSupplier {
-    inner: Arc<RwLock<Option<Fetched>>>,
-    cancel: Option<oneshot::Sender<()>>,
+    inner: Refreshable<Option<Option<ImpackableResourcepack>>>,
     base_url: String,
     uuid: Uuid,
     forced: bool,
@@ -33,34 +31,17 @@ pub struct ImpackableResourcepackSupplier {
 
 impl ImpackableResourcepackSupplier {
     pub fn new(config: ImpackableConfig, localization: Arc<Localization>) -> Result<Self, Error> {
-        let inner = Arc::new(RwLock::new(None));
         let query_url = format!("{}/query/{}", config.base_url, config.channel);
-
-        // start refresh
-        let _inner = Arc::clone(&inner);
         let refresh_interval = Duration::from_secs(config.cache_duration);
-        let (cancel, mut canceled) = oneshot::channel();
-        let mut interval = tokio::time::interval(refresh_interval);
-        tokio::spawn(async move {
-            info!("Starting impackable resourcepack supplier cache refresh task");
-            loop {
-                select! {
-                    biased;
-                    _ = &mut canceled => break,
-                    _ = interval.tick() => {
-                        match Self::refresh(&query_url, &config.username, &config.password).await {
-                            Ok(next) => *_inner.write().await = Some(next),
-                            Err(err) => warn!(err = ?err, "Failed to refresh resourcepack cache")
-                        };
-                    },
-                }
-            }
-            info!("Stopped impackable resourcepack supplier cache refresh task");
-        });
+        let inner = Refreshable::new(None);
+
+        // start thread coupled to 'inner' to refresh it
+        refresh! {
+            inner = refresh_interval => Self::fetch(&query_url, &config.username, &config.password)
+        }
 
         Ok(Self {
             inner,
-            cancel: Some(cancel),
             base_url: config.base_url,
             uuid: config.uuid,
             forced: config.forced,
@@ -68,11 +49,11 @@ impl ImpackableResourcepackSupplier {
         })
     }
 
-    async fn refresh(
+    async fn fetch(
         url: &str,
         username: &str,
         password: &str,
-    ) -> Result<Option<ImpackableResourcepack>, Error> {
+    ) -> Result<Option<Option<ImpackableResourcepack>>, Error> {
         let response = HTTP_CLIENT
             .get(url)
             .basic_auth(username, Some(password))
@@ -80,18 +61,7 @@ impl ImpackableResourcepackSupplier {
             .await?
             .error_for_status()?;
         let mut packs: Vec<ImpackableResourcepack> = response.json().await?;
-        Ok(packs.pop())
-    }
-}
-
-impl Drop for ImpackableResourcepackSupplier {
-    fn drop(&mut self) {
-        let Some(cancel) = self.cancel.take() else {
-            return;
-        };
-        if cancel.send(()).is_err() {
-            warn!("Failed to cancel cache refresh task");
-        }
+        Ok(Some(packs.pop()))
     }
 }
 

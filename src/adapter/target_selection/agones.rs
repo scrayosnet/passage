@@ -14,7 +14,8 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::select;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -114,7 +115,7 @@ impl TryFrom<GameServer> for Target {
 pub struct AgonesTargetSelector {
     strategy: Arc<dyn TargetSelectorStrategy>,
     inner: Arc<RwLock<Vec<Target>>>,
-    cancel: Option<oneshot::Sender<()>>,
+    token: CancellationToken,
 }
 
 impl AgonesTargetSelector {
@@ -123,6 +124,7 @@ impl AgonesTargetSelector {
         config: AgonesConfig,
     ) -> Result<Self, Error> {
         let inner: Arc<RwLock<Vec<Target>>> = Arc::new(RwLock::new(Vec::new()));
+        let token = CancellationToken::new();
 
         // get stream with of game servers
         let client = Client::try_default()
@@ -152,14 +154,14 @@ impl AgonesTargetSelector {
 
         // start listener
         let _inner = Arc::clone(&inner);
-        let (cancel, mut canceled) = oneshot::channel();
+        let _token = token.clone();
         tokio::spawn(async move {
             info!("starting game server watcher");
             loop {
                 // get next server update
                 let maybe_server = select! {
                     biased;
-                    _ = &mut canceled => break,
+                    _ = _token.cancelled() => break,
                     maybe_server = stream.next() => maybe_server.transpose(),
                 };
 
@@ -206,19 +208,14 @@ impl AgonesTargetSelector {
         Ok(Self {
             strategy,
             inner,
-            cancel: Some(cancel),
+            token,
         })
     }
 }
 
 impl Drop for AgonesTargetSelector {
     fn drop(&mut self) {
-        let Some(cancel) = self.cancel.take() else {
-            return;
-        };
-        if cancel.send(()).is_err() {
-            warn!("Failed to cancel cache watcher");
-        }
+        self.token.cancel();
     }
 }
 
