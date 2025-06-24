@@ -327,13 +327,23 @@ pub struct GrpcTargetStrategy {
     pub address: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct TargetFilter {
+    /// Matches targets with exact tagte identifier.
+    pub identifier: String,
+}
+
 /// [`PlayerFillTargetStrategy`] hold the player fill target strategy configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlayerFillTargetStrategy {
     /// The name of the field that stores the player amount.
     pub field: String,
+
     /// The number of players that will be filled at maximum.
     pub max_players: u32,
+
+    /// The target filters, matching server hostname against target.
+    pub target_filter: HashMap<String, TargetFilter>,
 }
 
 /// [`Config`] holds all configuration for the application. I.g. one immutable instance is created

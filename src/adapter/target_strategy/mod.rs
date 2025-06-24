@@ -7,6 +7,7 @@ pub mod player_fill;
 use crate::adapter::Error;
 use crate::adapter::status::Protocol;
 use crate::adapter::target_selection::Target;
+use crate::config::TargetFilter;
 use async_trait::async_trait;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -22,4 +23,15 @@ pub trait TargetSelectorStrategy: Send + Sync {
         user_id: &Uuid,
         targets: &[Target],
     ) -> Result<Option<SocketAddr>, Error>;
+}
+
+pub trait TargetFilterExt {
+    fn matches(&self, target: &Target) -> bool;
+}
+
+impl TargetFilterExt for TargetFilter {
+    fn matches(&self, target: &Target) -> bool {
+        // TODO extend filters
+        target.identifier == self.identifier
+    }
 }

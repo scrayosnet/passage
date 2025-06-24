@@ -1,7 +1,7 @@
-use crate::adapter::refresh::Refreshable;
-use crate::adapter::resourcepack::{format_size, Resourcepack, ResourcepackSupplier};
-use crate::adapter::status::Protocol;
 use crate::adapter::Error;
+use crate::adapter::refresh::Refreshable;
+use crate::adapter::resourcepack::{Resourcepack, ResourcepackSupplier, format_size};
+use crate::adapter::status::Protocol;
 use crate::config::ImpackableResourcepack as ImpackableConfig;
 use crate::config::Localization;
 use crate::refresh;

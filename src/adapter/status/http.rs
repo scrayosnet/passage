@@ -1,6 +1,6 @@
+use crate::adapter::Error;
 use crate::adapter::refresh::Refreshable;
 use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
-use crate::adapter::Error;
 use crate::config::HttpStatus as HttpStatusConfig;
 use crate::refresh;
 use async_trait::async_trait;
