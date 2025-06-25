@@ -329,8 +329,15 @@ pub struct GrpcTargetStrategy {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TargetFilter {
+    /// Matches incoming request server host.
+    pub server_host: String,
+
     /// Matches targets with exact tagte identifier.
-    pub identifier: String,
+    pub identifier: Option<String>,
+
+    /// Matches targets with at least the following metadata.
+    #[serde(default)]
+    pub meta: HashMap<String, String>,
 }
 
 /// [`PlayerFillTargetStrategy`] hold the player fill target strategy configuration.
@@ -343,7 +350,8 @@ pub struct PlayerFillTargetStrategy {
     pub max_players: u32,
 
     /// The target filters, matching server hostname against target.
-    pub target_filter: HashMap<String, TargetFilter>,
+    #[serde(default)]
+    pub target_filters: Vec<TargetFilter>,
 }
 
 /// [`Config`] holds all configuration for the application. I.g. one immutable instance is created

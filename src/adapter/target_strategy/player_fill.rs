@@ -20,7 +20,13 @@ impl PlayerFillTargetSelectorStrategy {
         Self {
             field: config.field,
             max_players: config.max_players,
-            target_filter: config.target_filter,
+            // store as hashmap to improve performance
+            target_filter: HashMap::from_iter(
+                config
+                    .target_filters
+                    .into_iter()
+                    .map(|filter| (filter.server_host.clone(), filter)),
+            ),
         }
     }
 }

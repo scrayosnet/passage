@@ -31,7 +31,20 @@ pub trait TargetFilterExt {
 
 impl TargetFilterExt for TargetFilter {
     fn matches(&self, target: &Target) -> bool {
-        // TODO extend filters
-        target.identifier == self.identifier
+        // check target identifier
+        if let Some(identifier) = &self.identifier {
+            if &target.identifier != identifier {
+                return false;
+            }
+        }
+
+        // check target metadata
+        for (key, value) in &self.meta {
+            if target.meta.get(key) == Some(value) {
+                return false;
+            }
+        }
+
+        true
     }
 }
