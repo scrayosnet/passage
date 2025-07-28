@@ -32,6 +32,7 @@ pub struct GameServerSpec {
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 pub struct GameServerStatus {
     address: String,
+    #[serde(default)]
     ports: Vec<GameServerPort>,
     state: String,
     counters: Option<HashMap<String, GameServerCounter>>,
@@ -55,6 +56,7 @@ pub struct GameServerCounter {
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 pub struct GameServerList {
     capacity: Option<u32>,
+    #[serde(default)]
     values: Vec<String>,
 }
 
