@@ -638,6 +638,11 @@ where
 
         debug!(len = packs.len(), "sending resource pack packet(s)");
         for pack in packs {
+            debug!(
+                hash = pack.hash,
+                uuid = %pack.uuid,
+                "sending resource pack packet"
+            );
             let packet = conf_out::AddResourcePackPacket {
                 uuid: pack.uuid,
                 url: pack.url,
@@ -667,6 +672,11 @@ where
             };
 
             // check the state for any final state in the resource pack loading process
+            debug!(
+                result = ?packet.result,
+                uuid = %packet.uuid,
+                "received resource pack response packet"
+            );
             let success = match packet.result {
                 ResourcePackResult::Success => true,
                 ResourcePackResult::Declined
