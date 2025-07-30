@@ -250,6 +250,6 @@ mod tests {
         let shared_secret = b"verysecuresecret";
         let (_, key) = generate_keypair().expect("failed to generate keypair");
         let encoded = encode_public_key(&key).expect("failed to encode keypair");
-        minecraft_hash("justchunks", shared_secret, &encoded);
+        let _ = minecraft_hash("justchunks", shared_secret, &encoded);
     }
 }
