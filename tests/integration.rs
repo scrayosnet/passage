@@ -251,6 +251,7 @@ async fn simulate_transfer_no_configuration() {
         client_addr: client_address,
         user_name: user_name.clone(),
         user_id,
+        target: None,
     })
     .expect("auth cookie serialization failed");
 
@@ -512,6 +513,7 @@ async fn sends_keep_alive() {
         client_addr: client_address,
         user_name: user_name.clone(),
         user_id,
+        target: None,
     })
     .expect("auth cookie serialization failed");
 
@@ -676,6 +678,7 @@ async fn no_respond_keep_alive() {
         client_addr: client_address,
         user_name: user_name.clone(),
         user_id,
+        target: None,
     })
     .expect("auth cookie serialization failed");
 

@@ -191,6 +191,7 @@ pub struct AuthCookie {
     pub client_addr: SocketAddr,
     pub user_name: String,
     pub user_id: Uuid,
+    pub target: Option<String>,
 }
 
 #[derive(Debug)]
@@ -579,6 +580,7 @@ where
                         .as_secs(),
                     user_name: login_start.user_name.clone(),
                     user_id: login_start.user_id,
+                    target: None,
                 };
 
                 let auth_payload = serde_json::to_vec(&cookie)?;
