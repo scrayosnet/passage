@@ -15,13 +15,15 @@ use passage::adapter::resourcepack::none::NoneResourcePackSupplier;
 use passage::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
 use passage::adapter::status::StatusSupplier;
 use passage::adapter::status::none::NoneStatusSupplier;
-use passage::adapter::target_selection::TargetSelector;
+use passage::adapter::target_selection::fixed::FixedTargetSelector;
 use passage::adapter::target_selection::none::NoneTargetSelector;
+use passage::adapter::target_selection::{Target, TargetSelector};
 use passage::adapter::target_strategy::TargetSelectorStrategy;
+use passage::adapter::target_strategy::any::AnyTargetSelectorStrategy;
 use passage::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use passage::authentication;
 use passage::cipher_stream::CipherStream;
-use passage::config::{FixedResourcepack, Localization};
+use passage::config::{FixedResourcepack, FixedTargetDiscovery, Localization};
 use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection, Error};
 use passage::mojang::{AuthResponse, Mojang};
 use rand::rngs::OsRng;
@@ -444,6 +446,11 @@ async fn sends_keep_alive() {
     let shared_secret = b"verysecuresecret";
     let user_name = "Hydrofin".to_owned();
     let user_id = uuid!("09879557-e479-45a9-b434-a56377674627");
+    let targets = vec![Target {
+        identifier: "foobar".to_string(),
+        address: SocketAddr::from_str("192.168.1.1:1234").expect("invalid address"),
+        meta: Default::default(),
+    }];
 
     // create stream
     let auth_secret = b"secret".to_vec();
@@ -452,8 +459,11 @@ async fn sends_keep_alive() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> = Arc::new(FixedTargetSelector::new(
+        strategy,
+        FixedTargetDiscovery { targets },
+    ));
     let resourcepack_supplier: Arc<dyn ResourcepackSupplier> =
         Arc::new(FixedResourcePackSupplier::new(FixedResourcepack {
             packs: vec![Resourcepack::default()],
@@ -474,8 +484,8 @@ async fn sends_keep_alive() {
     let server = tokio::spawn(async move {
         let result = server.listen(client_address).await;
         match result {
-            Err(Error::NoTargetFound) => {}
-            other => panic!("expected no target found, got {:?}", other),
+            Ok(()) => {}
+            other => panic!("expected target found, got {:?}", other),
         }
     });
 
@@ -595,11 +605,11 @@ async fn sends_keep_alive() {
         .await
         .expect("send resource pack response packet failed");
 
-    // disconnect as no target configured
-    let _disconnect_packet: conf_out::DisconnectPacket = client_stream
+    // transfer as target configured
+    let _transfer_packet: conf_out::TransferPacket = client_stream
         .read_packet()
         .await
-        .expect("disconnect packet read failed");
+        .expect("transfer packet read failed");
 
     // wait for the server to finish
     server.await.expect("server run failed");
@@ -610,6 +620,11 @@ async fn no_respond_keep_alive() {
     let shared_secret = b"verysecuresecret";
     let user_name = "Hydrofin".to_owned();
     let user_id = uuid!("09879557-e479-45a9-b434-a56377674627");
+    let targets = vec![Target {
+        identifier: "foobar".to_string(),
+        address: SocketAddr::from_str("192.168.1.1:1234").expect("invalid address"),
+        meta: Default::default(),
+    }];
 
     // create stream
     let auth_secret = b"secret".to_vec();
@@ -618,8 +633,11 @@ async fn no_respond_keep_alive() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> = Arc::new(FixedTargetSelector::new(
+        strategy,
+        FixedTargetDiscovery { targets },
+    ));
     let resourcepack_supplier: Arc<dyn ResourcepackSupplier> =
         Arc::new(FixedResourcePackSupplier::new(FixedResourcepack {
             packs: vec![Resourcepack::default()],

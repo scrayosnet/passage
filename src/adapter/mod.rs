@@ -61,6 +61,28 @@ pub mod proto {
             })
         }
     }
+
+    impl TryFrom<Target> for crate::adapter::target_selection::Target {
+        type Error = Error;
+
+        fn try_from(value: Target) -> Result<Self, Self::Error> {
+            let Some(raw_addr) = value.address.clone() else {
+                return Err(MissingData { field: "address" });
+            };
+            let address =
+                SocketAddr::from_str(&format!("{}:{}", raw_addr.hostname, raw_addr.port))?;
+
+            Ok(Self {
+                identifier: value.identifier,
+                address,
+                meta: value
+                    .meta
+                    .into_iter()
+                    .map(|entry| (entry.key, entry.value))
+                    .collect(),
+            })
+        }
+    }
 }
 
 /// The internal error type for all errors related to the adapters and adapter communication.

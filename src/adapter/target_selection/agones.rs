@@ -230,7 +230,7 @@ impl TargetSelector for AgonesTargetSelector {
         protocol: Protocol,
         username: &str,
         user_id: &Uuid,
-    ) -> Result<Option<SocketAddr>, Error> {
+    ) -> Result<Option<Target>, Error> {
         let inner = self.inner.read().await;
         strategize(
             Arc::clone(&self.strategy),

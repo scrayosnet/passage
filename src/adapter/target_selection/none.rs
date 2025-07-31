@@ -1,6 +1,6 @@
 use crate::adapter::Error;
 use crate::adapter::status::Protocol;
-use crate::adapter::target_selection::{TargetSelector, strategize};
+use crate::adapter::target_selection::{Target, TargetSelector, strategize};
 use crate::adapter::target_strategy::TargetSelectorStrategy;
 use async_trait::async_trait;
 use std::net::SocketAddr;
@@ -26,7 +26,7 @@ impl TargetSelector for NoneTargetSelector {
         protocol: Protocol,
         username: &str,
         user_id: &Uuid,
-    ) -> Result<Option<SocketAddr>, Error> {
+    ) -> Result<Option<Target>, Error> {
         strategize(
             Arc::clone(&self.strategy),
             client_addr,

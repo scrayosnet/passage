@@ -24,7 +24,7 @@ pub trait TargetSelector: Send + Sync {
         protocol: Protocol,
         username: &str,
         user_id: &Uuid,
-    ) -> Result<Option<SocketAddr>, Error>;
+    ) -> Result<Option<Target>, Error>;
 }
 
 async fn strategize(
@@ -35,7 +35,7 @@ async fn strategize(
     username: &str,
     user_id: &Uuid,
     targets: &[Target],
-) -> Result<Option<SocketAddr>, Error> {
+) -> Result<Option<Target>, Error> {
     let selected_target = strategy
         .select(
             client_addr,

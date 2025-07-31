@@ -18,7 +18,7 @@ impl TargetSelectorStrategy for AnyTargetSelectorStrategy {
         _username: &str,
         _user_id: &Uuid,
         targets: &[Target],
-    ) -> Result<Option<SocketAddr>, Error> {
-        Ok(targets.first().map(|target| target.address))
+    ) -> Result<Option<Target>, Error> {
+        Ok(targets.first().cloned())
     }
 }

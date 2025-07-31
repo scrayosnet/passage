@@ -38,7 +38,7 @@ impl TargetSelectorStrategy for GrpcTargetSelectorStrategy {
         username: &str,
         user_id: &Uuid,
         targets: &[Target],
-    ) -> Result<Option<SocketAddr>, Error> {
+    ) -> Result<Option<Target>, Error> {
         let request = tonic::Request::new(SelectRequest {
             client_address: Some(Address {
                 hostname: client_addr.ip().to_string(),
@@ -58,7 +58,7 @@ impl TargetSelectorStrategy for GrpcTargetSelectorStrategy {
         // return the result right away
         Ok(response
             .into_inner()
-            .address
+            .target
             .map(TryInto::try_into)
             .transpose()?)
     }

@@ -31,7 +31,7 @@ impl TargetSelector for FixedTargetSelector {
         protocol: Protocol,
         username: &str,
         user_id: &Uuid,
-    ) -> Result<Option<SocketAddr>, Error> {
+    ) -> Result<Option<Target>, Error> {
         strategize(
             Arc::clone(&self.strategy),
             client_addr,

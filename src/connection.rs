@@ -562,6 +562,37 @@ where
             packet = login_in::LoginAcknowledgedPacket => packet,
         };
 
+        // transfer
+        debug!("getting target from supplier");
+        let target = self
+            .target_selector
+            .select(
+                &client_address,
+                (&handshake.server_address, handshake.server_port),
+                handshake.protocol_version as Protocol,
+                &login_start.user_name,
+                &login_start.user_id,
+            )
+            .await?;
+
+        TRANSFER_TARGETS
+            .get_or_create(&TransferTargetsLabels {
+                target: target.clone().map(|target| target.address.to_string()),
+            })
+            .inc();
+
+        // disconnect if not target found
+        let Some(target) = target else {
+            debug!("no transfer target found");
+            let reason =
+                self.localization
+                    .localize(&self.client_locale, "disconnect_no_target", &[]);
+            debug!("sending disconnect packet");
+            self.send_packet(conf_out::DisconnectPacket { reason })
+                .await?;
+            return Err(Error::NoTargetFound);
+        };
+
         // write auth cookie
         'auth_cookie: {
             if should_authenticate {
@@ -580,7 +611,7 @@ where
                         .as_secs(),
                     user_name: login_start.user_name.clone(),
                     user_id: login_start.user_id,
-                    target: None,
+                    target: Some(target.identifier.clone()),
                 };
 
                 let auth_payload = serde_json::to_vec(&cookie)?;
@@ -717,41 +748,10 @@ where
             }
         }
 
-        // transfer
-        debug!("getting target from supplier");
-        let target = self
-            .target_selector
-            .select(
-                &client_address,
-                (&handshake.server_address, handshake.server_port),
-                handshake.protocol_version as Protocol,
-                &login_start.user_name,
-                &login_start.user_id,
-            )
-            .await?;
-
-        TRANSFER_TARGETS
-            .get_or_create(&TransferTargetsLabels {
-                target: target.map(|target| target.to_string()),
-            })
-            .inc();
-
-        // disconnect if not target found
-        let Some(target) = target else {
-            debug!("no transfer target found");
-            let reason =
-                self.localization
-                    .localize(&self.client_locale, "disconnect_no_target", &[]);
-            debug!("sending disconnect packet");
-            self.send_packet(conf_out::DisconnectPacket { reason })
-                .await?;
-            return Err(Error::NoTargetFound);
-        };
-
         // create a new transfer packet and send it
         let transfer = conf_out::TransferPacket {
-            host: target.ip().to_string(),
-            port: target.port(),
+            host: target.address.ip().to_string(),
+            port: target.address.port(),
         };
         debug!("sending transfer packet");
         self.send_packet(transfer).await?;

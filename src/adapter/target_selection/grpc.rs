@@ -42,7 +42,7 @@ impl TargetSelector for GrpcTargetSelector {
         protocol: Protocol,
         username: &str,
         user_id: &Uuid,
-    ) -> Result<Option<SocketAddr>, Error> {
+    ) -> Result<Option<Target>, Error> {
         let request = tonic::Request::new(TargetRequest {
             client_address: Some(Address {
                 hostname: client_addr.ip().to_string(),

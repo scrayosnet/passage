@@ -19,7 +19,7 @@ impl TargetSelectorStrategy for NoneTargetSelectorStrategy {
         _username: &str,
         _user_id: &Uuid,
         _targets: &[Target],
-    ) -> Result<Option<SocketAddr>, Error> {
+    ) -> Result<Option<Target>, Error> {
         Ok(None)
     }
 }

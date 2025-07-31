@@ -22,7 +22,7 @@ pub trait TargetSelectorStrategy: Send + Sync {
         username: &str,
         user_id: &Uuid,
         targets: &[Target],
-    ) -> Result<Option<SocketAddr>, Error>;
+    ) -> Result<Option<Target>, Error>;
 }
 
 pub trait TargetFilterExt {

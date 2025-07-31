@@ -18,5 +18,5 @@ message SelectRequest {
 }
 
 message SelectResponse {
-    optional Address address = 1;
+    optional Target target = 1;
 }

@@ -41,7 +41,7 @@ impl TargetSelectorStrategy for PlayerFillTargetSelectorStrategy {
         _username: &str,
         _user_id: &Uuid,
         targets: &[Target],
-    ) -> Result<Option<SocketAddr>, Error> {
+    ) -> Result<Option<Target>, Error> {
         let target = targets
             .iter()
             .map(|target| {
@@ -61,7 +61,7 @@ impl TargetSelectorStrategy for PlayerFillTargetSelectorStrategy {
                 filter.matches(target)
             })
             .max_by_key(|(_, players)| *players)
-            .map(|(target, _)| target.address);
+            .map(|(target, _)| target.clone());
         Ok(target)
     }
 }
