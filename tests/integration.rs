@@ -33,7 +33,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use uuid::uuid;
+use uuid::{Uuid, uuid};
 
 #[derive(Default)]
 struct MojangMock {
@@ -254,6 +254,7 @@ async fn simulate_transfer_no_configuration() {
         user_name: user_name.clone(),
         user_id,
         target: None,
+        session_id: Uuid::new_v4(),
     })
     .expect("auth cookie serialization failed");
 
@@ -524,6 +525,7 @@ async fn sends_keep_alive() {
         user_name: user_name.clone(),
         user_id,
         target: None,
+        session_id: Uuid::new_v4(),
     })
     .expect("auth cookie serialization failed");
 
@@ -697,6 +699,7 @@ async fn no_respond_keep_alive() {
         user_name: user_name.clone(),
         user_id,
         target: None,
+        session_id: Uuid::new_v4(),
     })
     .expect("auth cookie serialization failed");
 
