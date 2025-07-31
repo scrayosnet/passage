@@ -468,13 +468,13 @@ where
                 }
 
                 let cookie = serde_json::from_slice::<AuthCookie>(message)?;
-                let expires_at = SystemTime::now()
+                let expires_at = cookie.timestamp + AUTH_COOKIE_EXPIRY_SECS;
+                let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("time error")
-                    .as_secs()
-                    + AUTH_COOKIE_EXPIRY_SECS;
+                    .as_secs();
 
-                if cookie.client_addr.ip() != client_address.ip() || cookie.timestamp > expires_at {
+                if cookie.client_addr.ip() != client_address.ip() || expires_at < now {
                     debug!("invalid auth cookie payload received, skipping auth cookie");
                     break 'transfer;
                 }
