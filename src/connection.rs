@@ -20,10 +20,10 @@ use uuid::Uuid;
 
 use crate::config::Localization;
 use crate::metrics::{
-    ClientLocaleLabels, ClientViewDistanceLabels, ConnectionDurationLabels, Guard,
-    MojangDurationLabels, ReceivedPackets, ResourcePackDurationLabels, SentPackets,
-    TransferTargetsLabels, CLIENT_LOCALES, CLIENT_VIEW_DISTANCE, CONNECTION_DURATION,
-    MOJANG_DURATION, RECEIVED_PACKETS, RESOURCEPACK_DURATION, SENT_PACKETS, TRANSFER_TARGETS,
+    CLIENT_LOCALES, CLIENT_VIEW_DISTANCE, CONNECTION_DURATION, ClientLocaleLabels,
+    ClientViewDistanceLabels, ConnectionDurationLabels, Guard, MOJANG_DURATION,
+    MojangDurationLabels, RECEIVED_PACKETS, RESOURCEPACK_DURATION, ReceivedPackets,
+    ResourcePackDurationLabels, SENT_PACKETS, SentPackets, TRANSFER_TARGETS, TransferTargetsLabels,
 };
 use crate::mojang::Mojang;
 use packets::configuration::clientbound as conf_out;
