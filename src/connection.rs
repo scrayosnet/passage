@@ -62,9 +62,14 @@ macro_rules! match_packet {
 /// The max packet length in bytes. Larger packets are rejected.
 const MAX_PACKET_LENGTH: VarInt = 10_000;
 
+/// The auth cookie key.
 pub const AUTH_COOKIE_KEY: &str = "passage:authentication";
 
-pub const AUTH_COOKIE_EXPIRY_SECS: u64 = 6 * 60 * 60; // 6 hours
+/// The session cookie key.
+pub const SESSION_COOKIE_KEY: &str = "passage:session";
+
+/// The default expiry of the auth cookie (6 hours).
+pub const AUTH_COOKIE_EXPIRY_SECS: u64 = 6 * 60 * 60;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -431,6 +436,19 @@ where
             "handling login"
         );
 
+        // check session
+        debug!("sending session cookie request packet");
+        self.send_packet(login_out::CookieRequestPacket {
+            key: SESSION_COOKIE_KEY.to_string(),
+        })
+        .await?;
+
+        debug!("awaiting session cookie response packet");
+        let session_cookie = match_packet! { self,
+            packet = login_in::CookieResponsePacket => packet,
+        };
+        let session_id = session_cookie.payload.map(|session_id| session_id);
+
         // in case of transfer, use the auth cookie
         let mut should_authenticate = true;
         'transfer: {
@@ -748,6 +766,16 @@ where
                 })
                 .await?;
             }
+        }
+
+        // set session id if not exist
+        if session_id.is_none() {
+            debug!("sending session cookie packet");
+            self.send_packet(conf_out::StoreCookiePacket {
+                key: SESSION_COOKIE_KEY.to_string(),
+                payload: Uuid::new_v4().into_bytes().to_vec(),
+            })
+            .await?;
         }
 
         // create a new transfer packet and send it

@@ -22,7 +22,7 @@ use passage::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use passage::authentication;
 use passage::cipher_stream::CipherStream;
 use passage::config::{FixedResourcepack, Localization};
-use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection, Error};
+use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection, Error, SESSION_COOKIE_KEY};
 use passage::mojang::{AuthResponse, Mojang};
 use rand::rngs::OsRng;
 use rsa::pkcs8::DecodePublicKey;
@@ -239,6 +239,20 @@ async fn simulate_transfer_no_configuration() {
     let cookie_request_packet: login_out::CookieRequestPacket = client_stream
         .read_packet()
         .await
+        .expect("session cookie request packet read failed");
+    assert_eq!(&cookie_request_packet.key, SESSION_COOKIE_KEY);
+
+    client_stream
+        .write_packet(login_in::CookieResponsePacket {
+            key: cookie_request_packet.key,
+            payload: Some(vec![]),
+        })
+        .await
+        .expect("send session cookie response failed");
+
+    let cookie_request_packet: login_out::CookieRequestPacket = client_stream
+        .read_packet()
+        .await
         .expect("cookie request packet read failed");
     assert_eq!(&cookie_request_packet.key, AUTH_COOKIE_KEY);
 
@@ -381,6 +395,20 @@ async fn simulate_login_no_configuration() {
         .await
         .expect("send login start failed");
 
+    let cookie_request_packet: login_out::CookieRequestPacket = client_stream
+        .read_packet()
+        .await
+        .expect("session cookie request packet read failed");
+    assert_eq!(&cookie_request_packet.key, SESSION_COOKIE_KEY);
+
+    client_stream
+        .write_packet(login_in::CookieResponsePacket {
+            key: cookie_request_packet.key,
+            payload: Some(vec![]),
+        })
+        .await
+        .expect("send session cookie response failed");
+
     let encryption_request_packet: login_out::EncryptionRequestPacket = client_stream
         .read_packet()
         .await
@@ -498,6 +526,20 @@ async fn sends_keep_alive() {
         })
         .await
         .expect("send login start failed");
+
+    let cookie_request_packet: login_out::CookieRequestPacket = client_stream
+        .read_packet()
+        .await
+        .expect("session cookie request packet read failed");
+    assert_eq!(&cookie_request_packet.key, SESSION_COOKIE_KEY);
+
+    client_stream
+        .write_packet(login_in::CookieResponsePacket {
+            key: cookie_request_packet.key,
+            payload: Some(vec![]),
+        })
+        .await
+        .expect("send session cookie response failed");
 
     let cookie_request_packet: login_out::CookieRequestPacket = client_stream
         .read_packet()
@@ -664,6 +706,20 @@ async fn no_respond_keep_alive() {
         })
         .await
         .expect("send login start failed");
+
+    let cookie_request_packet: login_out::CookieRequestPacket = client_stream
+        .read_packet()
+        .await
+        .expect("session cookie request packet read failed");
+    assert_eq!(&cookie_request_packet.key, SESSION_COOKIE_KEY);
+
+    client_stream
+        .write_packet(login_in::CookieResponsePacket {
+            key: cookie_request_packet.key,
+            payload: Some(vec![]),
+        })
+        .await
+        .expect("send session cookie response failed");
 
     let cookie_request_packet: login_out::CookieRequestPacket = client_stream
         .read_packet()

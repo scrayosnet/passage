@@ -41,6 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let subscriber = subscriber.with(sentry_tracing::layer());
 
     subscriber.init();
+    info!(version = env!("CARGO_PKG_VERSION"), "starting passage");
 
     #[cfg(feature = "sentry")]
     if sentry_instance.is_enabled() {
