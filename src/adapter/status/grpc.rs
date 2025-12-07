@@ -1,9 +1,9 @@
-use crate::adapter::Error;
 use crate::adapter::proto::status_client::StatusClient;
 use crate::adapter::proto::{Address, Players, ProtocolVersion, StatusData, StatusRequest};
 use crate::adapter::status::{
     Protocol, ServerPlayer, ServerPlayers, ServerStatus, ServerVersion, StatusSupplier,
 };
+use crate::adapter::{Error, MissingFieldError};
 use crate::config::GrpcStatus as GrpcConfig;
 use async_trait::async_trait;
 use serde_json::value::RawValue;
@@ -19,7 +19,7 @@ impl GrpcStatusSupplier {
         Ok(Self {
             client: StatusClient::connect(config.address).await.map_err(|err| {
                 Error::FailedInitialization {
-                    adapter_type: "status",
+                    adapter_type: "grpc_status",
                     cause: err.into(),
                 }
             })?,
@@ -46,7 +46,15 @@ impl StatusSupplier for GrpcStatusSupplier {
             }),
             protocol: protocol as u64,
         });
-        let response = self.client.clone().get_status(request).await?;
+        let response = self
+            .client
+            .clone()
+            .get_status(request)
+            .await
+            .map_err(|err| Error::FailedFetch {
+                adapter_type: "grpc_status",
+                cause: err.into(),
+            })?;
 
         Ok(response
             .into_inner()
@@ -60,12 +68,30 @@ impl TryFrom<StatusData> for ServerStatus {
     type Error = Error;
 
     fn try_from(value: StatusData) -> Result<Self, Self::Error> {
-        let description = value.description.map(RawValue::from_string).transpose()?;
-        let favicon = value.favicon.map(String::from_utf8).transpose()?;
+        let description = value
+            .description
+            .map(RawValue::from_string)
+            .transpose()
+            .map_err(|err| Error::FailedParse {
+                adapter_type: "grpc_status",
+                cause: err.into(),
+            })?;
+
+        let favicon = value
+            .favicon
+            .map(String::from_utf8)
+            .transpose()
+            .map_err(|err| Error::FailedParse {
+                adapter_type: "grpc_status",
+                cause: err.into(),
+            })?;
 
         Ok(Self {
-            version: value.version.map(Into::into).ok_or(Error::MissingData {
-                field: "status.version",
+            version: value.version.map(Into::into).ok_or(Error::FailedParse {
+                adapter_type: "grpc_status",
+                cause: Box::new(MissingFieldError {
+                    field: "status.version",
+                }),
             })?,
             players: value.players.map(Into::into),
             description,

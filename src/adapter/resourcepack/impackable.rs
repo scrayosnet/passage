@@ -54,13 +54,29 @@ impl ImpackableResourcepackSupplier {
         username: &str,
         password: &str,
     ) -> Result<Option<Option<ImpackableResourcepack>>, Error> {
-        let response = HTTP_CLIENT
+        let mut packs: Vec<ImpackableResourcepack> = HTTP_CLIENT
+            // send fetch request
             .get(url)
             .basic_auth(username, Some(password))
             .send()
-            .await?
-            .error_for_status()?;
-        let mut packs: Vec<ImpackableResourcepack> = response.json().await?;
+            .await
+            .map_err(|err| Error::FailedFetch {
+                adapter_type: "impackable_resourcepack",
+                cause: err.into(),
+            })?
+            // handle status codes
+            .error_for_status()
+            .map_err(|err| Error::FailedFetch {
+                adapter_type: "impackable_resourcepack",
+                cause: err.into(),
+            })?
+            // parse response
+            .json()
+            .await
+            .map_err(|err| Error::FailedParse {
+                adapter_type: "impackable_resourcepack",
+                cause: err.into(),
+            })?;
         Ok(Some(packs.pop()))
     }
 }
@@ -78,7 +94,10 @@ impl ResourcepackSupplier for ImpackableResourcepackSupplier {
     ) -> Result<Vec<Resourcepack>, Error> {
         // get fetch result
         let Some(pack) = self.inner.read().await.clone() else {
-            return Err(Error::AdapterUnavailable);
+            return Err(Error::AdapterUnavailable {
+                adapter_type: "impackable_resourcepack",
+                reason: "resource packs have not been initialized yet",
+            });
         };
 
         // get available pack if any

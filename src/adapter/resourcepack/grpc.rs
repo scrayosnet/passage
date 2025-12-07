@@ -20,7 +20,7 @@ impl GrpcResourcepackSupplier {
             client: ResourcepackClient::connect(config.address)
                 .await
                 .map_err(|err| Error::FailedInitialization {
-                    adapter_type: "resourcepack",
+                    adapter_type: "grpc_resourcepack",
                     cause: err.into(),
                 })?,
         })
@@ -51,7 +51,15 @@ impl ResourcepackSupplier for GrpcResourcepackSupplier {
             username: username.to_string(),
             user_id: user_id.to_string(),
         });
-        let response = self.client.clone().get_packs(request).await?;
+        let response = self
+            .client
+            .clone()
+            .get_packs(request)
+            .await
+            .map_err(|err| Error::FailedFetch {
+                adapter_type: "grpc_resourcepack",
+                cause: err.into(),
+            })?;
 
         Ok(response
             .into_inner()
@@ -66,8 +74,12 @@ impl TryFrom<Pack> for Resourcepack {
     type Error = Error;
 
     fn try_from(value: Pack) -> Result<Self, Self::Error> {
+        let parsed_uuid = Uuid::from_str(&value.uuid).map_err(|err| Error::FailedParse {
+            adapter_type: "grpc_resourcepack",
+            cause: err.into(),
+        })?;
         Ok(Resourcepack {
-            uuid: Uuid::from_str(&value.uuid)?,
+            uuid: parsed_uuid,
             url: value.url,
             hash: value.hash,
             forced: value.forced,

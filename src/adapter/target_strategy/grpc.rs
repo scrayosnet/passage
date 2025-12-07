@@ -53,7 +53,15 @@ impl TargetSelectorStrategy for GrpcTargetSelectorStrategy {
             user_id: user_id.to_string(),
             targets: targets.iter().map(Into::into).collect(),
         });
-        let response = self.client.clone().select_target(request).await?;
+        let response = self
+            .client
+            .clone()
+            .select_target(request)
+            .await
+            .map_err(|err| Error::FailedFetch {
+                adapter_type: "grpc_target_strategy",
+                cause: err.into(),
+            })?;
 
         // return the result right away
         Ok(response
@@ -69,8 +77,14 @@ impl TryFrom<Address> for SocketAddr {
 
     fn try_from(value: Address) -> Result<Self, Self::Error> {
         Ok(Self::new(
-            IpAddr::from_str(&value.hostname)?,
-            u16::try_from(value.port)?,
+            IpAddr::from_str(&value.hostname).map_err(|err| Error::FailedParse {
+                adapter_type: "grpc_target_strategy",
+                cause: err.into(),
+            })?,
+            u16::try_from(value.port).map_err(|err| Error::FailedParse {
+                adapter_type: "grpc_target_strategy",
+                cause: err.into(),
+            })?,
         ))
     }
 }

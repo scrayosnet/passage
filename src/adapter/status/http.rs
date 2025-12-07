@@ -35,8 +35,29 @@ impl HttpStatusSupplier {
     }
 
     async fn fetch(url: &str) -> Result<Option<ServerStatus>, Error> {
-        let response = HTTP_CLIENT.get(url).send().await?.error_for_status()?;
-        Ok(response.json().await?)
+        let status = HTTP_CLIENT
+            // send fetch request
+            .get(url)
+            .send()
+            .await
+            .map_err(|err| Error::FailedFetch {
+                adapter_type: "http_status",
+                cause: err.into(),
+            })?
+            // handle status codes
+            .error_for_status()
+            .map_err(|err| Error::FailedFetch {
+                adapter_type: "http_status",
+                cause: err.into(),
+            })?
+            // parse response
+            .json()
+            .await
+            .map_err(|err| Error::FailedParse {
+                adapter_type: "http_status",
+                cause: err.into(),
+            })?;
+        Ok(status)
     }
 }
 

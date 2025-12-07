@@ -26,7 +26,7 @@ impl GrpcTargetSelector {
             client: DiscoveryClient::connect(config.address)
                 .await
                 .map_err(|err| Error::FailedInitialization {
-                    adapter_type: "target_selection",
+                    adapter_type: "grpc_target_selection",
                     cause: err.into(),
                 })?,
         })
@@ -56,7 +56,15 @@ impl TargetSelector for GrpcTargetSelector {
             username: username.to_string(),
             user_id: user_id.to_string(),
         });
-        let response = self.client.clone().get_targets(request).await?;
+        let response = self
+            .client
+            .clone()
+            .get_targets(request)
+            .await
+            .map_err(|err| Error::FailedFetch {
+                adapter_type: "grpc_target_selection",
+                cause: err.into(),
+            })?;
 
         let targets: Vec<Target> = response
             .into_inner()
