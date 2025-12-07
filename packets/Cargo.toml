@@ -14,7 +14,7 @@ homepage = "https://passage.scrayos.net"
 keywords = ["minecraft"]
 categories = ["emulators", "network-programming"]
 edition = "2024"
-rust-version = "1.85.0"
+rust-version = "1.86.0"
 
 [dependencies]
 tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal"] }
