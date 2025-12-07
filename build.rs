@@ -8,7 +8,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &[
                 "proto/adapter/adapter.proto",
                 "proto/adapter/discovery.proto",
-                "proto/adapter/resourcepack.proto",
                 "proto/adapter/status.proto",
                 "proto/adapter/strategy.proto",
             ],

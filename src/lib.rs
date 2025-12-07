@@ -10,11 +10,6 @@ mod metrics;
 pub mod mojang;
 pub mod rate_limiter;
 
-use crate::adapter::resourcepack::ResourcepackSupplier;
-#[cfg(feature = "grpc")]
-use crate::adapter::resourcepack::grpc::GrpcResourcepackSupplier;
-use crate::adapter::resourcepack::impackable::ImpackableResourcepackSupplier;
-use crate::adapter::resourcepack::none::NoneResourcePackSupplier;
 use crate::adapter::status::StatusSupplier;
 #[cfg(feature = "grpc")]
 use crate::adapter::status::grpc::GrpcStatusSupplier;
@@ -39,7 +34,6 @@ use crate::connection::{Connection, Error};
 use crate::mojang::Api;
 use crate::mojang::Mojang;
 use crate::rate_limiter::RateLimiter;
-use adapter::resourcepack::fixed::FixedResourcePackSupplier;
 use adapter::status::fixed::FixedStatusSupplier;
 use std::sync::Arc;
 use std::time::Duration;
@@ -162,38 +156,6 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         _ => return Err("unknown target selector discovery configured".into()),
     };
 
-    // initialize resourcepack supplier
-    debug!(
-        adaper = config.resourcepack.adapter.as_str(),
-        "initializing resource pack supplier"
-    );
-    let resourcepack_supplier = match config.resourcepack.adapter.as_str() {
-        "none" => Arc::new(NoneResourcePackSupplier) as Arc<dyn ResourcepackSupplier>,
-        #[cfg(feature = "grpc")]
-        "grpc" => {
-            let Some(grpc) = config.resourcepack.grpc.clone() else {
-                return Err("grpc resourcepack adapter requires a configuration".into());
-            };
-            Arc::new(GrpcResourcepackSupplier::new(grpc).await?) as Arc<dyn ResourcepackSupplier>
-        }
-        "impackable" => {
-            let Some(impackable) = config.resourcepack.impackable.clone() else {
-                return Err("impackable resourcepack adapter requires a configuration".into());
-            };
-            Arc::new(ImpackableResourcepackSupplier::new(
-                impackable,
-                Arc::clone(&localization),
-            )?) as Arc<dyn ResourcepackSupplier>
-        }
-        "fixed" => {
-            let Some(fixed) = config.resourcepack.fixed.clone() else {
-                return Err("fixed resourcepack adapter requires a configuration".into());
-            };
-            Arc::new(FixedResourcePackSupplier::new(fixed)) as Arc<dyn ResourcepackSupplier>
-        }
-        _ => return Err("unknown resourcepack supplier configured".into()),
-    };
-
     // initialize mojang client
     debug!("initializing mojang client");
     let mojang = Arc::new(Api::default()) as Arc<dyn Mojang>;
@@ -245,7 +207,6 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         // clone values to be moved
         let status_supplier = Arc::clone(&status_supplier);
         let target_selector = Arc::clone(&target_selector);
-        let resourcepack_supplier = Arc::clone(&resourcepack_supplier);
         let mojang = Arc::clone(&mojang);
         let localization = Arc::clone(&localization);
         let auth_secret = auth_secret.clone();
@@ -267,7 +228,6 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
                     &mut stream,
                     Arc::clone(&status_supplier),
                     Arc::clone(&target_selector),
-                    Arc::clone(&resourcepack_supplier),
                     Arc::clone(&mojang),
                     Arc::clone(&localization),
                     auth_secret,

@@ -62,5 +62,3 @@ Test
 
 ### Target Strategy
 
-### Resourcepack
-

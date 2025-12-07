@@ -1,4 +1,3 @@
-use crate::adapter::resourcepack::ResourcepackSupplier;
 use crate::adapter::status::{Protocol, StatusSupplier};
 use crate::adapter::target_selection::TargetSelector;
 use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
@@ -12,10 +11,9 @@ use packets::login::clientbound as login_out;
 use packets::login::serverbound as login_in;
 use packets::status::clientbound as status_out;
 use packets::status::serverbound as status_in;
-use packets::{AsyncReadPacket, AsyncWritePacket, ReadPacket, ResourcePackResult, State, VarInt};
+use packets::{AsyncReadPacket, AsyncWritePacket, ReadPacket, State, VarInt};
 use packets::{Packet, WritePacket};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::{Cursor, ErrorKind};
 use std::net::SocketAddr;
@@ -84,10 +82,6 @@ pub enum Error {
     /// Keep-alive was not received.
     #[error("Missed keep-alive")]
     MissedKeepAlive,
-
-    /// Some forced resource pack was not loaded.
-    #[error("Some forced resourcepack was not loaded")]
-    FailedResourcepack,
 
     /// No target was found for the user.
     #[error("No target was found for the user")]
@@ -171,7 +165,6 @@ impl Error {
     pub fn as_label(&self) -> &'static str {
         match self {
             Error::MissedKeepAlive => "missed-keep-alive",
-            Error::FailedResourcepack => "failed-resourcepack",
             Error::NoTargetFound => "no-target-found",
             Error::ConnectionClosed(_) => "connection-closed",
             Error::IllegalPacketLength
@@ -222,8 +215,6 @@ pub struct Connection<S> {
     /// ...
     pub target_selector: Arc<dyn TargetSelector>,
     /// ...
-    pub resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
-    /// ...
     pub mojang: Arc<dyn Mojang>,
     /// Auth cookie secret.
     pub auth_secret: Option<Vec<u8>>,
@@ -241,7 +232,6 @@ where
         stream: S,
         status_supplier: Arc<dyn StatusSupplier>,
         target_selector: Arc<dyn TargetSelector>,
-        resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
         mojang: Arc<dyn Mojang>,
         localization: Arc<Localization>,
         auth_secret: Option<Vec<u8>>,
@@ -260,7 +250,6 @@ where
             },
             status_supplier,
             target_selector,
-            resourcepack_supplier,
             mojang,
             auth_secret,
             client_locale: localization.default_locale.clone(),
@@ -570,6 +559,8 @@ where
                 packet = conf_in::ClientInformationPacket => break packet,
                 // ignore unsupported packets but don't throw an error
                 _ = conf_in::PluginMessagePacket => continue,
+                _ = conf_in::ResourcePackResponsePacket => continue,
+                _ = conf_in::CookieResponsePacket => continue,
             }
         };
 
@@ -579,98 +570,8 @@ where
             u64::try_from(client_info.view_distance).unwrap_or(0u64),
         );
 
-        // write resource packs
-        debug!("getting resource packs from supplier");
-        let packs = self
-            .resourcepack_supplier
-            .get_resourcepacks(
-                &client_address,
-                (&handshake.server_address, handshake.server_port),
-                handshake.protocol_version as Protocol,
-                &login_start.user_name,
-                &login_start.user_id,
-                &client_info.locale,
-            )
-            .await?;
-        // TODO no need to store instant as we dont track per resource pack?
-        let mut pack_ids: HashMap<Uuid, (bool, Instant)> = HashMap::with_capacity(packs.len());
-
-        debug!(len = packs.len(), "sending resource pack packet(s)");
-        for pack in packs {
-            debug!(
-                hash = pack.hash,
-                uuid = %pack.uuid,
-                "sending resource pack packet"
-            );
-            let packet = conf_out::AddResourcePackPacket {
-                uuid: pack.uuid,
-                url: pack.url,
-                hash: pack.hash,
-                forced: pack.forced,
-                prompt_message: pack.prompt_message,
-            };
-            self.send_packet(packet).await?;
-            pack_ids.insert(pack.uuid, (pack.forced, Instant::now()));
-        }
-
-        // wait for resource packs to be accepted
-        debug!("awaiting resource pack response packet(s)");
-        while !pack_ids.is_empty() {
-            let packet = match_packet! { self, keep_alive,
-                packet = conf_in::ResourcePackResponsePacket => packet,
-                // handle keep alive packets
-                packet = conf_in::KeepAlivePacket => {
-                    if !self.keep_alive.replace(packet.id, 0) {
-                        debug!(id = packet.id, "keep alive packet id unknown");
-                    }
-                    continue;
-                },
-                // ignore unsupported packets but don't throw an error
-                _ = conf_in::ClientInformationPacket => continue,
-                _ = conf_in::PluginMessagePacket => continue,
-            };
-
-            // check the state for any final state in the resource pack loading process
-            debug!(
-                result = ?packet.result,
-                uuid = %packet.uuid,
-                "received resource pack response packet"
-            );
-            let success = match packet.result {
-                ResourcePackResult::Success => true,
-                ResourcePackResult::Declined
-                | ResourcePackResult::DownloadFailed
-                | ResourcePackResult::InvalidUrl
-                | ResourcePackResult::ReloadFailed
-                | ResourcePackResult::Discorded => false,
-                // pending state, keep waiting
-                _ => continue,
-            };
-
-            // pop pack from the list (ignoring unknown pack ids)
-            let Some((forced, time)) = pack_ids.remove(&packet.uuid) else {
-                continue;
-            };
-            let seconds = time.elapsed().as_secs();
-            debug!(seconds = seconds, "successfully loaded resource pack");
-
-            // handle pack forced
-            if forced && !success {
-                debug!("client failed to load forced resource pack");
-                let reason = self.localization.localize(
-                    &self.client_locale,
-                    "disconnect_failed_resourcepack",
-                    &[],
-                );
-
-                debug!("sending disconnect packet");
-                self.send_packet(conf_out::DisconnectPacket { reason })
-                    .await?;
-                return Err(Error::FailedResourcepack);
-            }
-        }
-
-        // transfer
+        // select target and transfer
+        // expect this to be fast enough that no keep alive packets have to be handled
         debug!("getting target from supplier");
         let target = self
             .target_selector

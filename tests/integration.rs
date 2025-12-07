@@ -8,11 +8,8 @@ use packets::status::clientbound as status_out;
 use packets::status::serverbound as status_in;
 use packets::{
     AsyncReadPacket, AsyncWritePacket, ChatMode, DisplayedSkinParts, MainHand, ParticleStatus,
-    ResourcePackResult, State,
+    State,
 };
-use passage::adapter::resourcepack::fixed::FixedResourcePackSupplier;
-use passage::adapter::resourcepack::none::NoneResourcePackSupplier;
-use passage::adapter::resourcepack::{Resourcepack, ResourcepackSupplier};
 use passage::adapter::status::StatusSupplier;
 use passage::adapter::status::none::NoneStatusSupplier;
 use passage::adapter::target_selection::TargetSelector;
@@ -21,7 +18,7 @@ use passage::adapter::target_strategy::TargetSelectorStrategy;
 use passage::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use passage::authentication;
 use passage::cipher_stream::CipherStream;
-use passage::config::{FixedResourcepack, Localization};
+use passage::config::Localization;
 use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection, Error, SESSION_COOKIE_KEY};
 use passage::mojang::{AuthResponse, Mojang};
 use rand::TryRngCore;
@@ -73,14 +70,12 @@ async fn simulate_handshake() {
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
     let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
-    let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(NoneResourcePackSupplier);
 
     // build connection
     let mut server = Connection::new(
         server_stream,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
-        Arc::clone(&resourcepack_supplier),
         Arc::new(MojangMock::default()),
         Arc::new(Localization::default()),
         None,
@@ -123,14 +118,12 @@ async fn simulate_status() {
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
     let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
-    let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(NoneResourcePackSupplier);
 
     // build connection
     let mut server = Connection::new(
         server_stream,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
-        Arc::clone(&resourcepack_supplier),
         Arc::new(MojangMock::default()),
         Arc::new(Localization::default()),
         None,
@@ -196,14 +189,12 @@ async fn simulate_transfer_no_configuration() {
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
     let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
-    let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(NoneResourcePackSupplier);
 
     // build connection
     let mut server = Connection::new(
         server_stream,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
-        Arc::clone(&resourcepack_supplier),
         Arc::new(MojangMock::default()),
         Arc::new(Localization::default()),
         Some(auth_secret.clone()),
@@ -351,14 +342,12 @@ async fn simulate_login_no_configuration() {
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
     let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
-    let resourcepack_supplier: Arc<dyn ResourcepackSupplier> = Arc::new(NoneResourcePackSupplier);
 
     // build connection
     let mut server = Connection::new(
         server_stream,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
-        Arc::clone(&resourcepack_supplier),
         Arc::new(MojangMock::new(AuthResponse {
             id: user_id,
             name: user_name.clone(),
@@ -483,17 +472,12 @@ async fn sends_keep_alive() {
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
     let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
-    let resourcepack_supplier: Arc<dyn ResourcepackSupplier> =
-        Arc::new(FixedResourcePackSupplier::new(FixedResourcepack {
-            packs: vec![Resourcepack::default()],
-        }));
 
     // build connection
     let mut server = Connection::new(
         server_stream,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
-        Arc::clone(&resourcepack_supplier),
         Arc::new(MojangMock::default()),
         Arc::new(Localization::default()),
         Some(auth_secret.clone()),
@@ -602,6 +586,13 @@ async fn sends_keep_alive() {
         .await
         .expect("send login acknowledged packet failed");
 
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(10)).await;
+    let _: conf_out::KeepAlivePacket = client_stream
+        .read_packet()
+        .await
+        .expect("keep-alive packet read failed");
+
     client_stream
         .write_packet(conf_in::ClientInformationPacket {
             locale: "de_DE".to_string(),
@@ -616,27 +607,6 @@ async fn sends_keep_alive() {
         })
         .await
         .expect("send client information packet failed");
-
-    // accept resource pack but wait
-    let add_pack: conf_out::AddResourcePackPacket = client_stream
-        .read_packet()
-        .await
-        .expect("add resource pack packet read failed");
-
-    tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(10)).await;
-    let _: conf_out::KeepAlivePacket = client_stream
-        .read_packet()
-        .await
-        .expect("keep-alive packet read failed");
-
-    client_stream
-        .write_packet(conf_in::ResourcePackResponsePacket {
-            uuid: add_pack.uuid,
-            result: ResourcePackResult::Success,
-        })
-        .await
-        .expect("send resource pack response packet failed");
 
     // disconnect as no target configured
     let _disconnect_packet: conf_out::DisconnectPacket = client_stream
@@ -663,17 +633,12 @@ async fn no_respond_keep_alive() {
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
     let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
-    let resourcepack_supplier: Arc<dyn ResourcepackSupplier> =
-        Arc::new(FixedResourcePackSupplier::new(FixedResourcepack {
-            packs: vec![Resourcepack::default()],
-        }));
 
     // build connection
     let mut server = Connection::new(
         server_stream,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
-        Arc::clone(&resourcepack_supplier),
         Arc::new(MojangMock::default()),
         Arc::new(Localization::default()),
         Some(auth_secret.clone()),
@@ -780,27 +745,6 @@ async fn no_respond_keep_alive() {
         .write_packet(login_in::LoginAcknowledgedPacket)
         .await
         .expect("send login acknowledged packet failed");
-
-    client_stream
-        .write_packet(conf_in::ClientInformationPacket {
-            locale: "de_DE".to_string(),
-            view_distance: 10,
-            chat_mode: ChatMode::Enabled,
-            chat_colors: false,
-            displayed_skin_parts: DisplayedSkinParts(0),
-            main_hand: MainHand::Left,
-            enable_text_filtering: false,
-            allow_server_listing: false,
-            particle_status: ParticleStatus::All,
-        })
-        .await
-        .expect("send client information packet failed");
-
-    // accept resource pack but wait
-    let _: conf_out::AddResourcePackPacket = client_stream
-        .read_packet()
-        .await
-        .expect("add resource pack packet read failed");
 
     // advance multiple times to ensure keep-alive is sent multiple times
     tokio::time::pause();
