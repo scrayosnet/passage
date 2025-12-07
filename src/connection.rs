@@ -287,6 +287,7 @@ where
                         return Err(Error::MissedKeepAlive);
                     }
                     debug!("sending next keep-alive packet");
+                    println!("sending next keep-alive packet");
                     let packet = conf_out::KeepAlivePacket { id };
                     self.send_packet(packet).await?;
                 },
@@ -570,19 +571,41 @@ where
             u64::try_from(client_info.view_distance).unwrap_or(0u64),
         );
 
-        // select target and transfer
-        // expect this to be fast enough that no keep alive packets have to be handled
+        // create a future that checks keep alive packets
+        let target_selector = self.target_selector.clone();
+        let sender = async {
+            loop {
+                match_packet! { self, keep_alive,
+                    // handle keep alive packets
+                    packet = conf_in::KeepAlivePacket => {
+                        if !self.keep_alive.replace(packet.id, 0) {
+                            debug!(id = packet.id, "keep alive packet id unknown");
+                        }
+                        continue
+                    },
+                    // ignore unsupported packets but don't throw an error
+                    _ = conf_in::ClientInformationPacket => continue,
+                    _ = conf_in::PluginMessagePacket => continue,
+                    _ = conf_in::ResourcePackResponsePacket => continue,
+                    _ = conf_in::CookieResponsePacket => continue,
+                }
+            }
+        };
+
+        // wait for target task to finish and send keep alive packets
+        // technically, this could be done a lot earlier (maybe even in a separate threat), however
+        // in the future we might want to consider the client information when selecting a target
         debug!("getting target from supplier");
-        let target = self
-            .target_selector
-            .select(
+        let target = tokio::select! {
+            result = sender => result?,
+            maybe_target = target_selector.select(
                 &client_address,
                 (&handshake.server_address, handshake.server_port),
                 handshake.protocol_version as Protocol,
                 &login_start.user_name,
                 &login_start.user_id,
-            )
-            .await?;
+            ) => maybe_target?,
+        };
 
         // disconnect if not target found
         let Some(target) = target else {
