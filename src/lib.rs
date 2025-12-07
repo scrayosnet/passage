@@ -22,7 +22,7 @@ use crate::adapter::target_selection::fixed::FixedTargetSelector;
 #[cfg(feature = "grpc")]
 use crate::adapter::target_selection::grpc::GrpcTargetSelector;
 use crate::adapter::target_strategy::TargetSelectorStrategy;
-use crate::adapter::target_strategy::any::AnyTargetSelectorStrategy;
+use crate::adapter::target_strategy::fixed::FixedTargetSelectorStrategy;
 #[cfg(feature = "grpc")]
 use crate::adapter::target_strategy::grpc::GrpcTargetSelectorStrategy;
 use crate::adapter::target_strategy::player_fill::PlayerFillTargetSelectorStrategy;
@@ -115,7 +115,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
             Arc::new(PlayerFillTargetSelectorStrategy::new(player_fill))
                 as Arc<dyn TargetSelectorStrategy>
         }
-        "any" => Arc::new(AnyTargetSelectorStrategy) as Arc<dyn TargetSelectorStrategy>,
+        "fixed" => Arc::new(FixedTargetSelectorStrategy) as Arc<dyn TargetSelectorStrategy>,
         _ => return Err("unknown target selector strategy configured".into()),
     };
 

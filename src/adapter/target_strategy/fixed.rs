@@ -6,10 +6,10 @@ use async_trait::async_trait;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-pub struct AnyTargetSelectorStrategy;
+pub struct FixedTargetSelectorStrategy;
 
 #[async_trait]
-impl TargetSelectorStrategy for AnyTargetSelectorStrategy {
+impl TargetSelectorStrategy for FixedTargetSelectorStrategy {
     async fn select(
         &self,
         _client_addr: &SocketAddr,

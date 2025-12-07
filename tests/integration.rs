@@ -15,7 +15,7 @@ use passage::adapter::status::{Protocol, StatusSupplier};
 use passage::adapter::target_selection::fixed::FixedTargetSelector;
 use passage::adapter::target_selection::{Target, TargetSelector};
 use passage::adapter::target_strategy::TargetSelectorStrategy;
-use passage::adapter::target_strategy::any::AnyTargetSelectorStrategy;
+use passage::adapter::target_strategy::fixed::FixedTargetSelectorStrategy;
 use passage::authentication;
 use passage::cipher_stream::CipherStream;
 use passage::config::Localization;
@@ -87,7 +87,7 @@ async fn simulate_handshake() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(FixedTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> =
         Arc::new(FixedTargetSelector::new_empty(strategy));
 
@@ -136,7 +136,7 @@ async fn simulate_status() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(FixedTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> =
         Arc::new(FixedTargetSelector::new_empty(strategy));
 
@@ -208,7 +208,7 @@ async fn simulate_transfer_no_configuration() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(FixedTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> =
         Arc::new(FixedTargetSelector::new_empty(strategy));
 
@@ -525,7 +525,7 @@ async fn simulate_login_no_configuration() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(FixedTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> =
         Arc::new(FixedTargetSelector::new_empty(strategy));
 
@@ -656,7 +656,7 @@ async fn sends_keep_alive() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(FixedTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> =
         Arc::new(FixedTargetSelector::new_empty(strategy));
 
@@ -817,7 +817,7 @@ async fn no_respond_keep_alive() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(FixedTargetSelectorStrategy);
     let target_selector: Arc<dyn TargetSelector> =
         Arc::new(FixedTargetSelector::new_empty(strategy));
 

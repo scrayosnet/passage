@@ -69,7 +69,7 @@ address = "http://127.0.0.1:3030"
 namespace = "minecraft"
 
 [target_strategy]
-adapter = "any"
+adapter = "fixed"
 
 [target_strategy.grpc]
 address = "http://127.0.0.1:3030"
