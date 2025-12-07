@@ -10,12 +10,12 @@ use packets::{
     AsyncReadPacket, AsyncWritePacket, ChatMode, DisplayedSkinParts, MainHand, ParticleStatus,
     State,
 };
-use passage::adapter::status::none::NoneStatusSupplier;
+use passage::adapter::status::fixed::FixedStatusSupplier;
 use passage::adapter::status::{Protocol, StatusSupplier};
-use passage::adapter::target_selection::none::NoneTargetSelector;
+use passage::adapter::target_selection::fixed::FixedTargetSelector;
 use passage::adapter::target_selection::{Target, TargetSelector};
 use passage::adapter::target_strategy::TargetSelectorStrategy;
-use passage::adapter::target_strategy::none::NoneTargetSelectorStrategy;
+use passage::adapter::target_strategy::any::AnyTargetSelectorStrategy;
 use passage::authentication;
 use passage::cipher_stream::CipherStream;
 use passage::config::Localization;
@@ -86,9 +86,10 @@ async fn simulate_handshake() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
+    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> =
+        Arc::new(FixedTargetSelector::new_empty(strategy));
 
     // build connection
     let mut server = Connection::new(
@@ -134,9 +135,10 @@ async fn simulate_status() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
+    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> =
+        Arc::new(FixedTargetSelector::new_empty(strategy));
 
     // build connection
     let mut server = Connection::new(
@@ -205,9 +207,10 @@ async fn simulate_transfer_no_configuration() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
+    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> =
+        Arc::new(FixedTargetSelector::new_empty(strategy));
 
     // build connection
     let mut server = Connection::new(
@@ -359,7 +362,7 @@ async fn simulate_slow_transfer_no_configuration() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
+    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
     let target_selector: Arc<dyn TargetSelector> = Arc::new(SlowTargetSelector);
 
     // build connection
@@ -521,9 +524,10 @@ async fn simulate_login_no_configuration() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
+    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> =
+        Arc::new(FixedTargetSelector::new_empty(strategy));
 
     // build connection
     let mut server = Connection::new(
@@ -651,9 +655,10 @@ async fn sends_keep_alive() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
+    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> =
+        Arc::new(FixedTargetSelector::new_empty(strategy));
 
     // build connection
     let mut server = Connection::new(
@@ -811,9 +816,10 @@ async fn no_respond_keep_alive() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(NoneStatusSupplier);
-    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(NoneTargetSelectorStrategy);
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(NoneTargetSelector::new(strategy));
+    let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
+    let strategy: Arc<dyn TargetSelectorStrategy> = Arc::new(AnyTargetSelectorStrategy);
+    let target_selector: Arc<dyn TargetSelector> =
+        Arc::new(FixedTargetSelector::new_empty(strategy));
 
     // build connection
     let mut server = Connection::new(

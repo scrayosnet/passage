@@ -15,19 +15,16 @@ use crate::adapter::status::StatusSupplier;
 use crate::adapter::status::grpc::GrpcStatusSupplier;
 use crate::adapter::status::http::HttpStatusSupplier;
 use crate::adapter::status::mongodb::MongodbStatusSupplier;
-use crate::adapter::status::none::NoneStatusSupplier;
 use crate::adapter::target_selection::TargetSelector;
 #[cfg(feature = "agones")]
 use crate::adapter::target_selection::agones::AgonesTargetSelector;
 use crate::adapter::target_selection::fixed::FixedTargetSelector;
 #[cfg(feature = "grpc")]
 use crate::adapter::target_selection::grpc::GrpcTargetSelector;
-use crate::adapter::target_selection::none::NoneTargetSelector;
 use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::adapter::target_strategy::any::AnyTargetSelectorStrategy;
 #[cfg(feature = "grpc")]
 use crate::adapter::target_strategy::grpc::GrpcTargetSelectorStrategy;
-use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use crate::adapter::target_strategy::player_fill::PlayerFillTargetSelectorStrategy;
 use crate::config::Config;
 use crate::connection::{Connection, Error};
@@ -68,7 +65,6 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         "initializing status supplier"
     );
     let status_supplier = match config.status.adapter.as_str() {
-        "none" => Arc::new(NoneStatusSupplier) as Arc<dyn StatusSupplier>,
         #[cfg(feature = "grpc")]
         "grpc" => {
             let Some(grpc) = config.status.grpc.clone() else {
@@ -104,7 +100,6 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         "initializing target selector strategy"
     );
     let target_strategy = match config.target_strategy.adapter.as_str() {
-        "none" => Arc::new(NoneTargetSelectorStrategy) as Arc<dyn TargetSelectorStrategy>,
         #[cfg(feature = "grpc")]
         "grpc" => {
             let Some(grpc) = config.target_strategy.grpc.clone() else {
@@ -130,7 +125,6 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         "initializing target selector"
     );
     let target_selector = match config.target_discovery.adapter.as_str() {
-        "none" => Arc::new(NoneTargetSelector::new(target_strategy)) as Arc<dyn TargetSelector>,
         #[cfg(feature = "grpc")]
         "grpc" => {
             let Some(grpc) = config.target_discovery.grpc.clone() else {
