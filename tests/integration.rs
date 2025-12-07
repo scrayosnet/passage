@@ -60,7 +60,17 @@ pub fn encrypt(key: &RsaPublicKey, value: &[u8]) -> Vec<u8> {
         .expect("encrypt failed")
 }
 
-struct SlowTargetSelector;
+struct SlowTargetSelector {
+    duration: Duration,
+}
+
+impl SlowTargetSelector {
+    pub fn new(seconds: u64) -> Self {
+        Self {
+            duration: Duration::from_secs(seconds),
+        }
+    }
+}
 
 #[async_trait]
 impl TargetSelector for SlowTargetSelector {
@@ -72,9 +82,7 @@ impl TargetSelector for SlowTargetSelector {
         _username: &str,
         _user_id: &Uuid,
     ) -> Result<Option<Target>, passage::adapter::Error> {
-        tokio::time::advance(Duration::from_secs(5)).await;
-        tokio::time::advance(Duration::from_secs(10)).await;
-        tokio::time::advance(Duration::from_secs(10)).await;
+        tokio::time::sleep(self.duration).await;
         Ok(None)
     }
 }
@@ -363,7 +371,7 @@ async fn simulate_slow_transfer_no_configuration() {
 
     // build supplier
     let status_supplier: Arc<dyn StatusSupplier> = Arc::new(FixedStatusSupplier::new_empty());
-    let target_selector: Arc<dyn TargetSelector> = Arc::new(SlowTargetSelector);
+    let target_selector: Arc<dyn TargetSelector> = Arc::new(SlowTargetSelector::new(29));
 
     // build connection
     let mut server = Connection::new(

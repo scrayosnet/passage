@@ -287,7 +287,6 @@ where
                         return Err(Error::MissedKeepAlive);
                     }
                     debug!("sending next keep-alive packet");
-                    println!("sending next keep-alive packet");
                     let packet = conf_out::KeepAlivePacket { id };
                     self.send_packet(packet).await?;
                 },
