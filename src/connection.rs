@@ -1,8 +1,17 @@
 use crate::adapter::resourcepack::ResourcepackSupplier;
 use crate::adapter::status::{Protocol, StatusSupplier};
 use crate::adapter::target_selection::TargetSelector;
-use crate::authentication;
 use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
+use crate::config::Localization;
+use crate::mojang::Mojang;
+use crate::{authentication, metrics};
+use packets::configuration::clientbound as conf_out;
+use packets::configuration::serverbound as conf_in;
+use packets::handshake::serverbound as hand_in;
+use packets::login::clientbound as login_out;
+use packets::login::serverbound as login_in;
+use packets::status::clientbound as status_out;
+use packets::status::serverbound as status_in;
 use packets::{AsyncReadPacket, AsyncWritePacket, ReadPacket, ResourcePackResult, State, VarInt};
 use packets::{Packet, WritePacket};
 use serde::{Deserialize, Serialize};
@@ -15,24 +24,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::{Instant, Interval};
-use tracing::{debug, info};
+use tracing::{debug, info, instrument};
 use uuid::Uuid;
-
-use crate::config::Localization;
-use crate::metrics::{
-    CLIENT_LOCALES, CLIENT_VIEW_DISTANCE, CONNECTION_DURATION, ClientLocaleLabels,
-    ClientViewDistanceLabels, ConnectionDurationLabels, Guard, MOJANG_DURATION,
-    MojangDurationLabels, RECEIVED_PACKETS, RESOURCEPACK_DURATION, ReceivedPackets,
-    ResourcePackDurationLabels, SENT_PACKETS, SentPackets, TRANSFER_TARGETS, TransferTargetsLabels,
-};
-use crate::mojang::Mojang;
-use packets::configuration::clientbound as conf_out;
-use packets::configuration::serverbound as conf_in;
-use packets::handshake::serverbound as hand_in;
-use packets::login::clientbound as login_out;
-use packets::login::serverbound as login_in;
-use packets::status::clientbound as status_out;
-use packets::status::serverbound as status_in;
 
 #[macro_export]
 macro_rules! match_packet {
@@ -315,18 +308,19 @@ where
             }
         };
 
-        RECEIVED_PACKETS
-            .get_or_create(&ReceivedPackets {})
-            .observe(f64::from(length));
-
         // check the length of the packet for any following content
-        if length == 0 || length > MAX_PACKET_LENGTH {
+        if length <= 0 || length > MAX_PACKET_LENGTH {
             debug!(
                 length,
                 "packet length should be between 0 and {MAX_PACKET_LENGTH}"
             );
             return Err(packets::Error::IllegalPacketLength.into());
         }
+
+        // track metrics
+        let packet_size = u64::try_from(length).expect("length is always positive");
+        metrics::incoming_packets::inc();
+        metrics::incoming_packet_size::record(packet_size);
 
         // extract the encoded packet id
         let id = self.stream.read_varint().await?;
@@ -346,8 +340,15 @@ where
         &mut self,
         packet: T,
     ) -> Result<(), Error> {
-        SENT_PACKETS.get_or_create(&SentPackets {}).inc();
-        Ok(self.stream.write_packet(packet).await?)
+        // write packet to stream
+        let bytes_written = self.stream.write_packet(packet).await?;
+
+        // track metrics
+        let packet_size = u64::try_from(bytes_written).expect("usize always fits into u64");
+        metrics::outgoing_packets::inc();
+        metrics::outgoing_packet_size::record(packet_size);
+
+        Ok(())
     }
 
     fn apply_encryption(&mut self, shared_secret: &[u8]) -> Result<(), Error> {
@@ -360,9 +361,8 @@ where
         Ok(())
     }
 
+    #[instrument(skip_all)]
     pub async fn listen(&mut self, client_address: SocketAddr) -> Result<(), Error> {
-        let start = Instant::now();
-
         // handle handshake
         debug!("awaiting handshake packet");
         let handshake = match_packet! { self,
@@ -376,15 +376,6 @@ where
             State::Transfer => "transfer",
         };
         debug!(next_state = variant, "received handshake packet");
-
-        let _timer = Guard::on_drop(|| {
-            CONNECTION_DURATION
-                .get_or_create(&ConnectionDurationLabels {
-                    variant,
-                    protocol_version: handshake.protocol_version,
-                })
-                .observe(start.elapsed().as_secs_f64());
-        });
 
         // handle status request
         if handshake.next_state == State::Status {
@@ -446,7 +437,7 @@ where
         let session_cookie = match_packet! { self,
             packet = login_in::CookieResponsePacket => packet,
         };
-        let session_id = session_cookie.payload.map(|session_id| session_id);
+        let session_id = session_cookie.payload;
 
         // in case of transfer, use the auth cookie
         let mut should_authenticate = true;
@@ -534,7 +525,6 @@ where
         // handle authentication if not already authenticated by the token
         if should_authenticate {
             debug!("authenticating with mojang");
-            let start = Instant::now();
             let auth_response = self
                 .mojang
                 .authenticate(
@@ -543,22 +533,7 @@ where
                     "",
                     &authentication::ENCODED_PUB,
                 )
-                .await;
-
-            let auth_response = match auth_response {
-                Ok(resp) => {
-                    MOJANG_DURATION
-                        .get_or_create(&MojangDurationLabels { result: "success" })
-                        .observe(start.elapsed().as_secs_f64());
-                    resp
-                }
-                Err(err) => {
-                    MOJANG_DURATION
-                        .get_or_create(&MojangDurationLabels { result: "error" })
-                        .observe(start.elapsed().as_secs_f64());
-                    return Err(Error::from(err));
-                }
-            };
+                .await?;
 
             // update state for actual use info
             login_start.user_name = auth_response.name;
@@ -598,15 +573,11 @@ where
             }
         };
 
-        CLIENT_LOCALES
-            .get_or_create(&ClientLocaleLabels {
-                locale: client_info.locale.clone(),
-            })
-            .inc();
-
-        CLIENT_VIEW_DISTANCE
-            .get_or_create(&ClientViewDistanceLabels {})
-            .observe(f64::from(client_info.view_distance));
+        // track client metrics
+        metrics::client_locale::inc(client_info.locale.clone());
+        metrics::client_view_distance::record(
+            u64::try_from(client_info.view_distance).unwrap_or(0u64),
+        );
 
         // write resource packs
         debug!("getting resource packs from supplier");
@@ -621,6 +592,7 @@ where
                 &client_info.locale,
             )
             .await?;
+        // TODO no need to store instant as we dont track per resource pack?
         let mut pack_ids: HashMap<Uuid, (bool, Instant)> = HashMap::with_capacity(packs.len());
 
         debug!(len = packs.len(), "sending resource pack packet(s)");
@@ -679,14 +651,8 @@ where
             let Some((forced, time)) = pack_ids.remove(&packet.uuid) else {
                 continue;
             };
-
-            if success {
-                RESOURCEPACK_DURATION
-                    .get_or_create(&ResourcePackDurationLabels {
-                        uuid: packet.uuid.to_string(),
-                    })
-                    .observe(time.elapsed().as_secs_f64());
-            }
+            let seconds = time.elapsed().as_secs();
+            debug!(seconds = seconds, "successfully loaded resource pack");
 
             // handle pack forced
             if forced && !success {
@@ -716,12 +682,6 @@ where
                 &login_start.user_id,
             )
             .await?;
-
-        TRANSFER_TARGETS
-            .get_or_create(&TransferTargetsLabels {
-                target: target.clone().map(|target| target.address.to_string()),
-            })
-            .inc();
 
         // disconnect if not target found
         let Some(target) = target else {

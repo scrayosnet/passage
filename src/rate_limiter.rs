@@ -1,4 +1,4 @@
-use crate::metrics::{RATE_LIMITER, RateLimiterLabels};
+use crate::metrics;
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use tokio::time::{Duration, Instant};
@@ -39,9 +39,7 @@ where
             self.entries
                 .insert(*key, VecDeque::from_iter([Instant::now()]));
             self.size += 1;
-            RATE_LIMITER
-                .get_or_create(&RateLimiterLabels {})
-                .set(self.size as i64);
+            metrics::rate_limited::set(self.size as u64);
             return true;
         };
 
@@ -52,9 +50,7 @@ where
             }
             value.pop_front();
             self.size -= 1;
-            RATE_LIMITER
-                .get_or_create(&RateLimiterLabels {})
-                .set(self.size as i64);
+            metrics::rate_limited::set(self.size as u64);
         }
 
         // check the number of recent entries
@@ -65,9 +61,7 @@ where
         // enqueue
         value.push_back(Instant::now());
         self.size += 1;
-        RATE_LIMITER
-            .get_or_create(&RateLimiterLabels {})
-            .set(self.size as i64);
+        metrics::rate_limited::set(self.size as u64);
 
         // cleanup if not recent (expect up to 100 full connections)
         if self.size > self.entry_max_size * 100 {
@@ -99,9 +93,7 @@ where
             self.entries.remove(&key);
         }
 
-        RATE_LIMITER
-            .get_or_create(&RateLimiterLabels {})
-            .set(self.size as i64);
+        metrics::rate_limited::set(self.size as u64);
     }
 }
 

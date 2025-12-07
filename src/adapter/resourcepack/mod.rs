@@ -35,7 +35,7 @@ pub struct Resourcepack {
 
 pub fn format_size(size: u64) -> String {
     match size {
-        s if s < 1 << 10 => format!("{} Bytes", s),
+        s if s < 1 << 10 => format!("{s} Bytes"),
         s if s < 1 << 20 => format!("{:.2} KiB", s as f64 / (1i64 << 10) as f64),
         s if s < 1 << 30 => format!("{:.2} MiB", s as f64 / (1i64 << 20) as f64),
         s if s < 1 << 40 => format!("{:.2} GiB", s as f64 / (1i64 << 30) as f64),

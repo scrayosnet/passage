@@ -36,30 +36,19 @@ use crate::adapter::target_strategy::none::NoneTargetSelectorStrategy;
 use crate::adapter::target_strategy::player_fill::PlayerFillTargetSelectorStrategy;
 use crate::config::Config;
 use crate::connection::{Connection, Error};
-use crate::metrics::{OPEN_CONNECTIONS, OpenConnectionsLabels, RequestsLabels};
 use crate::mojang::Api;
 use crate::mojang::Mojang;
 use crate::rate_limiter::RateLimiter;
 use adapter::resourcepack::fixed::FixedResourcePackSupplier;
 use adapter::status::fixed::FixedStatusSupplier;
-use http_body_util::Full;
-use hyper::Response;
-use hyper::body::Bytes;
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper_util::rt::{TokioIo, TokioTimer};
-use metrics::REQUESTS;
-use prometheus_client::encoding::text::encode;
-use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::time::timeout;
-use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tracing::{Instrument, debug, error, info, warn};
+use tracing::{Instrument, debug, info, warn};
 
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
 ///
@@ -72,124 +61,6 @@ use tracing::{Instrument, debug, error, info, warn};
 /// Will return an appropriate error if the socket cannot be bound to the supplied address, or the TCP server cannot be
 /// properly initialized.
 pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
-    let config = Arc::new(config);
-
-    let tracker = TaskTracker::new();
-    let token = CancellationToken::new();
-
-    // start the metrics server in own thread
-    let m_token = token.clone();
-    let m_config = Arc::clone(&config);
-    tracker.spawn(async move {
-        if let Err(err) = start_metrics(m_config, m_token.clone()).await {
-            error!(cause = err.to_string(), "metrics server stopped with error");
-        }
-        m_token.cancel();
-    });
-
-    // start the protocol server in own thread
-    let p_token = token.clone();
-    let p_config = Arc::clone(&config);
-    tracker.spawn(async move {
-        if let Err(err) = start_protocol(p_config, p_token.clone()).await {
-            error!(
-                cause = err.to_string(),
-                "protocol server stopped with error"
-            );
-        }
-        p_token.cancel();
-    });
-
-    // wait for either a shutdown signal (from error) or a ctrl-c
-    select!(
-        _ = token.cancelled() => {},
-        _ = tokio::signal::ctrl_c() => {
-            info!("received ctrl-c signal, shutting down");
-            token.cancel();
-        },
-    );
-
-    // wait for graceful shutdown
-    tracker.close();
-    tracker.wait().await;
-
-    Ok(())
-}
-
-async fn start_metrics(
-    config: Arc<Config>,
-    shutdown: CancellationToken,
-) -> Result<(), Box<dyn std::error::Error>> {
-    debug!("starting metrics server");
-
-    // start metrics server
-    info!(
-        addr = config.metrics_address.to_string(),
-        "binding metrics socket address"
-    );
-    let listener = TcpListener::bind(&config.metrics_address).await?;
-
-    // listen for connections
-    loop {
-        // accept the next incoming connection
-        let (stream, addr) = select! {
-            accepted = listener.accept() => accepted?,
-            _ = shutdown.cancelled() => {
-                break;
-            },
-        };
-
-        let io = TokioIo::new(stream);
-
-        let connection_id = uuid::Uuid::new_v4();
-        let connection_span = tracing::info_span!(
-            "metrics",
-            addr = addr.to_string(),
-            id = connection_id.to_string(),
-        );
-
-        tokio::task::spawn(
-            async move {
-                if let Err(err) = http1::Builder::new()
-                    .timer(TokioTimer::new())
-                    .serve_connection(
-                        io,
-                        service_fn(|_| async {
-                            let mut buf = String::new();
-                            encode(&mut buf, &metrics::REGISTRY).expect("failed to encode metrics");
-
-                            let response = Response::builder()
-                                .header(
-                                    hyper::header::CONTENT_TYPE,
-                                    "application/openmetrics-text; version=1.0.0; charset=utf-8",
-                                )
-                                .body(Full::<Bytes>::from(buf))
-                                .expect("failed to build response");
-
-                            Ok::<Response<Full<Bytes>>, Infallible>(response)
-                        }),
-                    )
-                    .await
-                {
-                    warn!(
-                        cause = err.to_string(),
-                        addr = &addr.to_string(),
-                        "failure communicating with a client"
-                    );
-                }
-            }
-            .instrument(connection_span),
-        );
-    }
-
-    info!("metrics server stopped successfully");
-    Ok(())
-}
-
-async fn start_protocol(
-    config: Arc<Config>,
-    shutdown: CancellationToken,
-) -> Result<(), Box<dyn std::error::Error>> {
     debug!("starting protocol server");
 
     // retrieve config params
@@ -349,7 +220,8 @@ async fn start_protocol(
         // accept the next incoming connection
         let (mut stream, addr) = select! {
             accepted = listener.accept() => accepted?,
-            _ = shutdown.cancelled() => {
+            _ = tokio::signal::ctrl_c() => {
+                info!("received ctrl-c signal, shutting down");
                 break;
             },
         };
@@ -358,10 +230,7 @@ async fn start_protocol(
         // check rate limiter
         if rate_limiter_enabled && !rate_limiter.enqueue(&addr.ip()) {
             info!(addr = addr.to_string(), "rate limited client");
-
-            REQUESTS
-                .get_or_create(&RequestsLabels { result: "rejected" })
-                .inc();
+            metrics::requests::inc("rejected");
 
             if let Err(e) = stream.shutdown().await {
                 debug!(
@@ -391,9 +260,7 @@ async fn start_protocol(
         tracker.spawn(
             async move {
                 info!("accepted new connection");
-                OPEN_CONNECTIONS
-                    .get_or_create(&OpenConnectionsLabels {})
-                    .inc();
+                metrics::open_connections::inc();
 
                 // build connection wrapper for stream
                 let mut con = Connection::new(
@@ -417,19 +284,14 @@ async fn start_protocol(
                     Ok(_) => "success",
                     Err(_) => "timeout",
                 };
+                metrics::requests::inc(result);
 
                 // flush connection and shutdown
                 if let Err(err) = stream.shutdown().await {
                     warn!(cause = err.to_string(), "failed to shutdown connection");
                 }
-
-                REQUESTS.get_or_create(&RequestsLabels { result }).inc();
-
-                OPEN_CONNECTIONS
-                    .get_or_create(&OpenConnectionsLabels {})
-                    .dec();
-
                 debug!("closed connection");
+                metrics::open_connections::dec();
             }
             .instrument(connection_span),
         );

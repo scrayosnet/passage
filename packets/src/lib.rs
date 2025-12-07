@@ -355,13 +355,14 @@ pub trait ReadPacket: Packet + Sized {
 /// methods to write the data that is encoded in a Minecraft-specific manner. Their implementation is analogous to the
 /// [read implementation](AsyncReadPacket).
 pub trait AsyncWritePacket {
-    /// Writes a [`WritePacket`] onto this object as described in the official [protocol documentation][protocol-doc].
+    /// Writes a [`WritePacket`] onto this object as described in the official [protocol documentation][protocol-doc]
+    /// and returns the raw packet size (before any compression or encryption).
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Packet_format
     fn write_packet<T: WritePacket + Send + Sync + Debug>(
         &mut self,
         packet: T,
-    ) -> impl Future<Output = Result<(), Error>>;
+    ) -> impl Future<Output = Result<usize, Error>>;
 
     /// Writes a [`VarInt`] onto this object as described in the official [protocol documentation][protocol-doc].
     ///

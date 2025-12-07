@@ -9,7 +9,7 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
     async fn write_packet<T: WritePacket + Send + Sync + Debug>(
         &mut self,
         packet: T,
-    ) -> Result<(), Error> {
+    ) -> Result<usize, Error> {
         // create a new buffer (our packets are very small)
         let mut buffer = Vec::with_capacity(INITIAL_BUFFER_SIZE);
 
@@ -26,7 +26,7 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
         // send the final buffer into the stream
         self.write_all(&final_buffer).await?;
 
-        Ok(())
+        Ok(final_buffer.len())
     }
 
     async fn write_varint(&mut self, value: VarInt) -> Result<(), Error> {
