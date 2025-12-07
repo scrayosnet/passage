@@ -15,12 +15,6 @@ static METER: LazyLock<Meter> = LazyLock::new(|| {
 /// * `start` - The value of the first bucket
 /// * `width` - The width of each bucket
 /// * `count` - The number of buckets to generate
-///
-/// # Example
-/// ```
-/// let buckets = linear_buckets(0.0, 10.0, 5);
-/// // Returns: [0.0, 10.0, 20.0, 30.0, 40.0]
-/// ```
 fn linear_buckets(start: f64, width: f64, count: usize) -> Vec<f64> {
     (0..count).map(|i| start + (i as f64 * width)).collect()
 }
@@ -31,12 +25,6 @@ fn linear_buckets(start: f64, width: f64, count: usize) -> Vec<f64> {
 /// * `start` - The value of the first bucket (must be > 0)
 /// * `factor` - The exponential factor (must be > 1)
 /// * `count` - The number of buckets to generate
-///
-/// # Example
-/// ```
-/// let buckets = exponential_buckets(1.0, 2.0, 5);
-/// // Returns: [1.0, 2.0, 4.0, 8.0, 16.0]
-/// ```
 fn exponential_buckets(start: f64, factor: f64, count: usize) -> Vec<f64> {
     assert!(start > 0.0, "start must be greater than 0");
     assert!(factor > 1.0, "factor must be greater than 1");

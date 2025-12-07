@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::select;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 /// The shared http client.
 static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {

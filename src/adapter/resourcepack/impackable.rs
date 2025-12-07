@@ -11,7 +11,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use tokio::select;
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 /// The shared http client.

@@ -1,6 +1,6 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "grpc")]
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .protoc_arg("--experimental_allow_proto3_optional")
         .build_server(false)
         .type_attribute(".", "#[derive(serde::Serialize,serde::Deserialize)]")

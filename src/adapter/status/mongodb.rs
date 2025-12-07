@@ -11,7 +11,7 @@ use mongodb::{Client, Collection};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::select;
-use tracing::{info, warn};
+use tracing::info;
 
 pub struct MongodbStatusSupplier {
     inner: Refreshable<Option<ServerStatus>>,

@@ -4,8 +4,9 @@ use cfb8::cipher::KeyIvInit;
 use hmac::{Hmac, Mac};
 use num_bigint::BigInt;
 use packets::VerifyToken;
+use rand::TryRngCore;
+use rand::rand_core::UnwrapErr;
 use rand::rngs::OsRng;
-use rand::{Rng, RngCore};
 use rsa::pkcs8::EncodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use sha1::Sha1;
@@ -37,7 +38,7 @@ pub enum Error {
     #[error("could not encode the public key: {0}")]
     EncodingFailed(#[from] rsa::pkcs8::spki::Error),
     #[error("failed to retrieve randomness: {0}")]
-    UnavailableRandom(#[from] rand::Error),
+    UnavailableRandom(#[from] rand::rngs::OsError),
     #[error("authentication request failed: {0}")]
     AuthRequestFailed(#[from] reqwest::Error),
     #[error("authentication request failed: {0}")]
@@ -89,13 +90,13 @@ pub fn generate_keep_alive() -> u64 {
     let mut rng = OsRng;
 
     // generate random number
-    rng.r#gen()
+    rng.try_next_u64().expect("failed to generate randomness")
 }
 
 /// Generates a new RSA keypair.
 fn generate_keypair() -> Result<(RsaPrivateKey, RsaPublicKey), Error> {
     // retrieve a new mutable instance of an OS RNG
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(OsRng);
 
     // generate the corresponding key pair
     let private_key = RsaPrivateKey::new(&mut rng, 1024)?;
@@ -112,7 +113,10 @@ fn encode_public_key(key: &RsaPublicKey) -> Result<Vec<u8>, Error> {
 
 /// Encrypts some value with an RSA public key for the Minecraft protocol.
 pub fn encrypt(key: &RsaPublicKey, value: &[u8]) -> Result<Vec<u8>, Error> {
-    Ok(key.encrypt(&mut OsRng, Pkcs1v15Encrypt, value)?)
+    // retrieve a new mutable instance of an OS RNG
+    let mut rng = UnwrapErr(OsRng);
+
+    Ok(key.encrypt(&mut rng, Pkcs1v15Encrypt, value)?)
 }
 
 /// Decrypts some value with an RSA public key for the Minecraft protocol.

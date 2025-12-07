@@ -24,6 +24,7 @@ use passage::cipher_stream::CipherStream;
 use passage::config::{FixedResourcepack, Localization};
 use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection, Error, SESSION_COOKIE_KEY};
 use passage::mojang::{AuthResponse, Mojang};
+use rand::TryRngCore;
 use rand::rngs::OsRng;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
@@ -58,7 +59,7 @@ impl Mojang for MojangMock {
 }
 
 pub fn encrypt(key: &RsaPublicKey, value: &[u8]) -> Vec<u8> {
-    key.encrypt(&mut OsRng, Pkcs1v15Encrypt, value)
+    key.encrypt(&mut OsRng.unwrap_err(), Pkcs1v15Encrypt, value)
         .expect("encrypt failed")
 }
 

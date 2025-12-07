@@ -21,53 +21,55 @@ rust-version = "1.85.0"
 
 [dependencies]
 packets = { path = "./packets", features = ["server"] }
-tokio = { version = "1.45", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal", "test-util"] }
-tokio-util = { version = "0.7.15", features = ["rt"] }
+tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal", "test-util"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 tracing = { version = "0.1" }
-tracing-opentelemetry = { version = "0.32.0", features = ["metrics"] }
+tracing-opentelemetry = { version = "0.32", features = ["metrics"] }
 thiserror = { version = "2.0" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 uuid = { version = "1.17", features = ["v4", "serde"] }
-rsa = { version = "0.9" }
-rand = { version = "0.8" }
+rsa = { version = "0.10.0-rc.10" }
+rand = { version = "0.10.0-rc.5" }
 num-bigint = { version = "0.4" }
 sha1 = { version = "0.10" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 cfb8 = { version = "0.8" }
 aes = { version = "0.8" }
 config = { version = "0.15" }
-sentry = { version = "0.38", default-features = false, features = ["backtrace", "contexts", "panic", "debug-images", "reqwest", "rustls", "tower"], optional = true }
-sentry-tracing = { version = "0.38", optional = true }
+sentry = { version = "0.46", default-features = false, features = ["backtrace", "contexts", "panic", "debug-images", "reqwest", "rustls", "tower"], optional = true }
+sentry-tracing = { version = "0.46", optional = true }
 async-trait = "0.1"
 sha2 = { version = "0.10" }
 hmac = { version = "0.12" }
 futures-util = { version = "0.3" }
-tonic = { version = "0.13", optional = true }
-prost = { version = "0.13", optional = true }
-prost-types = { version = "0.13", optional = true }
-kube = { version = "1.0", features = ["runtime", "derive"], optional = true }
-k8s-openapi = { version = "0.25", features = ["latest"], optional = true }
-schemars = { version = "0.8", optional = true }
-mongodb = { version = "3.2", optional = true }
-opentelemetry = { version = "0.31.0", features = ["trace", "metrics"] }
-opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "metrics"] }
-opentelemetry-semantic-conventions = { version = "0.31.0", features = ["semconv_experimental"] }
-opentelemetry_sdk = "0.31.0"
+tonic = { version = "0.14", optional = true }
+tonic-prost = { version = "0.14", optional = true }
+prost = { version = "0.14", optional = true }
+prost-types = { version = "0.14", optional = true }
+kube = { version = "2.0", features = ["runtime", "derive"], optional = true }
+k8s-openapi = { version = "0.26", features = ["latest"], optional = true }
+schemars = { version = "1.1", optional = true }
+mongodb = { version = "3.4", optional = true }
+opentelemetry = { version = "0.31", features = ["trace", "metrics"] }
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "metrics"] }
+opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
+opentelemetry_sdk = "0.31"
 
 [dev-dependencies]
 packets = { path = "./packets", features = ["server", "client"] }
 
 [build-dependencies]
-tonic-build = { version = "0.13", features = ["prost"], optional = true }
+tonic-build = { version = "0.14", optional = true }
+tonic-prost-build = { version = "0.14", optional = true }
 
 [features]
 default = ["agones", "grpc", "mongodb", "sentry"]
 agones = ["dep:kube", "dep:k8s-openapi", "dep:schemars"]
-grpc = ["dep:tonic", "dep:tonic-build", "dep:prost", "dep:prost-types"]
+grpc = ["dep:tonic", "dep:tonic-prost", "dep:tonic-build", "dep:tonic-prost-build", "dep:prost", "dep:prost-types"]
 mongodb = ["dep:mongodb"]
 sentry = ["dep:sentry", "dep:sentry-tracing"]
 
 [package.metadata.cargo-machete]
-ignored = ["prost", "prost-types", "tonic-build", "k8s-openapi"]
+ignored = ["tonic-prost", "tonic-build", "tonic-prost-build", "prost", "prost-types", "k8s-openapi"]
