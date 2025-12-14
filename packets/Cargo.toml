@@ -34,5 +34,5 @@ client = []
 server = []
 
 [[bench]]
-name = "passage"
+name = "packets"
 harness = false

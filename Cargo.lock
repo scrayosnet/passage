@@ -2557,6 +2557,7 @@ dependencies = [
  "async-trait",
  "cfb8",
  "config",
+ "criterion",
  "futures-util",
  "hmac",
  "k8s-openapi",

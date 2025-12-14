@@ -184,7 +184,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         debug!(addr = addr.to_string(), "received protocol connection");
 
         // check rate limiter
-        if rate_limiter_enabled && !rate_limiter.enqueue(&addr.ip()) {
+        if rate_limiter_enabled && !rate_limiter.enqueue(addr.ip()) {
             info!(addr = addr.to_string(), "rate limited client");
             metrics::requests::inc("rejected");
 

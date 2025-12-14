@@ -1,99 +1,64 @@
-use crate::metrics;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::hash::Hash;
 use tokio::time::{Duration, Instant};
 
-/// [`RateLimiter`] tracks connections per client address over some time window.
-///
-/// The limiter automatically cleans itself up if it gets too large.
-pub(crate) struct RateLimiter<T> {
-    entries: HashMap<T, VecDeque<Instant>>,
+/// [`RateLimiter`] tracks connections per client address over some (approximate) time window.
+pub struct RateLimiter<T> {
+    last_cleanup: Instant,
+    buckets: HashMap<T, (Instant, f32, f32)>,
     duration: Duration,
-    entry_max_size: usize,
-    size: usize,
+    limit: f32,
 }
 
 impl<T> RateLimiter<T>
 where
     T: Eq + Copy + Hash,
 {
-    pub(crate) fn new(duration: Duration, size: usize) -> Self {
+    pub fn new(duration: Duration, limit: usize) -> Self {
         Self {
-            entries: HashMap::new(),
+            last_cleanup: Instant::now(),
+            buckets: HashMap::new(),
             duration,
-            entry_max_size: size,
-            size: 0,
+            limit: limit as f32,
         }
     }
 
-    /// Enqueues for a given key. If the rate limit is reached, it returns
-    /// false.
-    pub(crate) fn enqueue(&mut self, key: &T) -> bool {
-        // handle zero sized rate limiter
-        if self.entry_max_size < 1 {
+    pub fn enqueue(&mut self, key: T) -> bool {
+        // get current time once
+        let now = Instant::now();
+
+        // get or insert bucket
+        let (bucket_window, bucket_last, bucket_current) =
+            self.buckets.entry(key).or_insert((now, 0f32, 0f32));
+
+        // if bucket window changed, move bucket counts
+        if now.saturating_duration_since(*bucket_window) >= self.duration {
+            *bucket_window = Instant::now();
+            *bucket_last = *bucket_current;
+            *bucket_current = 0f32
+        }
+
+        // handle too many visits
+        let bucket_index = now.saturating_duration_since(*bucket_window).as_secs_f32()
+            / self.duration.as_secs_f32();
+        let bucket_value =
+            (*bucket_last * (1f32 - bucket_index)) + (*bucket_current * bucket_index);
+        if bucket_value >= self.limit {
             return false;
         }
 
-        // check whether key is already registered, otherwise add
-        let Some(value) = self.entries.get_mut(key) else {
-            self.entries
-                .insert(*key, VecDeque::from_iter([Instant::now()]));
-            self.size += 1;
-            metrics::rate_limited::set(self.size as u64);
-            return true;
-        };
+        // update bucket count
+        *bucket_current += 1f32;
 
-        // clear non-recent entries
-        while let Some(front) = value.front() {
-            if front.elapsed() <= self.duration {
-                break;
-            }
-            value.pop_front();
-            self.size -= 1;
-            metrics::rate_limited::set(self.size as u64);
-        }
-
-        // check the number of recent entries
-        if value.len() >= self.entry_max_size {
-            return false;
-        }
-
-        // enqueue
-        value.push_back(Instant::now());
-        self.size += 1;
-        metrics::rate_limited::set(self.size as u64);
-
-        // cleanup if not recent (expect up to 100 full connections)
-        if self.size > self.entry_max_size * 100 {
-            self.cleanup();
+        // after every second window change, remove all old buckets
+        if now.saturating_duration_since(self.last_cleanup) >= self.duration * 2 {
+            self.buckets.retain(|_, (last_visit, _, _)| {
+                now.saturating_duration_since(*last_visit) < self.duration * 2
+            });
+            self.last_cleanup = Instant::now();
         }
 
         true
-    }
-
-    /// Removes all expired timestamps from the entry map.
-    fn cleanup(&mut self) {
-        let mut expired = vec![];
-
-        for (key, value) in &mut self.entries {
-            while value
-                .front()
-                .is_some_and(|time| time.elapsed() > self.duration)
-            {
-                value.pop_front();
-                self.size -= 1;
-            }
-
-            if value.is_empty() {
-                expired.push(*key);
-            }
-        }
-
-        for key in expired {
-            self.entries.remove(&key);
-        }
-
-        metrics::rate_limited::set(self.size as u64);
     }
 }
 
@@ -101,18 +66,16 @@ where
 mod tests {
     use super::*;
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn allow_initial() {
-        tokio::time::pause();
         let mut rate_limiter = RateLimiter::new(Duration::from_secs(10), 3);
         assert!(rate_limiter.enqueue(&0));
         assert!(rate_limiter.enqueue(&0));
         assert!(rate_limiter.enqueue(&0));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn reject_many() {
-        tokio::time::pause();
         let mut rate_limiter = RateLimiter::new(Duration::from_secs(10), 3);
 
         assert!(rate_limiter.enqueue(&0));
@@ -125,9 +88,8 @@ mod tests {
         assert!(!rate_limiter.enqueue(&0));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn allow_after_duration() {
-        tokio::time::pause();
         let mut rate_limiter = RateLimiter::new(Duration::from_secs(10), 3);
 
         assert!(rate_limiter.enqueue(&0));
@@ -143,9 +105,8 @@ mod tests {
         assert!(!rate_limiter.enqueue(&0));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn allow_disjoint() {
-        tokio::time::pause();
         let mut rate_limiter = RateLimiter::new(Duration::from_secs(10), 3);
 
         assert!(rate_limiter.enqueue(&0));
