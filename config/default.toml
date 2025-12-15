@@ -111,3 +111,10 @@ disconnect_no_target = "{\"text\":\"已断开连接：没有可用的服务器�
 locale = "Русский"
 disconnect_timeout = "{\"text\":\"Отключено: нет ответа от клиента (тайм-аут keep-alive)\"}"
 disconnect_no_target = "{\"text\":\"Отключено: нет доступного сервера для обработки подключения\"}"
+
+[otel]
+environment = "production"
+metrics_token = ""
+metrics_endpoint = "https://otlp-gateway-prod-eu-west-2.grafana.net/otlp/v1/metrics"
+traces_token = ""
+traces_endpoint = "https://otlp-gateway-prod-eu-west-2.grafana.net/otlp/v1/traces"

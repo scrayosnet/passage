@@ -262,6 +262,7 @@ impl<S> Connection<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
 {
+    #[instrument(skip_all)]
     async fn receive_packet(
         &mut self,
         keep_alive: bool,
@@ -325,6 +326,7 @@ where
         Ok((id, buf))
     }
 
+    #[instrument(skip_all)]
     async fn send_packet<T: WritePacket + Send + Sync + Debug>(
         &mut self,
         packet: T,
@@ -340,6 +342,7 @@ where
         Ok(())
     }
 
+    #[instrument(skip_all)]
     fn apply_encryption(&mut self, shared_secret: &[u8]) -> Result<(), Error> {
         debug!("enabling encryption");
 

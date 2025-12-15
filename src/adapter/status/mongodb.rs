@@ -11,7 +11,7 @@ use mongodb::{Client, Collection};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::select;
-use tracing::info;
+use tracing::{info, instrument};
 
 pub struct MongodbStatusSupplier {
     inner: Refreshable<Option<ServerStatus>>,
@@ -54,6 +54,7 @@ impl MongodbStatusSupplier {
         Ok(Self { inner })
     }
 
+    #[instrument(skip_all)]
     async fn fetch(
         client: &Client,
         queries: &[(String, String, Vec<Document>)],

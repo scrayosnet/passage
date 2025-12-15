@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::select;
-use tracing::info;
+use tracing::{info, instrument};
 
 /// The shared http client.
 static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
@@ -34,6 +34,7 @@ impl HttpStatusSupplier {
         Ok(Self { inner })
     }
 
+    #[instrument(skip_all)]
     async fn fetch(url: &str) -> Result<Option<ServerStatus>, Error> {
         let status = HTTP_CLIENT
             // send fetch request

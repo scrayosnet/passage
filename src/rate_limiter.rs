@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use tokio::time::{Duration, Instant};
+use tracing::instrument;
 
 /// [`RateLimiter`] tracks connections per client address over some (approximate) time window.
 pub struct RateLimiter<T> {
@@ -23,6 +24,7 @@ where
         }
     }
 
+    #[instrument(skip_all)]
     pub fn enqueue(&mut self, key: T) -> bool {
         // get current time once
         let now = Instant::now();

@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use serde_json::value::RawValue;
 use std::net::SocketAddr;
 use tonic::transport::Channel;
+use tracing::instrument;
 
 pub struct GrpcStatusSupplier {
     client: StatusClient<Channel>,
@@ -29,6 +30,7 @@ impl GrpcStatusSupplier {
 
 #[async_trait]
 impl StatusSupplier for GrpcStatusSupplier {
+    #[instrument(skip_all)]
     async fn get_status(
         &self,
         client_addr: &SocketAddr,

@@ -127,6 +127,25 @@ pub struct Sentry {
     pub environment: String,
 }
 
+/// [OpenTelemetry] hold the OpenTelemetry configuration. The release is automatically inferred from cargo.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OpenTelemetry {
+    /// The environment of the application that should be communicated to sentry.
+    pub environment: String,
+
+    /// The base64 basic auth token traces endpoint.
+    pub traces_token: String,
+
+    /// The address of the http/protobuf traces endpoint.
+    pub traces_endpoint: String,
+
+    /// The base64 basic auth token metrics endpoint.
+    pub metrics_token: String,
+
+    /// The address of the http/protobuf metrics endpoint.
+    pub metrics_endpoint: String,
+}
+
 /// [`RateLimiter`] hold the connection rate limiting configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RateLimiter {
@@ -310,6 +329,9 @@ pub struct Config {
 
     /// The sentry configuration.
     pub sentry: Sentry,
+
+    /// The OpenTelemetry configuration.
+    pub otel: OpenTelemetry,
 
     /// The rate limiter config.
     pub rate_limiter: RateLimiter,

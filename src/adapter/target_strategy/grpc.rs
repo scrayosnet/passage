@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use tonic::transport::Channel;
+use tracing::instrument;
 use uuid::Uuid;
 
 pub struct GrpcTargetSelectorStrategy {
@@ -30,6 +31,7 @@ impl GrpcTargetSelectorStrategy {
 
 #[async_trait]
 impl TargetSelectorStrategy for GrpcTargetSelectorStrategy {
+    #[instrument(skip_all)]
     async fn select(
         &self,
         client_addr: &SocketAddr,
