@@ -17,6 +17,7 @@ pub mod clientbound {
     use tokio::io::{AsyncRead, AsyncReadExt};
     #[cfg(feature = "server")]
     use tokio::io::{AsyncWrite, AsyncWriteExt};
+    use tracing::instrument;
 
     /// The clientbound [`CookieRequestPacket`]. (Placeholder)
     ///
@@ -33,6 +34,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for CookieRequestPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -43,6 +45,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for CookieRequestPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -68,6 +71,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for PluginMessagePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -78,6 +82,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for PluginMessagePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -102,6 +107,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for DisconnectPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -114,6 +120,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for DisconnectPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -137,6 +144,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for FinishConfigurationPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -147,6 +155,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for FinishConfigurationPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -183,6 +192,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for KeepAlivePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -195,6 +205,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for KeepAlivePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -223,6 +234,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for PingPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -235,6 +247,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for PingPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -258,6 +271,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for ResetChatPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -268,6 +282,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for ResetChatPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -292,6 +307,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for RegistryDataPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -302,6 +318,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for RegistryDataPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -323,6 +340,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for RemoveResourcePackPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -333,6 +351,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for RemoveResourcePackPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -361,6 +380,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for AddResourcePackPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -381,6 +401,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for AddResourcePackPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -424,6 +445,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for StoreCookiePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -437,6 +459,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for StoreCookiePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -467,6 +490,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for TransferPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -480,6 +504,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for TransferPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -506,6 +531,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for FeatureFlagsPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -516,6 +542,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for FeatureFlagsPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -537,6 +564,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for UpdateTagsPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -547,6 +575,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for UpdateTagsPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -573,6 +602,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for KnownPacksPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -583,6 +613,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for KnownPacksPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -607,6 +638,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for CustomReportDetailsPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -617,6 +649,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for CustomReportDetailsPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -641,6 +674,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for ServerLinksPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -651,6 +685,7 @@ pub mod clientbound {
 
     #[cfg(feature = "client")]
     impl ReadPacket for ServerLinksPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -675,6 +710,7 @@ pub mod serverbound {
     use tokio::io::{AsyncRead, AsyncReadExt};
     #[cfg(feature = "client")]
     use tokio::io::{AsyncWrite, AsyncWriteExt};
+    use tracing::instrument;
 
     /// The serverbound [`ClientInformationPacket`]. (Placeholder)
     ///
@@ -701,6 +737,7 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for ClientInformationPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -721,6 +758,7 @@ pub mod serverbound {
 
     #[cfg(feature = "server")]
     impl ReadPacket for ClientInformationPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -765,6 +803,7 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for CookieResponsePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -775,6 +814,7 @@ pub mod serverbound {
 
     #[cfg(feature = "server")]
     impl ReadPacket for CookieResponsePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -803,6 +843,7 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for PluginMessagePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -813,6 +854,7 @@ pub mod serverbound {
 
     #[cfg(feature = "server")]
     impl ReadPacket for PluginMessagePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -837,6 +879,7 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for AckFinishConfigurationPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -847,6 +890,7 @@ pub mod serverbound {
 
     #[cfg(feature = "server")]
     impl ReadPacket for AckFinishConfigurationPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -876,6 +920,7 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for KeepAlivePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -888,6 +933,7 @@ pub mod serverbound {
 
     #[cfg(feature = "server")]
     impl ReadPacket for KeepAlivePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -914,6 +960,7 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for PongPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -926,6 +973,7 @@ pub mod serverbound {
 
     #[cfg(feature = "server")]
     impl ReadPacket for PongPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -952,6 +1000,7 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for ResourcePackResponsePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -965,6 +1014,7 @@ pub mod serverbound {
 
     #[cfg(feature = "server")]
     impl ReadPacket for ResourcePackResponsePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
@@ -993,6 +1043,7 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for KnownPacksPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -1003,6 +1054,7 @@ pub mod serverbound {
 
     #[cfg(feature = "server")]
     impl ReadPacket for KnownPacksPacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,

@@ -34,7 +34,7 @@ impl HttpStatusSupplier {
         Ok(Self { inner })
     }
 
-    #[instrument(skip_all)]
+    #[instrument]
     async fn fetch(url: &str) -> Result<Option<ServerStatus>, Error> {
         let status = HTTP_CLIENT
             // send fetch request

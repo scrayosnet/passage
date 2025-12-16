@@ -311,9 +311,11 @@ where
         let packet_size = u64::try_from(length).expect("length is always positive");
         metrics::incoming_packets::inc();
         metrics::incoming_packet_size::record(packet_size);
+        tracing::Span::current().record("packet_length", packet_size);
 
         // extract the encoded packet id
         let id = self.stream.read_varint().await?;
+        tracing::Span::current().record("packet_id", id);
 
         // split a separate reader from the stream and read packet bytes (advancing stream)
         let mut buffer = vec![];
