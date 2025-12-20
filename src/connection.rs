@@ -22,7 +22,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::{Instant, Interval};
-use tracing::{debug, info, instrument};
+use tracing::{debug, error, info, instrument};
 use uuid::Uuid;
 
 #[macro_export]
@@ -309,8 +309,7 @@ where
 
         // track metrics
         let packet_size = u64::try_from(length).expect("length is always positive");
-        metrics::incoming_packets::inc();
-        metrics::incoming_packet_size::record(packet_size);
+        metrics::packet_size::record_serverbound(packet_size);
         tracing::Span::current().record("packet_length", packet_size);
 
         // extract the encoded packet id
@@ -333,13 +332,12 @@ where
         &mut self,
         packet: T,
     ) -> Result<(), Error> {
-        // write packet to stream
+        // write the packet to the stream
         let bytes_written = self.stream.write_packet(packet).await?;
 
         // track metrics
         let packet_size = u64::try_from(bytes_written).expect("usize always fits into u64");
-        metrics::outgoing_packets::inc();
-        metrics::outgoing_packet_size::record(packet_size);
+        metrics::packet_size::record_clientbound(packet_size);
 
         Ok(())
     }
@@ -519,6 +517,7 @@ where
         // handle authentication if not already authenticated by the token
         if should_authenticate {
             debug!("authenticating with mojang");
+            let request_start = Instant::now();
             let auth_response = self
                 .mojang
                 .authenticate(
@@ -527,7 +526,13 @@ where
                     "",
                     &authentication::ENCODED_PUB,
                 )
-                .await?;
+                .await
+                .inspect_err(|err| {
+                    // track request failed
+                    error!(err = %err, "mojang request failed");
+                    metrics::mojang_request_duration::record(request_start, "failed");
+                })?;
+            metrics::mojang_request_duration::record(request_start, "success");
 
             // update state for actual use info
             login_start.user_name = auth_response.name;

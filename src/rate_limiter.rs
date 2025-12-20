@@ -1,3 +1,4 @@
+use crate::metrics;
 use std::collections::HashMap;
 use std::hash::Hash;
 use tokio::time::{Duration, Instant};
@@ -17,6 +18,7 @@ where
 {
     pub fn new(duration: Duration, limit: usize) -> Self {
         assert!(duration.as_secs_f32() > 0f32);
+        metrics::rate_limiter_size::set(0u64);
         Self {
             last_cleanup: Instant::now(),
             buckets: HashMap::new(),
@@ -66,7 +68,9 @@ where
             });
             self.last_cleanup = Instant::now();
         }
+        metrics::rate_limiter_size::set(self.buckets.len() as u64);
 
+        // allow the request to pass
         true
     }
 }

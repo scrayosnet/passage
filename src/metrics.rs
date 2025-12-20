@@ -32,22 +32,27 @@ fn exponential_buckets(start: f64, factor: f64, count: usize) -> Vec<f64> {
     (0..count).map(|i| start * factor.powi(i as i32)).collect()
 }
 
-pub(crate) mod requests {
-    use crate::metrics::METER;
+pub(crate) mod request_duration {
+    use crate::metrics::{METER, exponential_buckets};
     use opentelemetry::KeyValue;
-    use opentelemetry::metrics::Counter;
+    use opentelemetry::metrics::Histogram;
     use std::sync::LazyLock;
+    use tokio::time::Instant;
 
-    static INSTRUMENT: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    static INSTRUMENT: LazyLock<Histogram<u64>> = LazyLock::new(|| {
         METER
-            .u64_counter("requests")
-            .with_description("Number of requests")
+            .u64_histogram("request_duration")
+            .with_description("The time a request took to complete")
+            .with_unit("seconds")
+            .with_boundaries(exponential_buckets(0.1, 2.0, 10))
             .build()
     });
 
-    // TODO should this have a label at all?
-    pub(crate) fn inc(result: &'static str) {
-        INSTRUMENT.add(1, &[KeyValue::new("result", result)])
+    pub(crate) fn record(started: Instant, result: &'static str) {
+        INSTRUMENT.record(
+            started.elapsed().as_secs(),
+            &[KeyValue::new("result", result)],
+        )
     }
 }
 
@@ -72,7 +77,7 @@ pub(crate) mod open_connections {
     }
 }
 
-pub(crate) mod rate_limited {
+pub(crate) mod rate_limiter_size {
     use crate::metrics::METER;
     use opentelemetry::metrics::Gauge;
     use std::sync::LazyLock;
@@ -89,79 +94,27 @@ pub(crate) mod rate_limited {
     }
 }
 
-// TODO combine with other metric?
-pub(crate) mod incoming_packets {
-    use crate::metrics::METER;
-    use opentelemetry::metrics::Counter;
-    use std::sync::LazyLock;
-
-    static INSTRUMENT: LazyLock<Counter<u64>> = LazyLock::new(|| {
-        METER
-            .u64_counter("incoming_packets")
-            .with_description("The number of incoming packets")
-            .build()
-    });
-
-    pub(crate) fn inc() {
-        INSTRUMENT.add(1, &[])
-    }
-}
-
-// TODO combine with other metric?
-pub(crate) mod incoming_packet_size {
+pub(crate) mod packet_size {
     use crate::metrics::{METER, linear_buckets};
+    use opentelemetry::KeyValue;
     use opentelemetry::metrics::Histogram;
     use std::sync::LazyLock;
 
     static INSTRUMENT: LazyLock<Histogram<u64>> = LazyLock::new(|| {
         METER
-            .u64_histogram("incoming_packet_size")
-            .with_description("The size of incoming packets")
+            .u64_histogram("packet_size")
+            .with_description("The size of packets")
             .with_unit("bytes")
             .with_boundaries(linear_buckets(0.0, 512.0, 10))
             .build()
     });
 
-    pub(crate) fn record(size: u64) {
-        INSTRUMENT.record(size, &[])
+    pub(crate) fn record_serverbound(size: u64) {
+        INSTRUMENT.record(size, &[KeyValue::new("bound", "serverbound")])
     }
-}
 
-// TODO combine with other metric?
-pub(crate) mod outgoing_packets {
-    use crate::metrics::METER;
-    use opentelemetry::metrics::Counter;
-    use std::sync::LazyLock;
-
-    static INSTRUMENT: LazyLock<Counter<u64>> = LazyLock::new(|| {
-        METER
-            .u64_counter("outgoing_packets")
-            .with_description("The number of outgoing packets")
-            .build()
-    });
-
-    pub(crate) fn inc() {
-        INSTRUMENT.add(1, &[])
-    }
-}
-
-// TODO combine with other metric?
-pub(crate) mod outgoing_packet_size {
-    use crate::metrics::{METER, linear_buckets};
-    use opentelemetry::metrics::Histogram;
-    use std::sync::LazyLock;
-
-    static INSTRUMENT: LazyLock<Histogram<u64>> = LazyLock::new(|| {
-        METER
-            .u64_histogram("outgoing_packet_size")
-            .with_description("The size of outgoing packets")
-            .with_unit("bytes")
-            .with_boundaries(linear_buckets(0.0, 512.0, 10))
-            .build()
-    });
-
-    pub(crate) fn record(amount: u64) {
-        INSTRUMENT.record(amount, &[])
+    pub(crate) fn record_clientbound(size: u64) {
+        INSTRUMENT.record(size, &[KeyValue::new("bound", "clientbound")])
     }
 }
 
@@ -199,5 +152,29 @@ pub(crate) mod client_view_distance {
 
     pub(crate) fn record(distance: u64) {
         INSTRUMENT.record(distance, &[])
+    }
+}
+
+pub(crate) mod mojang_request_duration {
+    use crate::metrics::{METER, exponential_buckets};
+    use opentelemetry::KeyValue;
+    use opentelemetry::metrics::Histogram;
+    use std::sync::LazyLock;
+    use tokio::time::Instant;
+
+    static INSTRUMENT: LazyLock<Histogram<u64>> = LazyLock::new(|| {
+        METER
+            .u64_histogram("mojang_request_duration")
+            .with_description("The time a mojang request took to complete")
+            .with_unit("seconds")
+            .with_boundaries(exponential_buckets(0.1, 2.0, 10))
+            .build()
+    });
+
+    pub(crate) fn record(started: Instant, result: &'static str) {
+        INSTRUMENT.record(
+            started.elapsed().as_secs(),
+            &[KeyValue::new("result", result)],
+        )
     }
 }

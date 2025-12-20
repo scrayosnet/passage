@@ -37,7 +37,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::select;
-use tokio::time::timeout;
+use tokio::time::{Instant, timeout};
 use tokio_util::task::TaskTracker;
 use tracing::{Instrument, debug, info, warn};
 
@@ -181,12 +181,13 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
                 break;
             },
         };
+        let connection_start = Instant::now();
         debug!(addr = addr.to_string(), "received protocol connection");
 
         // check rate limiter
         if rate_limiter_enabled && !rate_limiter.enqueue(addr.ip()) {
             info!(addr = addr.to_string(), "rate limited client");
-            metrics::requests::inc("rejected");
+            metrics::request_duration::record(connection_start, "rejected");
 
             if let Err(e) = stream.shutdown().await {
                 debug!(
@@ -229,7 +230,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 
                 // handle the client connection (ignore connection closed by the client)
                 let timeout = timeout(timeout_duration, con.listen(addr)).await;
-                let result = match timeout {
+                let connection_result = match timeout {
                     Ok(Err(Error::ConnectionClosed(_))) => "connection-closed",
                     Ok(Err(err)) => {
                         warn!(cause = err.to_string(), "failed to handle connection");
@@ -238,13 +239,15 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
                     Ok(_) => "success",
                     Err(_) => "timeout",
                 };
-                metrics::requests::inc(result);
 
                 // flush connection and shutdown
                 if let Err(err) = stream.shutdown().await {
                     warn!(cause = err.to_string(), "failed to shutdown connection");
                 }
                 debug!("closed connection");
+
+                // update metrics
+                metrics::request_duration::record(connection_start, connection_result);
                 metrics::open_connections::dec();
             }
             .instrument(connection_span),
