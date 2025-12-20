@@ -16,6 +16,7 @@ where
     T: Eq + Copy + Hash,
 {
     pub fn new(duration: Duration, limit: usize) -> Self {
+        assert!(duration.as_secs_f32() > 0f32);
         Self {
             last_cleanup: Instant::now(),
             buckets: HashMap::new(),
@@ -26,25 +27,31 @@ where
 
     #[instrument(skip_all)]
     pub fn enqueue(&mut self, key: T) -> bool {
-        // get current time once
+        // get the current time only once
         let now = Instant::now();
 
-        // get or insert bucket
+        // get or insert the bucket
         let (bucket_window, bucket_last, bucket_current) =
             self.buckets.entry(key).or_insert((now, 0f32, 0f32));
 
-        // if bucket window changed, move bucket counts
-        if now.saturating_duration_since(*bucket_window) >= self.duration {
-            *bucket_window = Instant::now();
+        // if the bucket window changed, move bucket counts
+        let bucket_age = now.saturating_duration_since(*bucket_window);
+        if bucket_age >= self.duration {
+            // handle that the last bucket has also expired
+            if bucket_age >= 2 * self.duration {
+                *bucket_current = 0f32
+            }
+
+            // start the next bucket
+            *bucket_window = now;
             *bucket_last = *bucket_current;
             *bucket_current = 0f32
         }
 
         // handle too many visits
-        let bucket_index = now.saturating_duration_since(*bucket_window).as_secs_f32()
+        let bucket_last_weight = now.saturating_duration_since(*bucket_window).as_secs_f32()
             / self.duration.as_secs_f32();
-        let bucket_value =
-            (*bucket_last * (1f32 - bucket_index)) + (*bucket_current * bucket_index);
+        let bucket_value = (*bucket_last * (1f32 - bucket_last_weight)) + *bucket_current;
         if bucket_value >= self.limit {
             return false;
         }
@@ -76,6 +83,7 @@ mod tests {
         assert!(rate_limiter.enqueue(&0));
     }
 
+    // rejects any request after the window is filled
     #[tokio::test(start_paused = true)]
     async fn reject_many() {
         let mut rate_limiter = RateLimiter::new(Duration::from_secs(10), 3);
