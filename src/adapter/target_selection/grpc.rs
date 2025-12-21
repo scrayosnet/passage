@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tonic::transport::Channel;
+use tracing::instrument;
 use uuid::Uuid;
 
 pub struct GrpcTargetSelector {
@@ -26,7 +27,7 @@ impl GrpcTargetSelector {
             client: DiscoveryClient::connect(config.address)
                 .await
                 .map_err(|err| Error::FailedInitialization {
-                    adapter_type: "target_selection",
+                    adapter_type: "grpc_target_selection",
                     cause: err.into(),
                 })?,
         })
@@ -35,6 +36,7 @@ impl GrpcTargetSelector {
 
 #[async_trait]
 impl TargetSelector for GrpcTargetSelector {
+    #[instrument(skip_all)]
     async fn select(
         &self,
         client_addr: &SocketAddr,
@@ -56,7 +58,15 @@ impl TargetSelector for GrpcTargetSelector {
             username: username.to_string(),
             user_id: user_id.to_string(),
         });
-        let response = self.client.clone().get_targets(request).await?;
+        let response = self
+            .client
+            .clone()
+            .get_targets(request)
+            .await
+            .map_err(|err| Error::FailedFetch {
+                adapter_type: "grpc_target_selection",
+                cause: err.into(),
+            })?;
 
         let targets: Vec<Target> = response
             .into_inner()

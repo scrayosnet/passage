@@ -18,7 +18,7 @@ RUN set -eux \
 FROM scratch
 
 # declare our minecraft and metrics ports
-EXPOSE 25565 8080
+EXPOSE 25565
 
 # copy the raw binary into the new image
 COPY --from=builder "/usr/src/passage/target/release/passage" "/passage"

@@ -1,7 +1,6 @@
 # See settings documantation at src/settings.rs.
 
 address = "0.0.0.0:25565"
-metrics_address = "0.0.0.0:25566"
 timeout = 120
 
 [protocol]
@@ -14,12 +13,6 @@ enabled = false
 debug = false
 address = "https://key@sentry.io/42" # update if enabled
 environment = "staging"
-
-[metrics]
-enabled = false
-auth_enabled = false
-username = "username" # update if (auth) enabled
-password = "password" # update if (auth) enabled
 
 [rate_limiter]
 enabled = true
@@ -69,7 +62,7 @@ address = "http://127.0.0.1:3030"
 namespace = "minecraft"
 
 [target_strategy]
-adapter = "any"
+adapter = "fixed"
 
 [target_strategy.grpc]
 address = "http://127.0.0.1:3030"
@@ -78,69 +71,43 @@ address = "http://127.0.0.1:3030"
 field = "players"
 max_players = 50
 
-[resourcepack]
-adapter = "none"
-
-[[resourcepack.fixed.packs]]
-uuid = "00000000-0000-0000-0000-000000000000"
-url = "https://example.com/resourcepack.zip"
-hash = "c7affa49facf2b14238f1d2f7f04d7d0360bdb1d"
-forced = true
-prompt_message = "Please install!"
-
-[resourcepack.grpc]
-address = "http://127.0.0.1:3030"
-
-[resourcepack.impackable]
-base_url = "https://impackable.example.com"
-username = "Querying"
-password = ""
-channel = "production"
-uuid = "00000000-0000-0000-0000-000000000000"
-forced = true
-cache_duration = 3
-
 [localization]
 default_locale = "en_US"
 
 [localization.messages.en]
 locale = "English"
-resourcepack_impackable_prompt = "{\"text\":\"This server requires a resource pack ({size}) to join\"}"
 disconnect_timeout = "{\"text\":\"Disconnected: No response from client (keep-alive timeout)\"}"
-disconnect_failed_resourcepack = "{\"text\":\"Disconnected: Resource pack was not loaded by the client\"}"
 disconnect_no_target = "{\"text\":\"Disconnected: No available server to handle your connection\"}"
 
 [localization.messages.es]
 locale = "Español"
-resourcepack_impackable_prompt = "{\"text\":\"Este servidor requiere un paquete de recursos ({size}) para unirse\"}"
 disconnect_timeout = "{\"text\":\"Desconectado: No hubo respuesta del cliente (tiempo de espera agotado)\"}"
-disconnect_failed_resourcepack = "{\"text\":\"Desconectado: El cliente no cargó el paquete de recursos\"}"
 disconnect_no_target = "{\"text\":\"Desconectado: No hay un servidor disponible para manejar tu conexión\"}"
 
 [localization.messages.fr]
 locale = "Français"
-resourcepack_impackable_prompt = "{\"text\":\"Ce serveur nécessite un pack de ressources ({size}) pour se connecter\"}"
 disconnect_timeout = "{\"text\":\"Déconnecté : aucune réponse du client (délai de keep-alive dépassé)\"}"
 disconnect_failed_resourcepack = "{\"text\":\"Déconnecté : le pack de ressources n’a pas été chargé par le client\"}"
 disconnect_no_target = "{\"text\":\"Déconnecté : aucun serveur disponible pour traiter votre connexion\"}"
 
 [localization.messages.de]
 locale = "Deutsch"
-resourcepack_impackable_prompt = "{\"text\":\"Dieser Server erfordert ein Ressourcenpaket ({size}) zum Beitreten\"}"
 disconnect_timeout = "{\"text\":\"Verbindung getrennt: Keine Antwort vom Client (Keep-Alive-Timeout)\"}"
-disconnect_failed_resourcepack = "{\"text\":\"Verbindung getrennt: Ressourcenpaket wurde vom Client nicht geladen\"}"
 disconnect_no_target = "{\"text\":\"Verbindung getrennt: Kein verfügbarer Server für diese Verbindung\"}"
 
 [localization.messages.zh-CN]
 locale = "简体中文"
-resourcepack_impackable_prompt = "{\"text\":\"此服务器需要资源包（{size}）才能加入\"}"
 disconnect_timeout = "{\"text\":\"已断开连接：客户端无响应（保持连接超时）\"}"
-disconnect_failed_resourcepack = "{\"text\":\"已断开连接：客户端未加载资源包\"}"
 disconnect_no_target = "{\"text\":\"已断开连接：没有可用的服务器来处理你的连接\"}"
 
 [localization.messages.ru]
 locale = "Русский"
-resourcepack_impackable_prompt = "{\"text\":\"Для подключения к этому серверу требуется ресурс-пакет ({size})\"}"
 disconnect_timeout = "{\"text\":\"Отключено: нет ответа от клиента (тайм-аут keep-alive)\"}"
-disconnect_failed_resourcepack = "{\"text\":\"Отключено: клиент не загрузил ресурс-пакет\"}"
 disconnect_no_target = "{\"text\":\"Отключено: нет доступного сервера для обработки подключения\"}"
+
+[otel]
+environment = "production"
+metrics_token = ""
+metrics_endpoint = "https://otlp-gateway-prod-eu-west-2.grafana.net/otlp/v1/metrics"
+traces_token = ""
+traces_endpoint = "https://otlp-gateway-prod-eu-west-2.grafana.net/otlp/v1/traces"

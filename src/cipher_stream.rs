@@ -115,7 +115,7 @@ where
 mod tests {
     use super::*;
     use crate::authentication::create_ciphers;
-    use rand::RngCore;
+    use rand::TryRngCore;
     use rand::rngs::OsRng;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

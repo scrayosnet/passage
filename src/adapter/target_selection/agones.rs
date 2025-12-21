@@ -11,7 +11,7 @@ use kube::{Api, Client, CustomResource, ResourceExt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{AddrParseError, IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::RwLock;
@@ -60,25 +60,57 @@ pub struct GameServerList {
     values: Vec<String>,
 }
 
-impl TryFrom<GameServer> for Target {
-    type Error = Error;
+#[derive(thiserror::Error, Debug)]
+pub enum GameServerError {
+    #[error("server has no identifier")]
+    NoName,
 
-    fn try_from(server: GameServer) -> Result<Self, Error> {
+    #[error("server {identifier} has no status")]
+    NotStatus {
+        /// The identifier of the server.
+        identifier: String,
+    },
+
+    #[error("server {identifier} ip address could not be parsed: {cause}")]
+    InvalidAddress {
+        /// The identifier of the server.
+        identifier: String,
+        /// The cause of the error.
+        #[source]
+        cause: Box<AddrParseError>,
+    },
+
+    #[error("server is not public: {identifier}")]
+    NotPublic {
+        /// The identifier of the server.
+        identifier: String,
+    },
+}
+
+impl TryFrom<GameServer> for Target {
+    type Error = GameServerError;
+
+    fn try_from(server: GameServer) -> Result<Self, GameServerError> {
         let identifier = server
             .metadata
             .name
             .clone()
-            .ok_or(Error::AdapterUnavailable)?;
-        let status = server.status.clone().ok_or(Error::AdapterUnavailable)?;
-
-        // Parse IP address
-        let ip: IpAddr = status.address.parse()?;
-        // Extract port from the typed ports field
+            .ok_or(GameServerError::NoName)?;
+        let status = server.status.clone().ok_or(GameServerError::NotStatus {
+            identifier: identifier.clone(),
+        })?;
+        let ip: IpAddr = status
+            .address
+            .parse()
+            .map_err(|err| GameServerError::InvalidAddress {
+                identifier: identifier.clone(),
+                cause: Box::new(err),
+            })?;
         let port = status
             .ports
             .first()
             .map(|p| p.port)
-            .ok_or(Error::ServerNotPublic {
+            .ok_or(GameServerError::NotPublic {
                 identifier: identifier.clone(),
             })?;
         let address = SocketAddr::new(ip, port);
@@ -132,7 +164,7 @@ impl AgonesTargetSelector {
         let client = Client::try_default()
             .await
             .map_err(|err| Error::FailedInitialization {
-                adapter_type: "target_strategy",
+                adapter_type: "agones_target_strategy",
                 cause: err.into(),
             })?;
         let servers: Api<GameServer> = Api::namespaced(client.clone(), &config.namespace);

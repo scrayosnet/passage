@@ -2,6 +2,7 @@ use crate::authentication::minecraft_hash;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
+use tracing::instrument;
 use uuid::Uuid;
 
 /// The shared http client (for mojang requests).
@@ -36,6 +37,7 @@ pub struct Api {}
 
 #[async_trait]
 impl Mojang for Api {
+    #[instrument(skip_all)]
     async fn authenticate(
         &self,
         username: &str,

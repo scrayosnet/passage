@@ -35,6 +35,15 @@ impl FixedStatusSupplier {
             max_version: config.max_version,
         }
     }
+
+    pub fn new_empty() -> Self {
+        Self {
+            status: None,
+            preferred_version: 0,
+            min_version: 0,
+            max_version: 0,
+        }
+    }
 }
 
 #[async_trait]

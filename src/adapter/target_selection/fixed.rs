@@ -20,6 +20,13 @@ impl FixedTargetSelector {
             targets: config.targets,
         }
     }
+
+    pub fn new_empty(strategy: Arc<dyn TargetSelectorStrategy>) -> Self {
+        Self {
+            strategy,
+            targets: vec![],
+        }
+    }
 }
 
 #[async_trait]

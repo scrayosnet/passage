@@ -50,7 +50,6 @@ use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
 use tracing::warn;
-use uuid::Uuid;
 
 /// [Localization] holds all localizable messages of the application.
 #[derive(Debug, Clone, Deserialize)]
@@ -126,6 +125,25 @@ pub struct Sentry {
 
     /// The environment of the application that should be communicated to sentry.
     pub environment: String,
+}
+
+/// [OpenTelemetry] hold the OpenTelemetry configuration. The release is automatically inferred from cargo.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OpenTelemetry {
+    /// The environment of the application that should be communicated to sentry.
+    pub environment: String,
+
+    /// The base64 basic auth token traces endpoint.
+    pub traces_token: String,
+
+    /// The address of the http/protobuf traces endpoint.
+    pub traces_endpoint: String,
+
+    /// The base64 basic auth token metrics endpoint.
+    pub metrics_token: String,
+
+    /// The address of the http/protobuf metrics endpoint.
+    pub metrics_endpoint: String,
 }
 
 /// [`RateLimiter`] hold the connection rate limiting configuration.
@@ -213,61 +231,6 @@ pub struct MongodbStatusQuery {
     pub aggregation: String,
 }
 
-/// [`Resourcepack`] hold the resourcepack configuration.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Resourcepack {
-    /// Adapter to retrieve the results.
-    pub adapter: String,
-
-    /// The config for the fixed resourcepack.
-    pub fixed: Option<FixedResourcepack>,
-
-    /// The config for the grpc resourcepack.
-    pub grpc: Option<GrpcResourcepack>,
-
-    /// The config for the impackable resourcepack.
-    pub impackable: Option<ImpackableResourcepack>,
-}
-
-/// [`FixedResourcepack`] hold the resourcepack configuration for a fixed set of packs.
-#[derive(Debug, Clone, Deserialize)]
-pub struct FixedResourcepack {
-    /// The resource packs that should be served.
-    pub packs: Vec<adapter::resourcepack::Resourcepack>,
-}
-
-/// [`GrpcResourcepack`] hold the gRPC resourcepack configuration.
-#[derive(Debug, Clone, Deserialize)]
-pub struct GrpcResourcepack {
-    /// The address of the gRPC adapter server.
-    pub address: String,
-}
-
-/// [`ImpackableResourcepack`] hold the impackable resourcepack configuration.
-#[derive(Debug, Clone, Deserialize)]
-pub struct ImpackableResourcepack {
-    /// The base URL of the impackable resourcepack server.
-    pub base_url: String,
-
-    /// The username to authenticate against the query endpoint.
-    pub username: String,
-
-    /// The username to authenticate against the query endpoint.
-    pub password: String,
-
-    /// The channel that should be filtered for the query endpoint.
-    pub channel: String,
-
-    /// The UUID that should be used to identify the resourcepack.
-    pub uuid: Uuid,
-
-    /// Whether the download of the resourcepack should be forced.
-    pub forced: bool,
-
-    /// The cache duration in seconds to store the queried version.
-    pub cache_duration: u64,
-}
-
 /// [`TargetDiscovery`] hold the target discovery configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TargetDiscovery {
@@ -287,7 +250,7 @@ pub struct TargetDiscovery {
 /// [`FixedTargetDiscovery`] hold the target discovery configuration for a fixed target.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixedTargetDiscovery {
-    /// The resource packs that should be served.
+    /// The targets that should be served.
     pub targets: Vec<adapter::target_selection::Target>,
 }
 
@@ -361,11 +324,11 @@ pub struct PlayerFillTargetStrategy {
 /// with status ok.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    /// The metrics server address.
-    pub metrics_address: SocketAddr,
-
     /// The sentry configuration.
     pub sentry: Sentry,
+
+    /// The OpenTelemetry configuration.
+    pub otel: OpenTelemetry,
 
     /// The rate limiter config.
     pub rate_limiter: RateLimiter,
@@ -381,9 +344,6 @@ pub struct Config {
 
     /// The status (ping) configuration.
     pub status: Status,
-
-    /// The resourcepack configuration.
-    pub resourcepack: Resourcepack,
 
     /// The target discovery configuration.
     pub target_discovery: TargetDiscovery,

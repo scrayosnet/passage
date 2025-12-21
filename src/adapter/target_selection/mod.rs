@@ -3,7 +3,6 @@ pub mod agones;
 pub mod fixed;
 #[cfg(feature = "grpc")]
 pub mod grpc;
-pub mod none;
 
 use crate::adapter::Error;
 use crate::adapter::status::Protocol;

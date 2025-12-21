@@ -1,12 +1,19 @@
-use crate::adapter::resourcepack::ResourcepackSupplier;
 use crate::adapter::status::{Protocol, StatusSupplier};
 use crate::adapter::target_selection::TargetSelector;
-use crate::authentication;
 use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
-use packets::{AsyncReadPacket, AsyncWritePacket, ReadPacket, ResourcePackResult, State, VarInt};
+use crate::config::Localization;
+use crate::mojang::Mojang;
+use crate::{authentication, metrics};
+use packets::configuration::clientbound as conf_out;
+use packets::configuration::serverbound as conf_in;
+use packets::handshake::serverbound as hand_in;
+use packets::login::clientbound as login_out;
+use packets::login::serverbound as login_in;
+use packets::status::clientbound as status_out;
+use packets::status::serverbound as status_in;
+use packets::{AsyncReadPacket, AsyncWritePacket, ReadPacket, State, VarInt};
 use packets::{Packet, WritePacket};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::{Cursor, ErrorKind};
 use std::net::SocketAddr;
@@ -15,24 +22,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::{Instant, Interval};
-use tracing::{debug, info};
+use tracing::{debug, error, info, instrument};
 use uuid::Uuid;
-
-use crate::config::Localization;
-use crate::metrics::{
-    CLIENT_LOCALES, CLIENT_VIEW_DISTANCE, CONNECTION_DURATION, ClientLocaleLabels,
-    ClientViewDistanceLabels, ConnectionDurationLabels, Guard, MOJANG_DURATION,
-    MojangDurationLabels, RECEIVED_PACKETS, RESOURCEPACK_DURATION, ReceivedPackets,
-    ResourcePackDurationLabels, SENT_PACKETS, SentPackets, TRANSFER_TARGETS, TransferTargetsLabels,
-};
-use crate::mojang::Mojang;
-use packets::configuration::clientbound as conf_out;
-use packets::configuration::serverbound as conf_in;
-use packets::handshake::serverbound as hand_in;
-use packets::login::clientbound as login_out;
-use packets::login::serverbound as login_in;
-use packets::status::clientbound as status_out;
-use packets::status::serverbound as status_in;
 
 #[macro_export]
 macro_rules! match_packet {
@@ -91,10 +82,6 @@ pub enum Error {
     /// Keep-alive was not received.
     #[error("Missed keep-alive")]
     MissedKeepAlive,
-
-    /// Some forced resource pack was not loaded.
-    #[error("Some forced resourcepack was not loaded")]
-    FailedResourcepack,
 
     /// No target was found for the user.
     #[error("No target was found for the user")]
@@ -178,7 +165,6 @@ impl Error {
     pub fn as_label(&self) -> &'static str {
         match self {
             Error::MissedKeepAlive => "missed-keep-alive",
-            Error::FailedResourcepack => "failed-resourcepack",
             Error::NoTargetFound => "no-target-found",
             Error::ConnectionClosed(_) => "connection-closed",
             Error::IllegalPacketLength
@@ -229,8 +215,6 @@ pub struct Connection<S> {
     /// ...
     pub target_selector: Arc<dyn TargetSelector>,
     /// ...
-    pub resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
-    /// ...
     pub mojang: Arc<dyn Mojang>,
     /// Auth cookie secret.
     pub auth_secret: Option<Vec<u8>>,
@@ -248,7 +232,6 @@ where
         stream: S,
         status_supplier: Arc<dyn StatusSupplier>,
         target_selector: Arc<dyn TargetSelector>,
-        resourcepack_supplier: Arc<dyn ResourcepackSupplier>,
         mojang: Arc<dyn Mojang>,
         localization: Arc<Localization>,
         auth_secret: Option<Vec<u8>>,
@@ -267,7 +250,6 @@ where
             },
             status_supplier,
             target_selector,
-            resourcepack_supplier,
             mojang,
             auth_secret,
             client_locale: localization.default_locale.clone(),
@@ -280,6 +262,7 @@ impl<S> Connection<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
 {
+    #[instrument(skip_all)]
     async fn receive_packet(
         &mut self,
         keep_alive: bool,
@@ -315,12 +298,8 @@ where
             }
         };
 
-        RECEIVED_PACKETS
-            .get_or_create(&ReceivedPackets {})
-            .observe(f64::from(length));
-
         // check the length of the packet for any following content
-        if length == 0 || length > MAX_PACKET_LENGTH {
+        if length <= 0 || length > MAX_PACKET_LENGTH {
             debug!(
                 length,
                 "packet length should be between 0 and {MAX_PACKET_LENGTH}"
@@ -328,8 +307,14 @@ where
             return Err(packets::Error::IllegalPacketLength.into());
         }
 
+        // track metrics
+        let packet_size = u64::try_from(length).expect("length is always positive");
+        metrics::packet_size::record_serverbound(packet_size);
+        tracing::Span::current().record("packet_length", packet_size);
+
         // extract the encoded packet id
         let id = self.stream.read_varint().await?;
+        tracing::Span::current().record("packet_id", id);
 
         // split a separate reader from the stream and read packet bytes (advancing stream)
         let mut buffer = vec![];
@@ -342,14 +327,22 @@ where
         Ok((id, buf))
     }
 
+    #[instrument(skip_all)]
     async fn send_packet<T: WritePacket + Send + Sync + Debug>(
         &mut self,
         packet: T,
     ) -> Result<(), Error> {
-        SENT_PACKETS.get_or_create(&SentPackets {}).inc();
-        Ok(self.stream.write_packet(packet).await?)
+        // write the packet to the stream
+        let bytes_written = self.stream.write_packet(packet).await?;
+
+        // track metrics
+        let packet_size = u64::try_from(bytes_written).expect("usize always fits into u64");
+        metrics::packet_size::record_clientbound(packet_size);
+
+        Ok(())
     }
 
+    #[instrument(skip_all)]
     fn apply_encryption(&mut self, shared_secret: &[u8]) -> Result<(), Error> {
         debug!("enabling encryption");
 
@@ -360,9 +353,8 @@ where
         Ok(())
     }
 
+    #[instrument(skip_all)]
     pub async fn listen(&mut self, client_address: SocketAddr) -> Result<(), Error> {
-        let start = Instant::now();
-
         // handle handshake
         debug!("awaiting handshake packet");
         let handshake = match_packet! { self,
@@ -376,15 +368,6 @@ where
             State::Transfer => "transfer",
         };
         debug!(next_state = variant, "received handshake packet");
-
-        let _timer = Guard::on_drop(|| {
-            CONNECTION_DURATION
-                .get_or_create(&ConnectionDurationLabels {
-                    variant,
-                    protocol_version: handshake.protocol_version,
-                })
-                .observe(start.elapsed().as_secs_f64());
-        });
 
         // handle status request
         if handshake.next_state == State::Status {
@@ -446,7 +429,7 @@ where
         let session_cookie = match_packet! { self,
             packet = login_in::CookieResponsePacket => packet,
         };
-        let session_id = session_cookie.payload.map(|session_id| session_id);
+        let session_id = session_cookie.payload;
 
         // in case of transfer, use the auth cookie
         let mut should_authenticate = true;
@@ -534,7 +517,7 @@ where
         // handle authentication if not already authenticated by the token
         if should_authenticate {
             debug!("authenticating with mojang");
-            let start = Instant::now();
+            let request_start = Instant::now();
             let auth_response = self
                 .mojang
                 .authenticate(
@@ -543,22 +526,13 @@ where
                     "",
                     &authentication::ENCODED_PUB,
                 )
-                .await;
-
-            let auth_response = match auth_response {
-                Ok(resp) => {
-                    MOJANG_DURATION
-                        .get_or_create(&MojangDurationLabels { result: "success" })
-                        .observe(start.elapsed().as_secs_f64());
-                    resp
-                }
-                Err(err) => {
-                    MOJANG_DURATION
-                        .get_or_create(&MojangDurationLabels { result: "error" })
-                        .observe(start.elapsed().as_secs_f64());
-                    return Err(Error::from(err));
-                }
-            };
+                .await
+                .inspect_err(|err| {
+                    // track request failed
+                    error!(err = %err, "mojang request failed");
+                    metrics::mojang_request_duration::record(request_start, "failed");
+                })?;
+            metrics::mojang_request_duration::record(request_start, "success");
 
             // update state for actual use info
             login_start.user_name = auth_response.name;
@@ -595,133 +569,52 @@ where
                 packet = conf_in::ClientInformationPacket => break packet,
                 // ignore unsupported packets but don't throw an error
                 _ = conf_in::PluginMessagePacket => continue,
+                _ = conf_in::ResourcePackResponsePacket => continue,
+                _ = conf_in::CookieResponsePacket => continue,
             }
         };
 
-        CLIENT_LOCALES
-            .get_or_create(&ClientLocaleLabels {
-                locale: client_info.locale.clone(),
-            })
-            .inc();
+        // track client metrics
+        metrics::client_locale::inc(client_info.locale.clone());
+        metrics::client_view_distance::record(
+            u64::try_from(client_info.view_distance).unwrap_or(0u64),
+        );
 
-        CLIENT_VIEW_DISTANCE
-            .get_or_create(&ClientViewDistanceLabels {})
-            .observe(f64::from(client_info.view_distance));
-
-        // write resource packs
-        debug!("getting resource packs from supplier");
-        let packs = self
-            .resourcepack_supplier
-            .get_resourcepacks(
-                &client_address,
-                (&handshake.server_address, handshake.server_port),
-                handshake.protocol_version as Protocol,
-                &login_start.user_name,
-                &login_start.user_id,
-                &client_info.locale,
-            )
-            .await?;
-        let mut pack_ids: HashMap<Uuid, (bool, Instant)> = HashMap::with_capacity(packs.len());
-
-        debug!(len = packs.len(), "sending resource pack packet(s)");
-        for pack in packs {
-            debug!(
-                hash = pack.hash,
-                uuid = %pack.uuid,
-                "sending resource pack packet"
-            );
-            let packet = conf_out::AddResourcePackPacket {
-                uuid: pack.uuid,
-                url: pack.url,
-                hash: pack.hash,
-                forced: pack.forced,
-                prompt_message: pack.prompt_message,
-            };
-            self.send_packet(packet).await?;
-            pack_ids.insert(pack.uuid, (pack.forced, Instant::now()));
-        }
-
-        // wait for resource packs to be accepted
-        debug!("awaiting resource pack response packet(s)");
-        while !pack_ids.is_empty() {
-            let packet = match_packet! { self, keep_alive,
-                packet = conf_in::ResourcePackResponsePacket => packet,
-                // handle keep alive packets
-                packet = conf_in::KeepAlivePacket => {
-                    if !self.keep_alive.replace(packet.id, 0) {
-                        debug!(id = packet.id, "keep alive packet id unknown");
-                    }
-                    continue;
-                },
-                // ignore unsupported packets but don't throw an error
-                _ = conf_in::ClientInformationPacket => continue,
-                _ = conf_in::PluginMessagePacket => continue,
-            };
-
-            // check the state for any final state in the resource pack loading process
-            debug!(
-                result = ?packet.result,
-                uuid = %packet.uuid,
-                "received resource pack response packet"
-            );
-            let success = match packet.result {
-                ResourcePackResult::Success => true,
-                ResourcePackResult::Declined
-                | ResourcePackResult::DownloadFailed
-                | ResourcePackResult::InvalidUrl
-                | ResourcePackResult::ReloadFailed
-                | ResourcePackResult::Discorded => false,
-                // pending state, keep waiting
-                _ => continue,
-            };
-
-            // pop pack from the list (ignoring unknown pack ids)
-            let Some((forced, time)) = pack_ids.remove(&packet.uuid) else {
-                continue;
-            };
-
-            if success {
-                RESOURCEPACK_DURATION
-                    .get_or_create(&ResourcePackDurationLabels {
-                        uuid: packet.uuid.to_string(),
-                    })
-                    .observe(time.elapsed().as_secs_f64());
+        // create a future that checks keep alive packets
+        let target_selector = self.target_selector.clone();
+        let sender = async {
+            loop {
+                match_packet! { self, keep_alive,
+                    // handle keep alive packets
+                    packet = conf_in::KeepAlivePacket => {
+                        if !self.keep_alive.replace(packet.id, 0) {
+                            debug!(id = packet.id, "keep alive packet id unknown");
+                        }
+                        continue
+                    },
+                    // ignore unsupported packets but don't throw an error
+                    _ = conf_in::ClientInformationPacket => continue,
+                    _ = conf_in::PluginMessagePacket => continue,
+                    _ = conf_in::ResourcePackResponsePacket => continue,
+                    _ = conf_in::CookieResponsePacket => continue,
+                }
             }
+        };
 
-            // handle pack forced
-            if forced && !success {
-                debug!("client failed to load forced resource pack");
-                let reason = self.localization.localize(
-                    &self.client_locale,
-                    "disconnect_failed_resourcepack",
-                    &[],
-                );
-
-                debug!("sending disconnect packet");
-                self.send_packet(conf_out::DisconnectPacket { reason })
-                    .await?;
-                return Err(Error::FailedResourcepack);
-            }
-        }
-
-        // transfer
+        // wait for target task to finish and send keep alive packets
+        // technically, this could be done a lot earlier (maybe even in a separate threat), however
+        // in the future we might want to consider the client information when selecting a target
         debug!("getting target from supplier");
-        let target = self
-            .target_selector
-            .select(
+        let target = tokio::select! {
+            result = sender => result?,
+            maybe_target = target_selector.select(
                 &client_address,
                 (&handshake.server_address, handshake.server_port),
                 handshake.protocol_version as Protocol,
                 &login_start.user_name,
                 &login_start.user_id,
-            )
-            .await?;
-
-        TRANSFER_TARGETS
-            .get_or_create(&TransferTargetsLabels {
-                target: target.clone().map(|target| target.address.to_string()),
-            })
-            .inc();
+            ) => maybe_target?,
+        };
 
         // disconnect if not target found
         let Some(target) = target else {

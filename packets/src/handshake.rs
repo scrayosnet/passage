@@ -14,6 +14,7 @@ pub mod serverbound {
     use tokio::io::{AsyncRead, AsyncReadExt};
     #[cfg(feature = "client")]
     use tokio::io::{AsyncWrite, AsyncWriteExt};
+    use tracing::instrument;
 
     /// The [`HandshakePacket`].
     ///
@@ -40,6 +41,7 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for HandshakePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
@@ -55,6 +57,7 @@ pub mod serverbound {
 
     #[cfg(feature = "server")]
     impl ReadPacket for HandshakePacket {
+        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
         async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
