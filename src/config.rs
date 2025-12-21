@@ -324,9 +324,6 @@ pub struct PlayerFillTargetStrategy {
 /// with status ok.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    /// The metrics server address.
-    pub metrics_address: SocketAddr,
-
     /// The sentry configuration.
     pub sentry: Sentry,
 
