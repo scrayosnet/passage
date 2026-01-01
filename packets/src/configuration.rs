@@ -26,7 +26,9 @@ pub mod clientbound {
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Cookie_Request_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
-    pub struct CookieRequestPacket;
+    pub struct CookieRequestPacket {
+        pub key: String,
+    }
 
     impl Packet for CookieRequestPacket {
         const ID: VarInt = 0x00;
@@ -35,10 +37,12 @@ pub mod clientbound {
     #[cfg(feature = "server")]
     impl WritePacket for CookieRequestPacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
+        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
         where
             S: AsyncWrite + Unpin + Send + Sync,
         {
+            buffer.write_string(&self.key).await?;
+
             Ok(())
         }
     }
@@ -46,11 +50,13 @@ pub mod clientbound {
     #[cfg(feature = "client")]
     impl ReadPacket for CookieRequestPacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
+        async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
         where
             S: AsyncRead + Unpin + Send + Sync,
         {
-            Ok(Self)
+            let key = buffer.read_string().await?;
+
+            Ok(Self { key })
         }
     }
 

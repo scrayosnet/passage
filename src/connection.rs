@@ -2,7 +2,7 @@ use crate::adapter::status::{Protocol, StatusSupplier};
 use crate::adapter::target_selection::TargetSelector;
 use crate::cipher_stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
 use crate::config::Localization;
-use crate::mojang::Mojang;
+use crate::mojang::{Mojang, ProfileProperty};
 use crate::{authentication, metrics};
 use packets::configuration::clientbound as conf_out;
 use packets::configuration::serverbound as conf_in;
@@ -183,6 +183,7 @@ pub struct AuthCookie {
     pub user_name: String,
     pub user_id: Uuid,
     pub target: Option<String>,
+    pub profile_properties: Vec<ProfileProperty>,
 }
 
 #[derive(Debug)]
@@ -433,6 +434,7 @@ where
 
         // in case of transfer, use the auth cookie
         let mut should_authenticate = true;
+        let mut profile_properties = vec![];
         'transfer: {
             if handshake.next_state == State::Transfer {
                 if self.auth_secret.is_none() {
@@ -457,7 +459,7 @@ where
                 };
 
                 let Some(secret) = &self.auth_secret else {
-                    debug!("no auth cookie received, skipping auth cookie");
+                    debug!("no auth secret configured, skipping auth cookie");
                     break 'transfer;
                 };
 
@@ -484,6 +486,7 @@ where
                 // update state by token
                 login_start.user_name = cookie.user_name;
                 login_start.user_id = cookie.user_id;
+                profile_properties = cookie.profile_properties;
             }
         }
 
@@ -537,6 +540,7 @@ where
             // update state for actual use info
             login_start.user_name = auth_response.name;
             login_start.user_id = auth_response.id;
+            profile_properties = auth_response.properties;
         }
 
         // enable encryption for the connection using the shared secret
@@ -647,6 +651,7 @@ where
                     user_name: login_start.user_name.clone(),
                     user_id: login_start.user_id,
                     target: Some(target.identifier.clone()),
+                    profile_properties,
                 };
 
                 let auth_payload = serde_json::to_vec(&cookie)?;

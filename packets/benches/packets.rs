@@ -235,8 +235,14 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::CookieRequestPacket", 0),
         |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(configuration::clientbound::CookieRequestPacket, buf.clone()))
+            b.to_async(&runtime).iter(|| {
+                rw_packet(
+                    configuration::clientbound::CookieRequestPacket {
+                        key: "foo".to_string(),
+                    },
+                    buf.clone(),
+                )
+            })
         },
     );
 

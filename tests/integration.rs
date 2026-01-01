@@ -20,7 +20,7 @@ use passage::authentication;
 use passage::cipher_stream::CipherStream;
 use passage::config::Localization;
 use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection, Error, SESSION_COOKIE_KEY};
-use passage::mojang::{AuthResponse, Mojang};
+use passage::mojang::{Mojang, Profile};
 use rand::TryRngCore;
 use rand::rngs::OsRng;
 use rsa::pkcs8::DecodePublicKey;
@@ -33,11 +33,11 @@ use uuid::{Uuid, uuid};
 
 #[derive(Default)]
 struct MojangMock {
-    pub response: AuthResponse,
+    pub response: Profile,
 }
 
 impl MojangMock {
-    pub fn new(response: AuthResponse) -> Self {
+    pub fn new(response: Profile) -> Self {
         Self { response }
     }
 }
@@ -50,7 +50,7 @@ impl Mojang for MojangMock {
         _shared_secret: &[u8],
         _server_id: &str,
         _encoded_public: &[u8],
-    ) -> Result<AuthResponse, reqwest::Error> {
+    ) -> Result<Profile, reqwest::Error> {
         Ok(self.response.clone())
     }
 }
@@ -288,6 +288,7 @@ async fn simulate_transfer_no_configuration() {
         user_name: user_name.clone(),
         user_id,
         target: None,
+        profile_properties: vec![],
     })
     .expect("auth cookie serialization failed");
 
@@ -441,6 +442,7 @@ async fn simulate_slow_transfer_no_configuration() {
         user_name: user_name.clone(),
         user_id,
         target: None,
+        profile_properties: vec![],
     })
     .expect("auth cookie serialization failed");
 
@@ -542,9 +544,11 @@ async fn simulate_login_no_configuration() {
         server_stream,
         Arc::clone(&status_supplier),
         Arc::clone(&target_selector),
-        Arc::new(MojangMock::new(AuthResponse {
+        Arc::new(MojangMock::new(Profile {
             id: user_id,
             name: user_name.clone(),
+            properties: vec![],
+            profile_actions: vec![],
         })),
         Arc::new(Localization::default()),
         None,
@@ -736,6 +740,7 @@ async fn sends_keep_alive() {
         user_name: user_name.clone(),
         user_id,
         target: None,
+        profile_properties: vec![],
     })
     .expect("auth cookie serialization failed");
 
@@ -896,6 +901,7 @@ async fn no_respond_keep_alive() {
         user_name: user_name.clone(),
         user_id,
         target: None,
+        profile_properties: vec![],
     })
     .expect("auth cookie serialization failed");
 
