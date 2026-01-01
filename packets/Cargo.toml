@@ -1,7 +1,7 @@
 [package]
 name = "packets"
 description = "Minecraft Server Packets for Passage"
-version = "0.1.10"
+version = "0.1.15"
 authors = [
     "Joshua Dean Küpper <admin@joshua-kuepper.de>",
     "Paul Wagner <contact@paulwagner.dev>",
