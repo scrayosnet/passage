@@ -14,7 +14,6 @@ use crate::adapter::status::StatusSupplier;
 #[cfg(feature = "grpc")]
 use crate::adapter::status::grpc::GrpcStatusSupplier;
 use crate::adapter::status::http::HttpStatusSupplier;
-use crate::adapter::status::mongodb::MongodbStatusSupplier;
 use crate::adapter::target_selection::TargetSelector;
 #[cfg(feature = "agones")]
 use crate::adapter::target_selection::agones::AgonesTargetSelector;
@@ -71,13 +70,6 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
                 return Err("grpc status adapter requires a configuration".into());
             };
             Arc::new(GrpcStatusSupplier::new(grpc).await?) as Arc<dyn StatusSupplier>
-        }
-        #[cfg(feature = "mongodb")]
-        "mongodb" => {
-            let Some(mongodb) = config.status.mongodb.clone() else {
-                return Err("mongodb status adapter requires a configuration".into());
-            };
-            Arc::new(MongodbStatusSupplier::new(mongodb).await?) as Arc<dyn StatusSupplier>
         }
         "http" => {
             let Some(http) = config.status.http.clone() else {

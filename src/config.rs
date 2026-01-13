@@ -169,9 +169,6 @@ pub struct Status {
     /// The config for the grpc status.
     pub grpc: Option<GrpcStatus>,
 
-    /// The config for the mongodb status.
-    pub mongodb: Option<MongodbStatus>,
-
     /// The config for the http status.
     pub http: Option<HttpStatus>,
 }
@@ -195,19 +192,6 @@ pub struct GrpcStatus {
     pub address: String,
 }
 
-/// [`MongodbStatus`] hold the mongodb status (ping) configuration.
-#[derive(Debug, Clone, Deserialize)]
-pub struct MongodbStatus {
-    /// The address of the mongodb adapter server.
-    pub address: String,
-
-    /// The cache duration in seconds to store the queried status.
-    pub cache_duration: u64,
-
-    /// The queries that should be executed to get the full status.
-    pub queries: Vec<MongodbStatusQuery>,
-}
-
 /// [`HttpStatus`] hold the http status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct HttpStatus {
@@ -216,19 +200,6 @@ pub struct HttpStatus {
 
     /// The cache duration in seconds to store the queried status.
     pub cache_duration: u64,
-}
-
-/// [`MongodbStatusQuery`] holds a single query to get the mongodb status (ping) information.
-#[derive(Debug, Clone, Deserialize)]
-pub struct MongodbStatusQuery {
-    /// The database of this specific query.
-    pub database: String,
-
-    /// The collection of this specific query.
-    pub collection: String,
-
-    /// The aggregation specification on the collection to get the document(s).
-    pub aggregation: String,
 }
 
 /// [`TargetDiscovery`] hold the target discovery configuration.
