@@ -19,7 +19,9 @@ use passage::adapter::target_strategy::fixed::FixedTargetSelectorStrategy;
 use passage::authentication;
 use passage::cipher_stream::CipherStream;
 use passage::config::Localization;
-use passage::connection::{AUTH_COOKIE_KEY, AuthCookie, Connection, Error, SESSION_COOKIE_KEY};
+use passage::connection::{
+    AUTH_COOKIE_KEY, AuthCookie, Connection, Error, SESSION_COOKIE_KEY, SessionCookie,
+};
 use passage::mojang::{Mojang, Profile};
 use rand::TryRngCore;
 use rand::rngs::OsRng;
@@ -267,7 +269,14 @@ async fn simulate_transfer_no_configuration() {
     client_stream
         .write_packet(login_in::CookieResponsePacket {
             key: cookie_request_packet.key,
-            payload: Some(vec![]),
+            payload: Some(
+                serde_json::to_vec(&SessionCookie {
+                    id: Default::default(),
+                    server_address: "".to_string(),
+                    server_port: 0,
+                })
+                .expect("session cookie serialization failed"),
+            ),
         })
         .await
         .expect("send session cookie response failed");
@@ -421,7 +430,14 @@ async fn simulate_slow_transfer_no_configuration() {
     client_stream
         .write_packet(login_in::CookieResponsePacket {
             key: cookie_request_packet.key,
-            payload: Some(vec![]),
+            payload: Some(
+                serde_json::to_vec(&SessionCookie {
+                    id: Default::default(),
+                    server_address: "".to_string(),
+                    server_port: 0,
+                })
+                .expect("session cookie serialization failed"),
+            ),
         })
         .await
         .expect("send session cookie response failed");
@@ -591,7 +607,14 @@ async fn simulate_login_no_configuration() {
     client_stream
         .write_packet(login_in::CookieResponsePacket {
             key: cookie_request_packet.key,
-            payload: Some(vec![]),
+            payload: Some(
+                serde_json::to_vec(&SessionCookie {
+                    id: Default::default(),
+                    server_address: "".to_string(),
+                    server_port: 0,
+                })
+                .expect("session cookie serialization failed"),
+            ),
         })
         .await
         .expect("send session cookie response failed");
@@ -719,7 +742,14 @@ async fn sends_keep_alive() {
     client_stream
         .write_packet(login_in::CookieResponsePacket {
             key: cookie_request_packet.key,
-            payload: Some(vec![]),
+            payload: Some(
+                serde_json::to_vec(&SessionCookie {
+                    id: Default::default(),
+                    server_address: "".to_string(),
+                    server_port: 0,
+                })
+                .expect("session cookie serialization failed"),
+            ),
         })
         .await
         .expect("send session cookie response failed");
@@ -880,7 +910,14 @@ async fn no_respond_keep_alive() {
     client_stream
         .write_packet(login_in::CookieResponsePacket {
             key: cookie_request_packet.key,
-            payload: Some(vec![]),
+            payload: Some(
+                serde_json::to_vec(&SessionCookie {
+                    id: Default::default(),
+                    server_address: "".to_string(),
+                    server_port: 0,
+                })
+                .expect("session cookie serialization failed"),
+            ),
         })
         .await
         .expect("send session cookie response failed");

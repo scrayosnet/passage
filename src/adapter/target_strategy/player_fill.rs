@@ -1,7 +1,7 @@
+use crate::adapter::Error;
 use crate::adapter::status::Protocol;
 use crate::adapter::target_selection::Target;
 use crate::adapter::target_strategy::{TargetFilterExt, TargetSelectorStrategy};
-use crate::adapter::Error;
 use crate::config::{PlayerFillTargetStrategy as PlayerFillConfig, TargetFilter};
 use async_trait::async_trait;
 use std::collections::HashMap;
