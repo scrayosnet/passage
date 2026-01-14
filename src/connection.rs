@@ -186,6 +186,13 @@ pub struct AuthCookie {
     pub profile_properties: Vec<ProfileProperty>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SessionCookie {
+    pub id: Uuid,
+    pub server_address: String,
+    pub server_port: u16,
+}
+
 #[derive(Debug)]
 pub struct KeepAlive<const SIZE: usize> {
     pub packets: [u64; SIZE],
@@ -427,10 +434,13 @@ where
         .await?;
 
         debug!("awaiting session cookie response packet");
-        let session_cookie = match_packet! { self,
+        let session_packet = match_packet! { self,
             packet = login_in::CookieResponsePacket => packet,
         };
-        let session_id = session_cookie.payload;
+        let session_cookie = session_packet
+            .payload
+            .map(|payload| serde_json::from_slice::<SessionCookie>(&payload))
+            .transpose()?;
 
         // in case of transfer, use the auth cookie
         let mut should_authenticate = true;
@@ -664,12 +674,16 @@ where
             }
         }
 
-        // set session id if not exist
-        if session_id.is_none() {
+        // set session id if not exist (does not override the session fields)
+        if session_cookie.is_none() {
             debug!("sending session cookie packet");
             self.send_packet(conf_out::StoreCookiePacket {
                 key: SESSION_COOKIE_KEY.to_string(),
-                payload: Uuid::new_v4().into_bytes().to_vec(),
+                payload: serde_json::to_vec(&SessionCookie {
+                    id: Uuid::new_v4(),
+                    server_address: handshake.server_address.clone(),
+                    server_port: handshake.server_port,
+                })?,
             })
             .await?;
         }

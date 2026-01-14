@@ -34,15 +34,6 @@ max_version = 1_000
 [status.grpc]
 address = "http://127.0.0.1:3030"
 
-[status.mongodb]
-address = "http://127.0.0.1:3030"
-cache_duration = 3
-
-[[status.mongodb.queries]]
-database = "minecraft"
-collection = "status"
-aggregation = "{}"
-
 [status.http]
 address = "https://example.com/status"
 cache_duration = 3

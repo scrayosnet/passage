@@ -4,7 +4,7 @@ members = ['packets']
 [package]
 name = "passage"
 description = "Minecraft Server Transfer Router"
-version = "0.1.15"
+version = "0.1.16"
 authors = [
     "Joshua Dean Küpper <admin@joshua-kuepper.de>",
     "Paul Wagner <contact@paulwagner.dev>",
@@ -51,7 +51,6 @@ prost-types = { version = "0.14", optional = true }
 kube = { version = "2.0", features = ["runtime", "derive"], optional = true }
 k8s-openapi = { version = "0.26", features = ["latest"], optional = true }
 schemars = { version = "1.1", optional = true }
-mongodb = { version = "3.4", optional = true }
 opentelemetry = { version = "0.31", features = ["trace", "metrics"] }
 opentelemetry-otlp = { version = "0.31", features = ["http-proto", "metrics"] }
 opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
@@ -66,10 +65,9 @@ tonic-build = { version = "0.14", optional = true }
 tonic-prost-build = { version = "0.14", optional = true }
 
 [features]
-default = ["agones", "grpc", "mongodb", "sentry"]
+default = ["agones", "grpc", "sentry"]
 agones = ["dep:kube", "dep:k8s-openapi", "dep:schemars"]
 grpc = ["dep:tonic", "dep:tonic-prost", "dep:tonic-build", "dep:tonic-prost-build", "dep:prost", "dep:prost-types"]
-mongodb = ["dep:mongodb"]
 sentry = ["dep:sentry", "dep:sentry-tracing"]
 
 [package.metadata.cargo-machete]
