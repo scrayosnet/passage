@@ -17,7 +17,7 @@ edition = "2024"
 rust-version = "1.86.0"
 
 [dependencies]
-tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal"] }
+tokio = { version = "1.49", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal"] }
 thiserror = { version = "2.0" }
 uuid = { version = "1.19", features = ["v4", "serde"] }
 fake = { version = "4.4", features = ["derive", "uuid"] }

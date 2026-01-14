@@ -6,7 +6,7 @@ use num_bigint::BigInt;
 use packets::VerifyToken;
 use rand::TryRngCore;
 use rand::rand_core::UnwrapErr;
-use rand::rngs::OsRng;
+use rand::rngs::SysRng;
 use rsa::pkcs8::EncodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use sha1::Sha1;
@@ -38,7 +38,7 @@ pub enum Error {
     #[error("could not encode the public key: {0}")]
     EncodingFailed(#[from] rsa::pkcs8::spki::Error),
     #[error("failed to retrieve randomness: {0}")]
-    UnavailableRandom(#[from] rand::rngs::OsError),
+    UnavailableRandom(#[from] rand::rngs::SysError),
     #[error("authentication request failed: {0}")]
     AuthRequestFailed(#[from] reqwest::Error),
     #[error("authentication request failed: {0}")]
@@ -87,7 +87,7 @@ pub fn verify<'a>(signed: &'a [u8], secret: &[u8]) -> (bool, &'a [u8]) {
 #[must_use]
 pub fn generate_keep_alive() -> u64 {
     // retrieve a new mutable instance of an OS RNG
-    let mut rng = OsRng;
+    let mut rng = SysRng;
 
     // generate random number
     rng.try_next_u64().expect("failed to generate randomness")
@@ -96,7 +96,7 @@ pub fn generate_keep_alive() -> u64 {
 /// Generates a new RSA keypair.
 fn generate_keypair() -> Result<(RsaPrivateKey, RsaPublicKey), Error> {
     // retrieve a new mutable instance of an OS RNG
-    let mut rng = UnwrapErr(OsRng);
+    let mut rng = UnwrapErr(SysRng);
 
     // generate the corresponding key pair
     let private_key = RsaPrivateKey::new(&mut rng, 1024)?;
@@ -114,7 +114,7 @@ fn encode_public_key(key: &RsaPublicKey) -> Result<Vec<u8>, Error> {
 /// Encrypts some value with an RSA public key for the Minecraft protocol.
 pub fn encrypt(key: &RsaPublicKey, value: &[u8]) -> Result<Vec<u8>, Error> {
     // retrieve a new mutable instance of an OS RNG
-    let mut rng = UnwrapErr(OsRng);
+    let mut rng = UnwrapErr(SysRng);
 
     Ok(key.encrypt(&mut rng, Pkcs1v15Encrypt, value)?)
 }
@@ -127,7 +127,7 @@ pub fn decrypt(key: &RsaPrivateKey, value: &[u8]) -> Result<Vec<u8>, Error> {
 /// Generates a random [`VerifyToken`].
 pub fn generate_token() -> Result<VerifyToken, Error> {
     // retrieve a new mutable instance of an OS RNG
-    let mut rng = OsRng;
+    let mut rng = SysRng;
 
     // populate the random bytes
     let mut data = [0u8; 32];

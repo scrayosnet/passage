@@ -24,7 +24,7 @@ use passage::connection::{
 };
 use passage::mojang::{Mojang, Profile};
 use rand::TryRngCore;
-use rand::rngs::OsRng;
+use rand::rngs::SysRng;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
 use std::net::SocketAddr;
@@ -58,7 +58,7 @@ impl Mojang for MojangMock {
 }
 
 pub fn encrypt(key: &RsaPublicKey, value: &[u8]) -> Vec<u8> {
-    key.encrypt(&mut OsRng.unwrap_err(), Pkcs1v15Encrypt, value)
+    key.encrypt(&mut SysRng.unwrap_err(), Pkcs1v15Encrypt, value)
         .expect("encrypt failed")
 }
 

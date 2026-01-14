@@ -116,14 +116,14 @@ mod tests {
     use super::*;
     use crate::authentication::create_ciphers;
     use rand::TryRngCore;
-    use rand::rngs::OsRng;
+    use rand::rngs::SysRng;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     const SHARED_SECRET: &[u8; 16] = b"verysecuresecret";
 
     fn generate_bytes(len: usize) -> Vec<u8> {
         let mut data = Vec::with_capacity(len);
-        OsRng
+        SysRng
             .try_fill_bytes(&mut data)
             .expect("failed to generate bytes");
         data
