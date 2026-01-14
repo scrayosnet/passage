@@ -1,7 +1,7 @@
-use crate::adapter::Error;
 use crate::adapter::status::Protocol;
 use crate::adapter::target_selection::Target;
 use crate::adapter::target_strategy::{TargetFilterExt, TargetSelectorStrategy};
+use crate::adapter::Error;
 use crate::config::{PlayerFillTargetStrategy as PlayerFillConfig, TargetFilter};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -38,8 +38,8 @@ impl TargetSelectorStrategy for PlayerFillTargetSelectorStrategy {
         _client_addr: &SocketAddr,
         (server_host, _): (&str, u16),
         _protocol: Protocol,
-        _username: &str,
-        _user_id: &Uuid,
+        username: &str,
+        user_id: &Uuid,
         targets: &[Target],
     ) -> Result<Option<Target>, Error> {
         let target = targets
@@ -58,7 +58,7 @@ impl TargetSelectorStrategy for PlayerFillTargetSelectorStrategy {
                 let Some(filter) = self.target_filter.get(server_host) else {
                     return self.target_filter.is_empty();
                 };
-                filter.matches(target)
+                filter.matches(target, username, user_id)
             })
             .max_by_key(|(_, players)| *players)
             .map(|(target, _)| target.clone());

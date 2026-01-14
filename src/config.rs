@@ -272,6 +272,10 @@ pub struct TargetFilter {
     /// Matches targets with at least the following metadata.
     #[serde(default)]
     pub meta: HashMap<String, String>,
+
+    /// Matches users with the provided username or uuid.
+    #[serde(default)]
+    pub allow_list: Option<Vec<String>>,
 }
 
 /// [`PlayerFillTargetStrategy`] hold the player fill target strategy configuration.
