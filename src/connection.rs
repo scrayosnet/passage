@@ -14,6 +14,7 @@ use packets::status::serverbound as status_in;
 use packets::{AsyncReadPacket, AsyncWritePacket, ReadPacket, State, VarInt};
 use packets::{Packet, WritePacket};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::{Cursor, ErrorKind};
 use std::net::SocketAddr;
@@ -184,6 +185,9 @@ pub struct AuthCookie {
     pub user_id: Uuid,
     pub target: Option<String>,
     pub profile_properties: Vec<ProfileProperty>,
+    // the extra data holds any system-specific (secured) user information
+    #[serde(default)]
+    pub extra: HashMap<String, String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -662,6 +666,7 @@ where
                     user_id: login_start.user_id,
                     target: Some(target.identifier.clone()),
                     profile_properties,
+                    extra: Default::default(),
                 };
 
                 let auth_payload = serde_json::to_vec(&cookie)?;

@@ -298,6 +298,7 @@ async fn simulate_transfer_no_configuration() {
         user_id,
         target: None,
         profile_properties: vec![],
+        extra: Default::default(),
     })
     .expect("auth cookie serialization failed");
 
@@ -459,6 +460,7 @@ async fn simulate_slow_transfer_no_configuration() {
         user_id,
         target: None,
         profile_properties: vec![],
+        extra: Default::default(),
     })
     .expect("auth cookie serialization failed");
 
@@ -771,6 +773,7 @@ async fn sends_keep_alive() {
         user_id,
         target: None,
         profile_properties: vec![],
+        extra: Default::default(),
     })
     .expect("auth cookie serialization failed");
 
@@ -939,6 +942,7 @@ async fn no_respond_keep_alive() {
         user_id,
         target: None,
         profile_properties: vec![],
+        extra: Default::default(),
     })
     .expect("auth cookie serialization failed");
 
