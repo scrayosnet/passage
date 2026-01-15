@@ -21,7 +21,7 @@ allow = [
     "ISC",
     "CC0-1.0",
     "CDLA-Permissive-2.0",
-    "MPL-2.0", # TODO might require us to use the same license
+    "OpenSSL",
 ]
 confidence-threshold = 0.8
 exceptions = []
