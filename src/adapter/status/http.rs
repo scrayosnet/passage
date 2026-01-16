@@ -1,21 +1,13 @@
-use crate::adapter::Error;
 use crate::adapter::refresh::Refreshable;
 use crate::adapter::status::{Protocol, ServerStatus, StatusSupplier};
+use crate::adapter::{Error, HTTP_CLIENT};
 use crate::config::HttpStatus as HttpStatusConfig;
 use crate::refresh;
 use async_trait::async_trait;
 use std::net::SocketAddr;
-use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::select;
 use tracing::{info, instrument};
-
-/// The shared http client.
-static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    reqwest::Client::builder()
-        .build()
-        .expect("failed to create http client")
-});
 
 pub struct HttpStatusSupplier {
     inner: Refreshable<Option<ServerStatus>>,

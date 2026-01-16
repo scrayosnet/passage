@@ -1,10 +1,30 @@
 //! This module contains the adapter logic and the individual implementations of the adapters with
 //! different responsibilities.
 
+use std::sync::LazyLock;
+
 mod refresh;
 pub mod status;
 pub mod target_selection;
 pub mod target_strategy;
+
+#[cfg(feature = "webpki-certs")]
+pub static HTTP_CLIENT: LazyLock<reqwest::Client> =
+    LazyLock::new(|| {
+        reqwest::Client::builder()
+            .tls_certs_only(webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().map(|cert| {
+                reqwest::Certificate::from_der(cert.as_ref()).expect("valid certificate")
+            }))
+            .build()
+            .expect("failed to build reqwest client")
+    });
+
+#[cfg(not(feature = "webpki-certs"))]
+pub static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .build()
+        .expect("failed to build reqwest client")
+});
 
 #[cfg(feature = "grpc")]
 pub mod proto {

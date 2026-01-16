@@ -4,7 +4,7 @@ members = ['packets']
 [package]
 name = "passage"
 description = "Minecraft Server Transfer Router"
-version = "0.1.19"
+version = "0.1.20"
 authors = [
     "Joshua Dean Küpper <admin@joshua-kuepper.de>",
     "Paul Wagner <contact@paulwagner.dev>",
@@ -14,7 +14,7 @@ repository = "https://github.com/scrayosnet/passage"
 readme = "README.md"
 documentation = "https://passage.scrayos.net/docs"
 homepage = "https://passage.scrayos.net"
-keywords = ["minecraft", "opentelemetry", "monitoring", "exporter", "ping"]
+keywords = ["minecraft", "opentelemetry", "monitoring", "package"]
 categories = ["emulators", "network-programming"]
 edition = "2024"
 rust-version = "1.88.0"
@@ -35,6 +35,7 @@ rand = { version = "0.10.0-rc.5" }
 num-bigint = { version = "0.4" }
 sha1 = { version = "0.10" }
 reqwest = { version = "0.13", features = ["json"] }
+webpki-root-certs = { version = "1.0.5", optional = true }
 cfb8 = { version = "0.8" }
 aes = { version = "0.8" }
 config = { version = "0.15" }
@@ -65,10 +66,11 @@ tonic-build = { version = "0.14", optional = true }
 tonic-prost-build = { version = "0.14", optional = true }
 
 [features]
-default = ["agones", "grpc", "sentry"]
+default = ["agones", "grpc", "sentry", "webpki-certs"]
 agones = ["dep:kube", "dep:k8s-openapi", "dep:schemars"]
 grpc = ["dep:tonic", "dep:tonic-prost", "dep:tonic-build", "dep:tonic-prost-build", "dep:prost", "dep:prost-types"]
 sentry = ["dep:sentry", "dep:sentry-tracing"]
+webpki-certs = ["dep:webpki-root-certs"]
 
 [package.metadata.cargo-machete]
 ignored = ["tonic-prost", "tonic-build", "tonic-prost-build", "prost", "prost-types", "k8s-openapi"]
