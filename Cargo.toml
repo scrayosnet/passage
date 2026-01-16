@@ -4,7 +4,7 @@ members = ['packets']
 [package]
 name = "passage"
 description = "Minecraft Server Transfer Router"
-version = "0.1.18"
+version = "0.1.19"
 authors = [
     "Joshua Dean Küpper <admin@joshua-kuepper.de>",
     "Paul Wagner <contact@paulwagner.dev>",
@@ -34,7 +34,7 @@ rsa = { version = "0.10.0-rc.10" }
 rand = { version = "0.10.0-rc.5" }
 num-bigint = { version = "0.4" }
 sha1 = { version = "0.10" }
-reqwest = { version = "0.13", default-features = false, features = ["json", "http2", "rustls"] }
+reqwest = { version = "0.13", features = ["json"] }
 cfb8 = { version = "0.8" }
 aes = { version = "0.8" }
 config = { version = "0.15" }
