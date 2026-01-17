@@ -23,10 +23,7 @@ rust-version = "1.88.0"
 packets = { path = "./packets", features = ["server"] }
 tokio = { version = "1.49", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal", "test-util"] }
 tokio-util = { version = "0.7", features = ["rt"] }
-tracing = { version = "0.1" }
-tracing-opentelemetry = { version = "0.32", features = ["metrics"] }
 thiserror = { version = "2.0" }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 uuid = { version = "1.19", features = ["v4", "serde"] }
@@ -34,28 +31,42 @@ rsa = { version = "0.10.0-rc.10" }
 rand = { version = "0.10.0-rc.5" }
 num-bigint = { version = "0.4" }
 sha1 = { version = "0.10" }
-reqwest = { version = "0.13", features = ["json"] }
-webpki-root-certs = { version = "1.0.5", optional = true }
 cfb8 = { version = "0.8" }
 aes = { version = "0.8" }
 config = { version = "0.15" }
-sentry = { version = "0.46", default-features = false, features = ["backtrace", "contexts", "panic", "debug-images", "reqwest", "rustls", "tower"], optional = true }
-sentry-tracing = { version = "0.46", optional = true }
 async-trait = "0.1"
 sha2 = { version = "0.10" }
 hmac = { version = "0.12" }
-futures-util = { version = "0.3" }
-tonic = { version = "0.14", optional = true }
-tonic-prost = { version = "0.14", optional = true }
-prost = { version = "0.14", optional = true }
-prost-types = { version = "0.14", optional = true }
-kube = { version = "3.0", features = ["runtime", "derive"], optional = true }
-k8s-openapi = { version = "0.27", features = ["latest"], optional = true }
-schemars = { version = "1.2", optional = true }
+
+# http adapter and mojang requests
+reqwest = { version = "0.13", features = ["json"] }
+
+# application tracing
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-opentelemetry = { version = "0.32", features = ["metrics"] }
+
+# open telemetry
 opentelemetry = { version = "0.31", features = ["trace", "metrics"] }
 opentelemetry-otlp = { version = "0.31", features = ["http-proto", "metrics"] }
 opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
 opentelemetry_sdk = "0.31"
+
+# sentry
+sentry = { version = "0.46", default-features = false, features = ["backtrace", "contexts", "panic", "debug-images", "reqwest", "rustls", "tower"], optional = true }
+sentry-tracing = { version = "0.46", optional = true }
+
+# grpc adapter
+tonic = { version = "0.14", optional = true }
+tonic-prost = { version = "0.14", optional = true }
+prost = { version = "0.14", optional = true }
+prost-types = { version = "0.14", optional = true }
+
+# agones adapter
+kube = { version = "3.0", default-features = false, features = ["runtime", "derive", "rustls-tls", "aws-lc-rs"], optional = true }
+k8s-openapi = { version = "0.27", features = ["latest"], optional = true }
+schemars = { version = "1.2", optional = true }
+futures-util = { version = "0.3" }
 
 [dev-dependencies]
 packets = { path = "./packets", features = ["server", "client"] }
@@ -66,11 +77,10 @@ tonic-build = { version = "0.14", optional = true }
 tonic-prost-build = { version = "0.14", optional = true }
 
 [features]
-default = ["agones", "grpc", "sentry", "webpki-certs"]
+default = ["agones", "grpc", "sentry"]
 agones = ["dep:kube", "dep:k8s-openapi", "dep:schemars"]
 grpc = ["dep:tonic", "dep:tonic-prost", "dep:tonic-build", "dep:tonic-prost-build", "dep:prost", "dep:prost-types"]
 sentry = ["dep:sentry", "dep:sentry-tracing"]
-webpki-certs = ["dep:webpki-root-certs"]
 
 [package.metadata.cargo-machete]
 ignored = ["tonic-prost", "tonic-build", "tonic-prost-build", "prost", "prost-types", "k8s-openapi"]

@@ -28,7 +28,7 @@ fn resource(config: &OpenTelemetry) -> Resource {
         .with_schema_url(
             [
                 KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
-                KeyValue::new(SERVICE_NAMESPACE, env!("CARGO_PKG_NAME")),
+                KeyValue::new(SERVICE_NAMESPACE, "scrayosnet"),
                 KeyValue::new(DEPLOYMENT_ENVIRONMENT_NAME, config.environment.to_string()),
             ],
             SCHEMA_URL,

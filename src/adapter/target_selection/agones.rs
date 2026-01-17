@@ -4,6 +4,7 @@ use crate::adapter::target_selection::{Target, TargetSelector, strategize};
 use crate::adapter::target_strategy::TargetSelectorStrategy;
 use crate::config::AgonesTargetDiscovery as AgonesConfig;
 use async_trait::async_trait;
+use futures_util::TryStreamExt;
 use futures_util::stream::StreamExt;
 use kube::runtime::watcher::{Config, InitialListStrategy, ListSemantic};
 use kube::runtime::{WatchStreamExt, watcher};
@@ -196,7 +197,7 @@ impl AgonesTargetSelector {
                 let maybe_server = select! {
                     biased;
                     _ = _token.cancelled() => break,
-                    maybe_server = stream.next() => maybe_server.transpose(),
+                    maybe_server = stream.try_next() => maybe_server,
                 };
 
                 let server = match maybe_server {

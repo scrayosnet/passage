@@ -20,6 +20,9 @@ FROM scratch
 # declare our minecraft and metrics ports
 EXPOSE 25565
 
+# copy the ssl certificates
+COPY --from=builder "/etc/ssl/certs/ca-certificates.crt" "/etc/ssl/certs/ca-certificates.crt"
+
 # copy the raw binary into the new image
 COPY --from=builder "/usr/src/passage/target/release/passage" "/passage"
 
