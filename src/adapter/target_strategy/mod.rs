@@ -31,10 +31,10 @@ pub trait TargetFilterExt {
 impl TargetFilterExt for TargetFilter {
     fn matches(&self, target: &Target, username: &str, user_id: &Uuid) -> bool {
         // check target identifier
-        if let Some(identifier) = &self.identifier {
-            if &target.identifier != identifier {
-                return false;
-            }
+        if let Some(identifier) = &self.identifier
+            && &target.identifier != identifier
+        {
+            return false;
         }
 
         // check target metadata

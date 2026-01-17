@@ -2251,7 +2251,6 @@ dependencies = [
  "prost",
  "reqwest 0.12.28",
  "thiserror 2.0.17",
- "tracing",
 ]
 
 [[package]]
@@ -2325,7 +2324,7 @@ dependencies = [
 
 [[package]]
 name = "packets"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "criterion",
  "fake",
@@ -2378,7 +2377,7 @@ dependencies = [
 
 [[package]]
 name = "passage"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "aes",
  "async-trait",
@@ -2934,6 +2933,7 @@ dependencies = [
  "pin-project-lite",
  "quinn",
  "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -3137,7 +3137,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

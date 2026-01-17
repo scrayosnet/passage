@@ -4,7 +4,7 @@ members = ['packets']
 [package]
 name = "passage"
 description = "Minecraft Server Transfer Router"
-version = "0.1.20"
+version = "0.1.21"
 authors = [
     "Joshua Dean Küpper <admin@joshua-kuepper.de>",
     "Paul Wagner <contact@paulwagner.dev>",
@@ -48,9 +48,9 @@ tracing-opentelemetry = { version = "0.32", features = ["metrics"] }
 
 # open telemetry
 opentelemetry = { version = "0.31", features = ["trace", "metrics"] }
-opentelemetry-otlp = { version = "0.31", features = ["http-proto", "metrics"] }
+opentelemetry_sdk = { version = "0.31" }
 opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
-opentelemetry_sdk = "0.31"
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "metrics", "trace", "reqwest-rustls"] }
 
 # sentry
 sentry = { version = "0.46", default-features = false, features = ["backtrace", "contexts", "panic", "debug-images", "reqwest", "rustls", "tower"], optional = true }
