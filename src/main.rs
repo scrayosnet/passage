@@ -11,7 +11,6 @@ use opentelemetry_semantic_conventions::{
     SCHEMA_URL,
     attribute::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_VERSION},
 };
-use passage::adapter::HTTP_CLIENT;
 use passage::config::{Config, OpenTelemetry};
 use std::borrow::Cow::Owned;
 use std::collections::HashMap;

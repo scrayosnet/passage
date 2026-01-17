@@ -2251,6 +2251,7 @@ dependencies = [
  "prost",
  "reqwest 0.12.28",
  "thiserror 2.0.17",
+ "tracing",
 ]
 
 [[package]]
@@ -2933,7 +2934,6 @@ dependencies = [
  "pin-project-lite",
  "quinn",
  "rustls",
- "rustls-native-certs",
  "rustls-pki-types",
  "serde",
  "serde_json",
