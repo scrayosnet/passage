@@ -55,6 +55,7 @@ use tracing::warn;
 #[derive(Debug, Clone, Deserialize)]
 pub struct Localization {
     /// The locale to be used in case the client locale is unknown or unsupported.
+    #[serde(alias = "defaultlocale")]
     pub default_locale: String,
 
     /// The localizable messages.
@@ -134,15 +135,19 @@ pub struct OpenTelemetry {
     pub environment: String,
 
     /// The base64 basic auth token traces endpoint.
+    #[serde(alias = "tracestoken")]
     pub traces_token: String,
 
     /// The address of the http/protobuf traces endpoint.
+    #[serde(alias = "tracesendpoint")]
     pub traces_endpoint: String,
 
     /// The base64 basic auth token metrics endpoint.
+    #[serde(alias = "metricstoken")]
     pub metrics_token: String,
 
     /// The address of the http/protobuf metrics endpoint.
+    #[serde(alias = "metricsendpoint")]
     pub metrics_endpoint: String,
 }
 
@@ -179,9 +184,13 @@ pub struct FixedStatus {
     pub name: String,
     pub description: Option<String>,
     pub favicon: Option<String>,
+    #[serde(alias = "enforcessecurechat")]
     pub enforces_secure_chat: Option<bool>,
+    #[serde(alias = "preferredversion")]
     pub preferred_version: Protocol,
+    #[serde(alias = "minversion")]
     pub min_version: Protocol,
+    #[serde(alias = "maxversion")]
     pub max_version: Protocol,
 }
 
@@ -199,6 +208,7 @@ pub struct HttpStatus {
     pub address: String,
 
     /// The cache duration in seconds to store the queried status.
+    #[serde(alias = "cacheduration")]
     pub cache_duration: u64,
 }
 
@@ -238,6 +248,7 @@ pub struct AgonesTargetDiscovery {
     /// The namespace to search for agones game servers.
     pub namespace: String,
     /// The labels to search for agones game servers.
+    #[serde(alias = "labelselector")]
     pub label_selector: Option<String>,
 }
 
@@ -251,6 +262,7 @@ pub struct TargetStrategy {
     pub grpc: Option<GrpcTargetStrategy>,
 
     /// The config for the player fill target strategy.
+    #[serde(alias = "playerfill")]
     pub player_fill: Option<PlayerFillTargetStrategy>,
 }
 
@@ -264,6 +276,7 @@ pub struct GrpcTargetStrategy {
 #[derive(Debug, Clone, Deserialize)]
 pub struct TargetFilter {
     /// Matches incoming request server host.
+    #[serde(alias = "serverhost")]
     pub server_host: String,
 
     /// Matches targets with exact tagte identifier.
@@ -275,6 +288,7 @@ pub struct TargetFilter {
 
     /// Matches users with the provided username or uuid.
     #[serde(default)]
+    #[serde(alias = "allowlist")]
     pub allow_list: Option<Vec<String>>,
 }
 
@@ -285,10 +299,12 @@ pub struct PlayerFillTargetStrategy {
     pub field: String,
 
     /// The number of players that will be filled at maximum.
+    #[serde(alias = "maxplayers")]
     pub max_players: u32,
 
     /// The target filters, matching server hostname against target.
     #[serde(default)]
+    #[serde(alias = "targetfilters")]
     pub target_filters: Vec<TargetFilter>,
 }
 
@@ -306,6 +322,7 @@ pub struct Config {
     pub otel: OpenTelemetry,
 
     /// The rate limiter config.
+    #[serde(alias = "ratelimiter")]
     pub rate_limiter: RateLimiter,
 
     /// The network address that should be used to bind the HTTP server for connection requests.
@@ -315,15 +332,18 @@ pub struct Config {
     pub timeout: u64,
 
     /// The auth cookie secret, disabled if empty.
+    #[serde(alias = "authsecret")]
     pub auth_secret: Option<String>,
 
     /// The status (ping) configuration.
     pub status: Status,
 
     /// The target discovery configuration.
+    #[serde(alias = "targetdiscovery")]
     pub target_discovery: TargetDiscovery,
 
     /// The target strategy configuration.
+    #[serde(alias = "targetstrategy")]
     pub target_strategy: TargetStrategy,
 
     /// The localization configuration.
