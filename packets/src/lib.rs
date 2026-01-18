@@ -13,7 +13,7 @@ pub mod reader;
 pub mod status;
 pub mod writer;
 
-const INITIAL_BUFFER_SIZE: usize = 48;
+pub const INITIAL_BUFFER_SIZE: usize = 48;
 
 pub type VerifyToken = [u8; 32];
 

@@ -11,7 +11,7 @@ use packets::login::clientbound as login_out;
 use packets::login::serverbound as login_in;
 use packets::status::clientbound as status_out;
 use packets::status::serverbound as status_in;
-use packets::{AsyncReadPacket, AsyncWritePacket, ReadPacket, State, VarInt};
+use packets::{AsyncReadPacket, AsyncWritePacket, INITIAL_BUFFER_SIZE, ReadPacket, State, VarInt};
 use packets::{Packet, WritePacket};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -20,10 +20,10 @@ use std::io::{Cursor, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::io::AsyncReadExt;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{Instant, Interval};
-use tracing::{debug, error, info, instrument};
+use tracing::{Instrument, debug, error, field, info, instrument};
 use uuid::Uuid;
 
 #[macro_export]
@@ -274,7 +274,7 @@ impl<S> Connection<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
 {
-    #[instrument(skip_all)]
+    #[instrument(skip_all, fields(packet_length = field::Empty, packet_id = field::Empty))]
     async fn receive_packet(
         &mut self,
         keep_alive: bool,
@@ -304,7 +304,7 @@ where
                     self.send_packet(packet).await?;
                 },
                 // await the next packet in, reading the packet size (expect fast execution)
-                maybe_length = self.stream.read_varint() => {
+                maybe_length = self.stream.read_varint().instrument(tracing::info_span!("read_packet_length", otel.kind = "server")) => {
                     break maybe_length?;
                 },
             }
@@ -325,7 +325,11 @@ where
         tracing::Span::current().record("packet_length", packet_size);
 
         // extract the encoded packet id
-        let id = self.stream.read_varint().await?;
+        let id = self
+            .stream
+            .read_varint()
+            .instrument(tracing::info_span!("read_packet_id", otel.kind = "server"))
+            .await?;
         tracing::Span::current().record("packet_id", id);
 
         // split a separate reader from the stream and read packet bytes (advancing stream)
@@ -333,6 +337,10 @@ where
         (&mut self.stream)
             .take(length as u64 - 1)
             .read_to_end(&mut buffer)
+            .instrument(tracing::info_span!(
+                "read_packet_bytes",
+                otel.kind = "server"
+            ))
             .await?;
         let buf = Cursor::new(buffer);
 
@@ -344,11 +352,29 @@ where
         &mut self,
         packet: T,
     ) -> Result<(), Error> {
-        // write the packet to the stream
-        let bytes_written = self.stream.write_packet(packet).await?;
+        // create a new buffer (our packets are very small)
+        // TODO reuse buffer here!
+        let mut buffer = Vec::with_capacity(INITIAL_BUFFER_SIZE);
+
+        // write the packets id and the respective packets content
+        buffer.write_varint(T::ID as VarInt).await?;
+        packet.write_to_buffer(&mut buffer).await?;
+
+        // prepare a final buffer (leaving max 2 bytes for varint as packets never get that big)
+        let packet_len = buffer.len();
+        // TODO reuse buffer here!
+        let mut final_buffer = Vec::with_capacity(packet_len + 2);
+        final_buffer.write_varint(packet_len as VarInt).await?;
+        final_buffer.extend_from_slice(&buffer);
+
+        // send the final buffer into the stream
+        self.stream
+            .write_all(&final_buffer)
+            .instrument(tracing::info_span!("write_packet", otel.kind = "server"))
+            .await?;
 
         // track metrics
-        let packet_size = u64::try_from(bytes_written).expect("usize always fits into u64");
+        let packet_size = u64::try_from(final_buffer.len()).expect("usize always fits into u64");
         metrics::packet_size::record_clientbound(packet_size);
 
         Ok(())
