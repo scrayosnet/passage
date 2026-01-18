@@ -2325,7 +2325,7 @@ dependencies = [
 
 [[package]]
 name = "packets"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "criterion",
  "fake",
@@ -2378,7 +2378,7 @@ dependencies = [
 
 [[package]]
 name = "passage"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "aes",
  "async-trait",
