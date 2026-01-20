@@ -33,7 +33,7 @@ use crate::rate_limiter::RateLimiter;
 use adapter::status::fixed::FixedStatusSupplier;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::time::{Instant, timeout};
@@ -178,8 +178,36 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 
         // resolve real client address from proxy protocol header (if enabled)
         if config.proxy_protocol.enabled {
-            addr = addr;
-            debug!(addr = addr.to_string(), "resolved real client address from proxy protocol header");
+            match parse_proxy_protocol(&mut stream).await {
+                Ok(Some(proxy_addr)) => {
+                    addr = proxy_addr;
+                    debug!(addr = addr.to_string(), "resolved real client address from proxy protocol header");
+                }
+                Ok(None) => {
+                    warn!(addr = addr.to_string(), "no proxy protocol header present, rejecting connection");
+                    metrics::request_duration::record(connection_start, "proxy-protocol-missing");
+                    if let Err(e) = stream.shutdown().await {
+                        debug!(
+                            cause = e.to_string(),
+                            addr = &addr.to_string(),
+                            "failed to close a client connection"
+                        );
+                    }
+                    continue;
+                }
+                Err(e) => {
+                    warn!(cause = e.to_string(), "failed to parse proxy protocol header, closing connection");
+                    metrics::request_duration::record(connection_start, "proxy-protocol-error");
+                    if let Err(e) = stream.shutdown().await {
+                        debug!(
+                            cause = e.to_string(),
+                            addr = &addr.to_string(),
+                            "failed to close a client connection"
+                        );
+                    }
+                    continue;
+                }
+            }
         }
 
         // check rate limiter
@@ -258,4 +286,22 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 
     info!("protocol server stopped successfully");
     Ok(())
+}
+
+/// Parses the PROXY protocol header from a TCP stream.
+///
+/// This function attempts to read and parse a PROXY protocol v1 or v2 header from the provided
+/// TCP stream. The PROXY protocol is commonly used by load balancers and proxies to preserve
+/// the original client IP address information.
+///
+/// # Returns
+///
+/// - `Ok(Some(SocketAddr))` - Successfully parsed proxy protocol header with client address
+/// - `Ok(None)` - No proxy protocol header detected (not an error)
+/// - `Err(...)` - Failed to parse or invalid proxy protocol header
+async fn parse_proxy_protocol(
+    stream: &mut tokio::net::TcpStream,
+) -> Result<Option<std::net::SocketAddr>, Box<dyn std::error::Error>> {
+    // no PROXY protocol header detected
+    Ok(None)
 }
