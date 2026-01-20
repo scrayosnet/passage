@@ -8,6 +8,7 @@ pub mod config;
 pub mod connection;
 mod metrics;
 pub mod mojang;
+pub mod proxy_protocol;
 pub mod rate_limiter;
 
 use crate::adapter::status::StatusSupplier;
@@ -57,6 +58,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let timeout_duration = Duration::from_secs(config.timeout);
     let auth_secret = config.auth_secret.clone().map(String::into_bytes);
     let localization = Arc::new(config.localization.clone());
+    let proxy_protocol_enabled = config.proxy_protocol.enabled;
 
     // initialize status supplier
     debug!(
@@ -174,17 +176,50 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
             },
         };
         let connection_start = Instant::now();
-        debug!(addr = addr.to_string(), "received protocol connection");
 
-        // check rate limiter
-        if rate_limiter_enabled && !rate_limiter.enqueue(addr.ip()) {
-            info!(addr = addr.to_string(), "rate limited client");
+        // extract real client address from PROXY protocol header if enabled
+        let client_addr = if proxy_protocol_enabled {
+            match proxy_protocol::read_proxy_header(&mut stream).await {
+                Ok(real_addr) => {
+                    debug!(
+                        proxy_addr = addr.to_string(),
+                        real_addr = real_addr.to_string(),
+                        "extracted real client address from PROXY protocol"
+                    );
+                    real_addr
+                }
+                Err(e) => {
+                    warn!(
+                        cause = e.to_string(),
+                        addr = addr.to_string(),
+                        "failed to read PROXY protocol header, rejecting connection"
+                    );
+                    metrics::request_duration::record(connection_start, "proxy-protocol-error");
+                    if let Err(e) = stream.shutdown().await {
+                        debug!(
+                            cause = e.to_string(),
+                            addr = addr.to_string(),
+                            "failed to close a client connection"
+                        );
+                    }
+                    continue;
+                }
+            }
+        } else {
+            addr
+        };
+
+        debug!(addr = client_addr.to_string(), "received protocol connection");
+
+        // check rate limiter (use real client address)
+        if rate_limiter_enabled && !rate_limiter.enqueue(client_addr.ip()) {
+            info!(addr = client_addr.to_string(), "rate limited client");
             metrics::request_duration::record(connection_start, "rejected");
 
             if let Err(e) = stream.shutdown().await {
                 debug!(
                     cause = e.to_string(),
-                    addr = &addr.to_string(),
+                    addr = &client_addr.to_string(),
                     "failed to close a client connection"
                 );
             }
@@ -201,7 +236,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         let connection_id = uuid::Uuid::new_v4();
         let connection_span = tracing::info_span!(
             "protocol",
-            addr = addr.to_string(),
+            addr = client_addr.to_string(),
             id = connection_id.to_string(),
         );
 
@@ -221,7 +256,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
                 );
 
                 // handle the client connection (ignore connection closed by the client)
-                let timeout = timeout(timeout_duration, con.listen(addr)).await;
+                let timeout = timeout(timeout_duration, con.listen(client_addr)).await;
                 let connection_result = match timeout {
                     Ok(Err(Error::ConnectionClosed(_))) => "connection-closed",
                     Ok(Err(err)) => {
