@@ -33,5 +33,8 @@ COPY --from=builder "/etc/group" "/etc/group"
 # we run with minimum permissions as the nobody user
 USER nobody:nobody
 
+# stop using sigint for graceful shutdown
+STOPSIGNAL SIGINT
+
 # just execute the raw binary without any wrapper
 ENTRYPOINT ["/passage"]

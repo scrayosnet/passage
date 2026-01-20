@@ -166,7 +166,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         // accept the next incoming connection
-        let (mut stream, addr) = select! {
+        let (mut stream, mut addr) = select! {
             accepted = listener.accept() => accepted?,
             _ = tokio::signal::ctrl_c() => {
                 info!("received ctrl-c signal, shutting down");
@@ -175,6 +175,12 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         };
         let connection_start = Instant::now();
         debug!(addr = addr.to_string(), "received protocol connection");
+
+        // resolve real client address from proxy protocol header (if enabled)
+        if config.proxy_protocol.enabled {
+            addr = addr;
+            debug!(addr = addr.to_string(), "resolved real client address from proxy protocol header");
+        }
 
         // check rate limiter
         if rate_limiter_enabled && !rate_limiter.enqueue(addr.ip()) {

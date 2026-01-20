@@ -19,6 +19,9 @@ enabled = true
 duration = 60
 size = 60
 
+[proxy_protocol]
+enabled = false
+
 [status]
 adapter = "fixed"
 

@@ -126,6 +126,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("auth cookie is enabled");
         }
 
+        if config.proxy_protocol.enabled {
+            info!("proxy protocol is enabled");
+        }
+
         let locale = config.localization.localize_default("locale", &[]);
         info!(locale = locale, "using localization");
 
