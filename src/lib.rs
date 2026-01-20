@@ -8,7 +8,6 @@ pub mod config;
 pub mod connection;
 mod metrics;
 pub mod mojang;
-pub mod proxy_protocol;
 pub mod rate_limiter;
 
 use crate::adapter::status::StatusSupplier;
@@ -32,9 +31,10 @@ use crate::mojang::Api;
 use crate::mojang::Mojang;
 use crate::rate_limiter::RateLimiter;
 use adapter::status::fixed::FixedStatusSupplier;
+use ppp::PartialResult;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::time::{Instant, timeout};
@@ -179,22 +179,156 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 
         // extract real client address from PROXY protocol header if enabled
         let client_addr = if proxy_protocol_enabled {
-            match proxy_protocol::read_proxy_header(&mut stream).await {
-                Ok(real_addr) => {
-                    debug!(
-                        proxy_addr = addr.to_string(),
-                        real_addr = real_addr.to_string(),
-                        "extracted real client address from PROXY protocol"
-                    );
-                    real_addr
+            // Read proxy protocol header
+            let mut buffer = [0u8; 512];
+            let mut read = 0;
+            let header = loop {
+                match stream.read(&mut buffer[read..]).await {
+                    Ok(0) => {
+                        warn!(
+                            addr = addr.to_string(),
+                            "connection closed while reading PROXY protocol header"
+                        );
+                        metrics::request_duration::record(connection_start, "proxy-protocol-error");
+                        break None;
+                    }
+                    Ok(n) => {
+                        read += n;
+                        let result = ppp::HeaderResult::parse(&buffer[..read]);
+                        if result.is_complete() {
+                            break Some(result);
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            cause = e.to_string(),
+                            addr = addr.to_string(),
+                            "failed to read PROXY protocol header"
+                        );
+                        metrics::request_duration::record(connection_start, "proxy-protocol-error");
+                        break None;
+                    }
                 }
-                Err(e) => {
+            };
+
+            match header {
+                Some(ppp::HeaderResult::V1(Ok(v1_header))) => {
+                    match v1_header.addresses {
+                        ppp::v1::Addresses::Tcp4(addrs) => {
+                            let real_addr = std::net::SocketAddr::new(
+                                std::net::IpAddr::V4(addrs.source_address),
+                                addrs.source_port,
+                            );
+                            debug!(
+                                proxy_addr = addr.to_string(),
+                                real_addr = real_addr.to_string(),
+                                "extracted real client address from PROXY protocol v1"
+                            );
+                            real_addr
+                        }
+                        ppp::v1::Addresses::Tcp6(addrs) => {
+                            let real_addr = std::net::SocketAddr::new(
+                                std::net::IpAddr::V6(addrs.source_address),
+                                addrs.source_port,
+                            );
+                            debug!(
+                                proxy_addr = addr.to_string(),
+                                real_addr = real_addr.to_string(),
+                                "extracted real client address from PROXY protocol v1"
+                            );
+                            real_addr
+                        }
+                        _ => {
+                            warn!(
+                                addr = addr.to_string(),
+                                "PROXY protocol v1 header does not contain address info"
+                            );
+                            if let Err(e) = stream.shutdown().await {
+                                debug!(
+                                    cause = e.to_string(),
+                                    addr = addr.to_string(),
+                                    "failed to close a client connection"
+                                );
+                            }
+                            continue;
+                        }
+                    }
+                }
+                Some(ppp::HeaderResult::V2(Ok(v2_header))) => {
+                    match v2_header.addresses {
+                        ppp::v2::Addresses::IPv4(addrs) => {
+                            let real_addr = std::net::SocketAddr::new(
+                                std::net::IpAddr::V4(addrs.source_address),
+                                addrs.source_port,
+                            );
+                            debug!(
+                                proxy_addr = addr.to_string(),
+                                real_addr = real_addr.to_string(),
+                                "extracted real client address from PROXY protocol v2"
+                            );
+                            real_addr
+                        }
+                        ppp::v2::Addresses::IPv6(addrs) => {
+                            let real_addr = std::net::SocketAddr::new(
+                                std::net::IpAddr::V6(addrs.source_address),
+                                addrs.source_port,
+                            );
+                            debug!(
+                                proxy_addr = addr.to_string(),
+                                real_addr = real_addr.to_string(),
+                                "extracted real client address from PROXY protocol v2"
+                            );
+                            real_addr
+                        }
+                        _ => {
+                            warn!(
+                                addr = addr.to_string(),
+                                "PROXY protocol v2 header does not contain address info"
+                            );
+                            if let Err(e) = stream.shutdown().await {
+                                debug!(
+                                    cause = e.to_string(),
+                                    addr = addr.to_string(),
+                                    "failed to close a client connection"
+                                );
+                            }
+                            continue;
+                        }
+                    }
+                }
+                Some(ppp::HeaderResult::V1(Err(e))) => {
                     warn!(
                         cause = e.to_string(),
                         addr = addr.to_string(),
-                        "failed to read PROXY protocol header, rejecting connection"
+                        "failed to parse PROXY protocol v1 header, rejecting connection"
                     );
                     metrics::request_duration::record(connection_start, "proxy-protocol-error");
+                    if let Err(e) = stream.shutdown().await {
+                        debug!(
+                            cause = e.to_string(),
+                            addr = addr.to_string(),
+                            "failed to close a client connection"
+                        );
+                    }
+                    continue;
+                }
+                Some(ppp::HeaderResult::V2(Err(e))) => {
+                    warn!(
+                        cause = e.to_string(),
+                        addr = addr.to_string(),
+                        "failed to parse PROXY protocol v2 header, rejecting connection"
+                    );
+                    metrics::request_duration::record(connection_start, "proxy-protocol-error");
+                    if let Err(e) = stream.shutdown().await {
+                        debug!(
+                            cause = e.to_string(),
+                            addr = addr.to_string(),
+                            "failed to close a client connection"
+                        );
+                    }
+                    continue;
+                }
+                None => {
                     if let Err(e) = stream.shutdown().await {
                         debug!(
                             cause = e.to_string(),

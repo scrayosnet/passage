@@ -23,9 +23,10 @@ use passage::connection::{
     AUTH_COOKIE_KEY, AuthCookie, Connection, Error, SESSION_COOKIE_KEY, SessionCookie,
 };
 use passage::mojang::{Mojang, Profile};
-use passage::proxy_protocol;
+use ppp::PartialResult;
 use rand::TryRngCore;
 use rand::rngs::SysRng;
+use tokio::io::AsyncReadExt;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
 use std::net::SocketAddr;
@@ -1015,6 +1016,7 @@ async fn no_respond_keep_alive() {
 
 #[tokio::test]
 async fn test_proxy_protocol_v1_ipv4() {
+    use tokio::io::AsyncReadExt;
     let (mut client_stream, mut server_stream) = tokio::io::duplex(1024);
 
     // Write PROXY protocol v1 header
@@ -1025,15 +1027,34 @@ async fn test_proxy_protocol_v1_ipv4() {
         .expect("write proxy header failed");
 
     // Read and parse the header on the server side
-    let addr = proxy_protocol::read_proxy_header(&mut server_stream)
-        .await
-        .expect("read proxy header failed");
+    let mut buffer = [0u8; 512];
+    let mut read = 0;
+    let header = loop {
+        read += server_stream.read(&mut buffer[read..]).await.expect("read failed");
+        let result = ppp::HeaderResult::parse(&buffer[..read]);
+        if result.is_complete() {
+            break result;
+        }
+    };
 
-    assert_eq!(addr.to_string(), "192.168.1.100:12345");
+    if let ppp::HeaderResult::V1(Ok(v1_header)) = header {
+        if let ppp::v1::Addresses::Tcp4(addrs) = v1_header.addresses {
+            let addr = SocketAddr::new(
+                std::net::IpAddr::V4(addrs.source_address),
+                addrs.source_port,
+            );
+            assert_eq!(addr.to_string(), "192.168.1.100:12345");
+        } else {
+            panic!("Expected Tcp4 addresses");
+        }
+    } else {
+        panic!("Expected V1 header");
+    }
 }
 
 #[tokio::test]
 async fn test_proxy_protocol_v1_ipv6() {
+    use tokio::io::AsyncReadExt;
     let (mut client_stream, mut server_stream) = tokio::io::duplex(1024);
 
     // Write PROXY protocol v1 header with IPv6
@@ -1045,15 +1066,34 @@ async fn test_proxy_protocol_v1_ipv6() {
         .expect("write proxy header failed");
 
     // Read and parse the header on the server side
-    let addr = proxy_protocol::read_proxy_header(&mut server_stream)
-        .await
-        .expect("read proxy header failed");
+    let mut buffer = [0u8; 512];
+    let mut read = 0;
+    let header = loop {
+        read += server_stream.read(&mut buffer[read..]).await.expect("read failed");
+        let result = ppp::HeaderResult::parse(&buffer[..read]);
+        if result.is_complete() {
+            break result;
+        }
+    };
 
-    assert_eq!(addr.to_string(), "[2001:db8::1]:54321");
+    if let ppp::HeaderResult::V1(Ok(v1_header)) = header {
+        if let ppp::v1::Addresses::Tcp6(addrs) = v1_header.addresses {
+            let addr = SocketAddr::new(
+                std::net::IpAddr::V6(addrs.source_address),
+                addrs.source_port,
+            );
+            assert_eq!(addr.to_string(), "[2001:db8::1]:54321");
+        } else {
+            panic!("Expected Tcp6 addresses");
+        }
+    } else {
+        panic!("Expected V1 header");
+    }
 }
 
 #[tokio::test]
 async fn test_proxy_protocol_v2_ipv4() {
+    use tokio::io::AsyncReadExt;
     let (mut client_stream, mut server_stream) = tokio::io::duplex(1024);
 
     // Write PROXY protocol v2 header for IPv4
@@ -1078,15 +1118,34 @@ async fn test_proxy_protocol_v2_ipv4() {
         .expect("write proxy header failed");
 
     // Read and parse the header on the server side
-    let addr = proxy_protocol::read_proxy_header(&mut server_stream)
-        .await
-        .expect("read proxy header failed");
+    let mut buffer = [0u8; 512];
+    let mut read = 0;
+    let header = loop {
+        read += server_stream.read(&mut buffer[read..]).await.expect("read failed");
+        let result = ppp::HeaderResult::parse(&buffer[..read]);
+        if result.is_complete() {
+            break result;
+        }
+    };
 
-    assert_eq!(addr.to_string(), "203.0.113.5:45678");
+    if let ppp::HeaderResult::V2(Ok(v2_header)) = header {
+        if let ppp::v2::Addresses::IPv4(addrs) = v2_header.addresses {
+            let addr = SocketAddr::new(
+                std::net::IpAddr::V4(addrs.source_address),
+                addrs.source_port,
+            );
+            assert_eq!(addr.to_string(), "203.0.113.5:45678");
+        } else {
+            panic!("Expected IPv4 addresses");
+        }
+    } else {
+        panic!("Expected V2 header");
+    }
 }
 
 #[tokio::test]
 async fn test_proxy_protocol_v2_ipv6() {
+    use tokio::io::AsyncReadExt;
     let (mut client_stream, mut server_stream) = tokio::io::duplex(1024);
 
     // Write PROXY protocol v2 header for IPv6
@@ -1117,15 +1176,34 @@ async fn test_proxy_protocol_v2_ipv6() {
         .expect("write proxy header failed");
 
     // Read and parse the header on the server side
-    let addr = proxy_protocol::read_proxy_header(&mut server_stream)
-        .await
-        .expect("read proxy header failed");
+    let mut buffer = [0u8; 512];
+    let mut read = 0;
+    let header = loop {
+        read += server_stream.read(&mut buffer[read..]).await.expect("read failed");
+        let result = ppp::HeaderResult::parse(&buffer[..read]);
+        if result.is_complete() {
+            break result;
+        }
+    };
 
-    assert_eq!(addr.to_string(), "[2001:db8::cafe:beef]:54321");
+    if let ppp::HeaderResult::V2(Ok(v2_header)) = header {
+        if let ppp::v2::Addresses::IPv6(addrs) = v2_header.addresses {
+            let addr = SocketAddr::new(
+                std::net::IpAddr::V6(addrs.source_address),
+                addrs.source_port,
+            );
+            assert_eq!(addr.to_string(), "[2001:db8::cafe:beef]:54321");
+        } else {
+            panic!("Expected IPv6 addresses");
+        }
+    } else {
+        panic!("Expected V2 header");
+    }
 }
 
 #[tokio::test]
 async fn test_proxy_protocol_invalid_header() {
+    use tokio::io::AsyncReadExt;
     let (mut client_stream, mut server_stream) = tokio::io::duplex(1024);
 
     // Write invalid data
@@ -1135,9 +1213,17 @@ async fn test_proxy_protocol_invalid_header() {
         .await
         .expect("write invalid header failed");
 
-    // Reading should fail
-    let result = proxy_protocol::read_proxy_header(&mut server_stream).await;
-    assert!(result.is_err());
+    // Reading should fail for invalid headers
+    let mut buffer = [0u8; 512];
+    let read = server_stream.read(&mut buffer).await.expect("read failed");
+    let result = ppp::HeaderResult::parse(&buffer[..read]);
+
+    match result {
+        ppp::HeaderResult::V1(Err(_)) | ppp::HeaderResult::V2(Err(_)) => {
+            // Expected error
+        }
+        _ => panic!("Expected parsing error"),
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -1166,9 +1252,28 @@ async fn test_proxy_protocol_with_auth_cookie() {
 
     // Create a wrapper that reads proxy header first
     let (mut server_reader, server_writer) = tokio::io::split(server_stream);
-    let extracted_addr = proxy_protocol::read_proxy_header(&mut server_reader)
-        .await
-        .expect("read proxy header failed");
+    let mut buffer = [0u8; 512];
+    let mut read = 0;
+    let header = loop {
+        read += server_reader.read(&mut buffer[read..]).await.expect("read failed");
+        let result = ppp::HeaderResult::parse(&buffer[..read]);
+        if result.is_complete() {
+            break result;
+        }
+    };
+
+    let extracted_addr = if let ppp::HeaderResult::V1(Ok(v1_header)) = header {
+        if let ppp::v1::Addresses::Tcp4(addrs) = v1_header.addresses {
+            SocketAddr::new(
+                std::net::IpAddr::V4(addrs.source_address),
+                addrs.source_port,
+            )
+        } else {
+            panic!("Expected Tcp4 addresses");
+        }
+    } else {
+        panic!("Expected V1 header");
+    };
     assert_eq!(extracted_addr, real_client_addr);
 
     // Rejoin the stream
