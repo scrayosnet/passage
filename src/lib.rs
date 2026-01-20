@@ -33,7 +33,7 @@ use crate::rate_limiter::RateLimiter;
 use adapter::status::fixed::FixedStatusSupplier;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::time::{Instant, timeout};
