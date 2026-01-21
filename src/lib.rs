@@ -179,7 +179,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 
         // extract the proxy header (if any) from the stream
         let (mut stream, client_addr) = if config.proxy_protocol.enabled {
-            let stream = ProxiedStream::create_from_tokio(
+            match ProxiedStream::create_from_tokio(
                 stream,
                 ParseConfig {
                     // not required for our use case
@@ -188,13 +188,25 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
                     allow_v2: true,
                 },
             )
-            .await?;
-            let client_addr = stream
-                .proxy_header()
-                .proxied_address()
-                .map(|address| address.source)
-                .unwrap_or(addr);
-            (stream, client_addr)
+            .await
+            {
+                Ok(stream) => {
+                    let client_addr = stream
+                        .proxy_header()
+                        .proxied_address()
+                        .map(|address| address.source)
+                        .unwrap_or(addr);
+                    (stream, client_addr)
+                }
+                Err(e) => {
+                    debug!(
+                        cause = e.to_string(),
+                        addr = addr.to_string(),
+                        "failed to parse proxy protocol header, connection closed"
+                    );
+                    continue;
+                }
+            }
         } else {
             (ProxiedStream::unproxied(stream), addr)
         };
