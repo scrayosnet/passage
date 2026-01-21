@@ -35,7 +35,7 @@ use proxy_header::ParseConfig;
 use proxy_header::io::ProxiedStream;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::time::{Instant, timeout};
@@ -59,7 +59,6 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let timeout_duration = Duration::from_secs(config.timeout);
     let auth_secret = config.auth_secret.clone().map(String::into_bytes);
     let localization = Arc::new(config.localization.clone());
-    let proxy_protocol_enabled = config.proxy_protocol.enabled;
 
     // initialize status supplier
     debug!(
