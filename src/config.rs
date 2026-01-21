@@ -162,6 +162,13 @@ pub struct RateLimiter {
     pub size: usize,
 }
 
+/// [`ProxyProtocol`] hold the PROXY protocol configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProxyProtocol {
+    /// Whether PROXY protocol support should be enabled.
+    pub enabled: bool,
+}
+
 /// [`Status`] hold the status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Status {
@@ -324,6 +331,10 @@ pub struct Config {
     /// The rate limiter config.
     #[serde(alias = "ratelimiter")]
     pub rate_limiter: RateLimiter,
+
+    /// The PROXY protocol config.
+    #[serde(alias = "proxyprotocol")]
+    pub proxy_protocol: ProxyProtocol,
 
     /// The network address that should be used to bind the HTTP server for connection requests.
     pub address: SocketAddr,

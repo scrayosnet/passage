@@ -2397,6 +2397,7 @@ dependencies = [
  "packets",
  "prost",
  "prost-types",
+ "proxy-header",
  "rand 0.10.0-rc.6",
  "reqwest 0.13.1",
  "rsa",
@@ -2694,6 +2695,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8991c4cbdb8bc5b11f0b074ffe286c30e523de90fee5ba8132f1399f23cb3dd7"
 dependencies = [
  "prost",
+]
+
+[[package]]
+name = "proxy-header"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc1493f63ddddfba840c3169e997c2905d09538ace72d64e84af6324c6e0e065"
+dependencies = [
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]

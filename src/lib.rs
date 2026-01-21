@@ -31,6 +31,8 @@ use crate::mojang::Api;
 use crate::mojang::Mojang;
 use crate::rate_limiter::RateLimiter;
 use adapter::status::fixed::FixedStatusSupplier;
+use proxy_header::ParseConfig;
+use proxy_header::io::ProxiedStream;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -166,7 +168,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         // accept the next incoming connection
-        let (mut stream, addr) = select! {
+        let (stream, addr) = select! {
             accepted = listener.accept() => accepted?,
             _ = tokio::signal::ctrl_c() => {
                 info!("received ctrl-c signal, shutting down");
@@ -174,17 +176,43 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
             },
         };
         let connection_start = Instant::now();
-        debug!(addr = addr.to_string(), "received protocol connection");
 
-        // check rate limiter
-        if rate_limiter_enabled && !rate_limiter.enqueue(addr.ip()) {
-            info!(addr = addr.to_string(), "rate limited client");
+        // extract the proxy header (if any) from the stream
+        let (mut stream, client_addr) = if config.proxy_protocol.enabled {
+            let stream = ProxiedStream::create_from_tokio(
+                stream,
+                ParseConfig {
+                    // not required for our use case
+                    include_tlvs: false,
+                    allow_v1: true,
+                    allow_v2: true,
+                },
+            )
+            .await?;
+            let client_addr = stream
+                .proxy_header()
+                .proxied_address()
+                .map(|address| address.source)
+                .unwrap_or(addr);
+            (stream, client_addr)
+        } else {
+            (ProxiedStream::unproxied(stream), addr)
+        };
+
+        debug!(
+            addr = client_addr.to_string(),
+            "received protocol connection"
+        );
+
+        // check rate limiter (use real client address)
+        if rate_limiter_enabled && !rate_limiter.enqueue(client_addr.ip()) {
+            info!(addr = client_addr.to_string(), "rate limited client");
             metrics::request_duration::record(connection_start, "rejected");
 
             if let Err(e) = stream.shutdown().await {
                 debug!(
                     cause = e.to_string(),
-                    addr = &addr.to_string(),
+                    addr = &client_addr.to_string(),
                     "failed to close a client connection"
                 );
             }
@@ -201,7 +229,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         let connection_id = uuid::Uuid::new_v4();
         let connection_span = tracing::info_span!(
             "protocol",
-            addr = addr.to_string(),
+            addr = client_addr.to_string(),
             id = connection_id.to_string(),
         );
 
@@ -221,7 +249,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
                 );
 
                 // handle the client connection (ignore connection closed by the client)
-                let timeout = timeout(timeout_duration, con.listen(addr)).await;
+                let timeout = timeout(timeout_duration, con.listen(client_addr)).await;
                 let connection_result = match timeout {
                     Ok(Err(Error::ConnectionClosed(_))) => "connection-closed",
                     Ok(Err(err)) => {

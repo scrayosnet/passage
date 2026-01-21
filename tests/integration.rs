@@ -23,6 +23,8 @@ use passage::connection::{
     AUTH_COOKIE_KEY, AuthCookie, Connection, Error, SESSION_COOKIE_KEY, SessionCookie,
 };
 use passage::mojang::{Mojang, Profile};
+use proxy_header::ParseConfig;
+use proxy_header::io::ProxiedStream;
 use rand::TryRngCore;
 use rand::rngs::SysRng;
 use rsa::pkcs8::DecodePublicKey;
@@ -31,6 +33,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::io::AsyncWriteExt;
 use uuid::{Uuid, uuid};
 
 #[derive(Default)]
@@ -1009,4 +1012,156 @@ async fn no_respond_keep_alive() {
 
     // wait for the server to finish
     assert!(server.await.is_err());
+}
+
+#[tokio::test]
+async fn test_proxy_protocol_v1_ipv4() {
+    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+
+    // Write PROXY protocol v1 header
+    let proxy_header = b"PROXY TCP4 192.168.1.100 10.0.0.1 12345 25565\r\n";
+    client_stream
+        .write_all(proxy_header)
+        .await
+        .expect("write proxy header failed");
+
+    // read and parse the header on the server side
+    let server_stream = ProxiedStream::create_from_tokio(server_stream, ParseConfig::default())
+        .await
+        .expect("proxy stream failed");
+
+    let proxied = server_stream
+        .proxy_header()
+        .proxied_address()
+        .expect("proxy address failed");
+    assert_eq!(proxied.source.to_string(), "192.168.1.100:12345");
+    assert_eq!(proxied.destination.to_string(), "10.0.0.1:25565");
+    assert_eq!(proxied.protocol, proxy_header::Protocol::Stream);
+}
+
+#[tokio::test]
+async fn test_proxy_protocol_v1_ipv6() {
+    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+
+    // Write PROXY protocol v1 header with IPv6
+    // Note: IPv6 addresses in PROXY protocol v1 should not have brackets
+    let proxy_header = b"PROXY TCP6 2001:0db8:0000:0000:0000:0000:0000:0001 2001:0db8:0000:0000:0000:0000:0000:0002 54321 25565\r\n";
+    client_stream
+        .write_all(proxy_header)
+        .await
+        .expect("write proxy header failed");
+
+    // read and parse the header on the server side
+    let server_stream = ProxiedStream::create_from_tokio(server_stream, ParseConfig::default())
+        .await
+        .expect("proxy stream failed");
+
+    let proxied = server_stream
+        .proxy_header()
+        .proxied_address()
+        .expect("proxy address failed");
+    assert_eq!(proxied.source.to_string(), "[2001:db8::1]:54321");
+    assert_eq!(proxied.destination.to_string(), "[2001:db8::2]:25565");
+    assert_eq!(proxied.protocol, proxy_header::Protocol::Stream);
+}
+
+#[tokio::test]
+async fn test_proxy_protocol_v2_ipv4() {
+    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+
+    // Write PROXY protocol v2 header for IPv4
+    let mut proxy_header = vec![
+        0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A, // signature
+        0x21, // version 2, command PROXY
+        0x11, // AF_INET (IPv4), SOCK_STREAM (TCP)
+        0x00, 0x0C, // address length = 12 bytes
+    ];
+    // Source IP: 203.0.113.5
+    proxy_header.extend_from_slice(&[203, 0, 113, 5]);
+    // Dest IP: 198.51.100.1
+    proxy_header.extend_from_slice(&[198, 51, 100, 1]);
+    // Source port: 45678
+    proxy_header.extend_from_slice(&45678u16.to_be_bytes());
+    // Dest port: 25565
+    proxy_header.extend_from_slice(&25565u16.to_be_bytes());
+
+    client_stream
+        .write_all(&proxy_header)
+        .await
+        .expect("write proxy header failed");
+
+    // read and parse the header on the server side
+    let server_stream = ProxiedStream::create_from_tokio(server_stream, ParseConfig::default())
+        .await
+        .expect("proxy stream failed");
+
+    let proxied = server_stream
+        .proxy_header()
+        .proxied_address()
+        .expect("proxy address failed");
+    assert_eq!(proxied.source.to_string(), "203.0.113.5:45678");
+    assert_eq!(proxied.destination.to_string(), "198.51.100.1:25565");
+    assert_eq!(proxied.protocol, proxy_header::Protocol::Stream);
+}
+
+#[tokio::test]
+async fn test_proxy_protocol_v2_ipv6() {
+    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+
+    // Write PROXY protocol v2 header for IPv6
+    let mut proxy_header = vec![
+        0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A, // signature
+        0x21, // version 2, command PROXY
+        0x21, // AF_INET6 (IPv6), SOCK_STREAM (TCP)
+        0x00, 0x24, // address length = 36 bytes
+    ];
+    // Source IP: 2001:db8::cafe:beef
+    proxy_header.extend_from_slice(&[
+        0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xca, 0xfe, 0xbe,
+        0xef,
+    ]);
+    // Dest IP: 2001:db8::1
+    proxy_header.extend_from_slice(&[
+        0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x01,
+    ]);
+    // Source port: 54321
+    proxy_header.extend_from_slice(&54321u16.to_be_bytes());
+    // Dest port: 25565
+    proxy_header.extend_from_slice(&25565u16.to_be_bytes());
+
+    client_stream
+        .write_all(&proxy_header)
+        .await
+        .expect("write proxy header failed");
+
+    // read and parse the header on the server side
+    let server_stream = ProxiedStream::create_from_tokio(server_stream, ParseConfig::default())
+        .await
+        .expect("proxy stream failed");
+
+    let proxied = server_stream
+        .proxy_header()
+        .proxied_address()
+        .expect("proxy address failed");
+    assert_eq!(proxied.source.to_string(), "[2001:db8::cafe:beef]:54321");
+    assert_eq!(proxied.destination.to_string(), "[2001:db8::1]:25565");
+    assert_eq!(proxied.protocol, proxy_header::Protocol::Stream);
+}
+
+#[tokio::test]
+async fn test_proxy_protocol_invalid_header() {
+    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+
+    // Write invalid data
+    let invalid_header = b"INVALID DATA\r\n";
+    client_stream
+        .write_all(invalid_header)
+        .await
+        .expect("write invalid header failed");
+
+    // read and parse the header on the server side
+    let server_stream =
+        ProxiedStream::create_from_tokio(server_stream, ParseConfig::default()).await;
+    assert!(server_stream.is_err());
 }
