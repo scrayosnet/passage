@@ -1061,7 +1061,7 @@ async fn test_proxy_protocol_v1_ipv6() {
         .proxied_address()
         .expect("proxy address failed");
     assert_eq!(proxied.source.to_string(), "[2001:db8::1]:54321");
-    assert_eq!(proxied.destination.to_string(), "[2001:db8::1]:25565");
+    assert_eq!(proxied.destination.to_string(), "[2001:db8::2]:25565");
     assert_eq!(proxied.protocol, proxy_header::Protocol::Stream);
 }
 
@@ -1145,10 +1145,7 @@ async fn test_proxy_protocol_v2_ipv6() {
         .proxied_address()
         .expect("proxy address failed");
     assert_eq!(proxied.source.to_string(), "[2001:db8::cafe:beef]:54321");
-    assert_eq!(
-        proxied.destination.to_string(),
-        "[2001:db8::cafe:beef]:25565"
-    );
+    assert_eq!(proxied.destination.to_string(), "[2001:db8::1]:25565");
     assert_eq!(proxied.protocol, proxy_header::Protocol::Stream);
 }
 
@@ -1164,10 +1161,7 @@ async fn test_proxy_protocol_invalid_header() {
         .expect("write invalid header failed");
 
     // read and parse the header on the server side
-    let server_stream = ProxiedStream::create_from_tokio(server_stream, ParseConfig::default())
-        .await
-        .expect("proxy stream failed");
-
-    let proxied = server_stream.proxy_header().proxied_address().is_some();
-    assert!(!proxied);
+    let server_stream =
+        ProxiedStream::create_from_tokio(server_stream, ParseConfig::default()).await;
+    assert!(server_stream.is_err());
 }

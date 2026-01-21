@@ -179,18 +179,27 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         let connection_start = Instant::now();
 
         // extract the proxy header (if any) from the stream
-        let proxy_config = ParseConfig {
-            // not required for our use case
-            include_tlvs: false,
-            allow_v1: true,
-            allow_v2: true,
+        let (mut stream, client_addr) = if config.proxy_protocol.enabled {
+            let stream = ProxiedStream::create_from_tokio(
+                stream,
+                ParseConfig {
+                    // not required for our use case
+                    include_tlvs: false,
+                    allow_v1: true,
+                    allow_v2: true,
+                },
+            )
+            .await?;
+            let client_addr = stream
+                .proxy_header()
+                .proxied_address()
+                .map(|address| address.source)
+                .unwrap_or(addr);
+            (stream, client_addr)
+        } else {
+            (ProxiedStream::unproxied(stream), addr)
         };
-        let mut stream = ProxiedStream::create_from_tokio(stream, proxy_config).await?;
-        let client_addr = stream
-            .proxy_header()
-            .proxied_address()
-            .map(|address| address.source)
-            .unwrap_or(addr);
+
         debug!(
             addr = client_addr.to_string(),
             "received protocol connection"
