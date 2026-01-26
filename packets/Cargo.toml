@@ -19,7 +19,7 @@ rust-version = "1.88.0"
 [dependencies]
 tokio = { version = "1.49", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal"] }
 thiserror = { version = "2.0" }
-uuid = { version = "1.19", features = ["v4", "serde"] }
+uuid = { version = "1.20", features = ["v4", "serde"] }
 fake = { version = "4.4", features = ["derive", "uuid"] }
 fastnbt = { version = "2.6.0" }
 serde_json = { version = "1.0" }
