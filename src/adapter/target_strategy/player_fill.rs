@@ -1,17 +1,15 @@
 use crate::adapter::Error;
 use crate::adapter::status::Protocol;
 use crate::adapter::target_selection::Target;
-use crate::adapter::target_strategy::{TargetFilterExt, TargetSelectorStrategy};
-use crate::config::{PlayerFillTargetStrategy as PlayerFillConfig, TargetFilter};
+use crate::adapter::target_strategy::TargetSelectorStrategy;
+use crate::config::PlayerFillTargetStrategy as PlayerFillConfig;
 use async_trait::async_trait;
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
 pub struct PlayerFillTargetSelectorStrategy {
     field: String,
     max_players: u32,
-    target_filter: HashMap<String, TargetFilter>,
 }
 
 impl PlayerFillTargetSelectorStrategy {
@@ -20,13 +18,6 @@ impl PlayerFillTargetSelectorStrategy {
         Self {
             field: config.field,
             max_players: config.max_players,
-            // store as hashmap to improve performance
-            target_filter: HashMap::from_iter(
-                config
-                    .target_filters
-                    .into_iter()
-                    .map(|filter| (filter.server_host.clone(), filter)),
-            ),
         }
     }
 }
@@ -36,10 +27,10 @@ impl TargetSelectorStrategy for PlayerFillTargetSelectorStrategy {
     async fn select(
         &self,
         _client_addr: &SocketAddr,
-        (server_host, _): (&str, u16),
+        (_server_host, _): (&str, u16),
         _protocol: Protocol,
-        username: &str,
-        user_id: &Uuid,
+        _username: &str,
+        _user_id: &Uuid,
         targets: &[Target],
     ) -> Result<Option<Target>, Error> {
         let target = targets
@@ -54,12 +45,6 @@ impl TargetSelectorStrategy for PlayerFillTargetSelectorStrategy {
                 (target, players)
             })
             .filter(|(_, players)| *players < self.max_players)
-            .filter(|(target, _)| {
-                let Some(filter) = self.target_filter.get(server_host) else {
-                    return self.target_filter.is_empty();
-                };
-                filter.matches(target, username, user_id)
-            })
             .max_by_key(|(_, players)| *players)
             .map(|(target, _)| target.clone());
         Ok(target)

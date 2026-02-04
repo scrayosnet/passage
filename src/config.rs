@@ -280,25 +280,6 @@ pub struct GrpcTargetStrategy {
     pub address: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct TargetFilter {
-    /// Matches incoming request server host.
-    #[serde(alias = "serverhost")]
-    pub server_host: String,
-
-    /// Matches targets with exact tagte identifier.
-    pub identifier: Option<String>,
-
-    /// Matches targets with at least the following metadata.
-    #[serde(default)]
-    pub meta: HashMap<String, String>,
-
-    /// Matches users with the provided username or uuid.
-    #[serde(default)]
-    #[serde(alias = "allowlist")]
-    pub allow_list: Option<Vec<String>>,
-}
-
 /// [`PlayerFillTargetStrategy`] hold the player fill target strategy configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlayerFillTargetStrategy {
@@ -308,11 +289,6 @@ pub struct PlayerFillTargetStrategy {
     /// The number of players that will be filled at maximum.
     #[serde(alias = "maxplayers")]
     pub max_players: u32,
-
-    /// The target filters, matching server hostname against target.
-    #[serde(default)]
-    #[serde(alias = "targetfilters")]
-    pub target_filters: Vec<TargetFilter>,
 }
 
 /// [`Config`] holds all configuration for the application. I.g. one immutable instance is created
