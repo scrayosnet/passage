@@ -5,7 +5,7 @@ template: splash # Remove or comment out this line to display the site sidebar o
 hero:
   tagline: Connect your Minecraft network to the world without any limits to scaling, security or infrastructure in a few seconds!
   image:
-    file: ../../assets/houston.webp
+    file: ../../assets/logo.svg
   actions:
     - text: Getting Started
       link: /setup/installation/
@@ -18,11 +18,10 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## Next steps
 
-<CardGrid stagger>
-	<Card title="Update content" icon="pencil">
-		Edit `src/content/docs/index.mdx` to see this page change.
+<CardGrid>
+	<Card title="Stateless and proxy-less" icon="star">
+        Passage holds no connection and can therefore be restarted and replicated at will.
 	</Card>
 	<Card title="Change page layout" icon="document">
 		Delete `template: splash` in `src/content/docs/index.mdx` to display a
@@ -37,4 +36,7 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 	<Card title="Read the docs" icon="open-book">
 		Learn more in [the Starlight Docs](https://starlight.astro.build/).
 	</Card>
+    <Card title="Read the docs" icon="open-book">
+        Learn more in [the Starlight Docs](https://starlight.astro.build/).
+    </Card>
 </CardGrid>

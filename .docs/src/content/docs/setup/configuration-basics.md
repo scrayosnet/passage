@@ -1,0 +1,330 @@
+---
+title: Configuration Basics
+description: Learn the fundamentals of configuring Passage.
+---
+
+This guide covers the basics of configuring Passage for your Minecraft network.
+
+## Configuration Files
+
+Passage uses a layered configuration system with multiple sources:
+
+### Layer Priority (highest to lowest)
+
+1. **Environment Variables** - Override any setting
+2. **Auth Secret File** - Dedicated file for auth secret
+3. **Custom Config File** - Your deployment-specific settings
+4. **Default Config** - Built-in defaults (embedded at compile time)
+
+### File Locations
+
+```
+config/
+├── config.toml      # Your custom configuration
+├── auth_secret      # Optional: Authentication secret
+└── default.toml     # Built-in defaults (reference only)
+```
+
+## Minimal Configuration
+
+The simplest working configuration:
+
+```toml
+# config/config.toml
+address = "0.0.0.0:25565"
+
+[status]
+adapter = "fixed"
+
+[status.fixed]
+name = "My Server"
+
+[target_discovery]
+adapter = "fixed"
+
+[[target_discovery.fixed.targets]]
+identifier = "server-1"
+address = "127.0.0.1:25566"
+
+[target_strategy]
+adapter = "fixed"
+```
+
+This configuration:
+- Listens on all interfaces at port 25565
+- Returns "My Server" as the status name
+- Routes all players to 127.0.0.1:25566
+
+## Environment Variables
+
+All configuration fields can be overridden with environment variables:
+
+```bash
+# Format: PASSAGE_[SECTION]_[FIELD]
+export PASSAGE_ADDRESS="0.0.0.0:25565"
+export PASSAGE_TIMEOUT=120
+export PASSAGE_STATUS_ADAPTER="fixed"
+export PASSAGE_TARGET_DISCOVERY_ADAPTER="grpc"
+export PASSAGE_TARGET_DISCOVERY_GRPC_ADDRESS="http://localhost:3030"
+```
+
+Nested fields use underscores:
+```bash
+PASSAGE_STATUS_FIXED_NAME="Cool Server"
+PASSAGE_RATE_LIMITER_ENABLED=true
+PASSAGE_RATE_LIMITER_SIZE=100
+```
+
+### Custom Environment Prefix
+
+Change the prefix from `PASSAGE` to something else:
+
+```bash
+ENV_PREFIX=MYNETWORK
+MYNETWORK_ADDRESS=0.0.0.0:25565 passage
+```
+
+## Configuration File Location
+
+Specify a custom config file:
+
+```bash
+# Default location
+CONFIG_FILE=config/config passage
+
+# Custom location
+CONFIG_FILE=/etc/passage/production.toml passage
+
+# Supports multiple formats
+CONFIG_FILE=/etc/passage/config.json passage
+CONFIG_FILE=/etc/passage/config.yaml passage
+```
+
+## Core Settings
+
+### Connection Settings
+
+```toml
+# Address to bind for incoming connections
+address = "0.0.0.0:25565"
+
+# Connection timeout in seconds
+timeout = 120
+```
+
+### Rate Limiting
+
+Prevent connection floods:
+
+```toml
+[rate_limiter]
+enabled = true
+duration = 60  # Time window in seconds
+size = 60      # Max connections per IP per window
+```
+
+### PROXY Protocol Support
+
+Enable if Passage is behind a proxy/load balancer:
+
+```toml
+[proxy_protocol]
+enabled = true
+```
+
+This allows Passage to see the real client IP address when behind HAProxy, AWS NLB, or other PROXY protocol-compatible load balancers.
+
+## Adapter Configuration
+
+Passage uses three types of adapters. Each must be configured:
+
+### Status Adapter
+
+Provides server status information (MOTD, player count, favicon):
+
+```toml
+[status]
+adapter = "fixed"  # or "http" or "grpc"
+
+[status.fixed]
+name = "My Minecraft Network"
+description = "\"Welcome!\""
+```
+
+### Target Discovery Adapter
+
+Discovers available backend servers:
+
+```toml
+[target_discovery]
+adapter = "fixed"  # or "grpc" or "agones"
+
+[[target_discovery.fixed.targets]]
+identifier = "hub-1"
+address = "10.0.1.10:25565"
+```
+
+### Target Strategy Adapter
+
+Selects which server to send each player to:
+
+```toml
+[target_strategy]
+adapter = "fixed"  # or "grpc" or "player_fill"
+```
+
+## Localization
+
+Configure disconnect messages in multiple languages:
+
+```toml
+[localization]
+default_locale = "en_US"
+
+[localization.messages.en]
+disconnect_timeout = "{\"text\":\"Connection timeout\"}"
+disconnect_no_target = "{\"text\":\"No server available\"}"
+
+[localization.messages.es]
+disconnect_timeout = "{\"text\":\"Tiempo de espera agotado\"}"
+disconnect_no_target = "{\"text\":\"Servidor no disponible\"}"
+```
+
+Messages support parameter substitution with placeholders like `{player}`.
+
+## Observability
+
+### OpenTelemetry
+
+Send metrics and traces to Grafana Cloud, Datadog, or other OTLP-compatible backends:
+
+```toml
+[otel]
+environment = "production"
+metrics_endpoint = "https://otlp.example.com/v1/metrics"
+metrics_token = "base64_auth_token"
+traces_endpoint = "https://otlp.example.com/v1/traces"
+traces_token = "base64_auth_token"
+```
+
+### Sentry (Optional)
+
+Enable error tracking with Sentry:
+
+```toml
+[sentry]
+enabled = true
+debug = false
+address = "https://your-key@sentry.io/project-id"
+environment = "production"
+```
+
+## Configuration Validation
+
+Test your configuration:
+
+```bash
+# Run Passage - it will validate config on startup
+passage
+
+# Check logs for validation errors
+RUST_LOG=debug passage
+```
+
+Common validation errors:
+- Missing required adapter configuration
+- Invalid socket address format
+- Malformed TOML syntax
+- Invalid adapter type names
+
+## Best Practices
+
+### Security
+- Store auth secrets in `config/auth_secret` file, not in config.toml
+- Don't commit `config/config.toml` to version control
+- Use environment variables for sensitive values in CI/CD
+
+### Performance
+- Enable rate limiting to prevent abuse
+- Set reasonable timeout values (60-300 seconds)
+- Use gRPC adapters for high-performance scenarios
+
+### Reliability
+- Configure multiple targets for redundancy
+- Use Agones adapter for auto-scaling
+- Monitor with OpenTelemetry
+
+## Example Configurations
+
+### Simple Static Setup
+
+```toml
+address = "0.0.0.0:25565"
+timeout = 120
+
+[status]
+adapter = "fixed"
+[status.fixed]
+name = "My Network"
+
+[target_discovery]
+adapter = "fixed"
+[[target_discovery.fixed.targets]]
+identifier = "lobby"
+address = "10.0.0.10:25565"
+
+[target_strategy]
+adapter = "fixed"
+```
+
+### Dynamic Kubernetes Setup
+
+```toml
+address = "0.0.0.0:25565"
+
+[status]
+adapter = "http"
+[status.http]
+address = "http://status-service/status"
+cache_duration = 5
+
+[target_discovery]
+adapter = "agones"
+[target_discovery.agones]
+namespace = "minecraft"
+label_selector = "game=minecraft"
+
+[target_strategy]
+adapter = "player_fill"
+[target_strategy.player_fill]
+field = "players"
+max_players = 50
+```
+
+### Multi-Region gRPC Setup
+
+```toml
+address = "0.0.0.0:25565"
+
+[status]
+adapter = "grpc"
+[status.grpc]
+address = "http://status-service:3030"
+
+[target_discovery]
+adapter = "grpc"
+[target_discovery.grpc]
+address = "http://discovery-service:3030"
+
+[target_strategy]
+adapter = "grpc"
+[target_strategy.grpc]
+address = "http://strategy-service:3030"
+```
+
+## Next Steps
+
+- Explore detailed [Configuration Reference](/reference/configuration-reference/)
+- Learn about [Status Adapters](/customization/status-adapters/)
+- Configure [Target Discovery](/customization/target-discovery-adapters/)
+- Set up [Target Strategies](/customization/target-strategy-adapters/)

@@ -1,0 +1,427 @@
+---
+title: Custom gRPC Adapters
+description: Learn how to implement custom gRPC adapters for Passage.
+---
+
+This guide shows you how to create custom gRPC adapters for Passage, enabling you to implement complex routing logic, integrate with existing systems, and extend Passage's functionality.
+
+## Why gRPC Adapters?
+
+gRPC adapters allow you to:
+- **Implement custom business logic** in any language
+- **Integrate with existing infrastructure** (databases, APIs, services)
+- **Maintain separation of concerns** between Passage and your application logic
+- **Scale independently** from Passage
+- **Reuse existing code** and libraries
+
+## Prerequisites
+
+- Basic understanding of gRPC and Protocol Buffers
+- A programming language with gRPC support (Go, Java, Python, Node.js, etc.)
+- The Passage proto definitions (in `/proto/adapter/` directory)
+
+## Proto Definitions
+
+Passage provides proto definitions for all three adapter types. These are available in the repository at:
+
+```
+proto/adapter/
+├── adapter.proto     # Common types (Target, Address, MetaEntry)
+├── status.proto      # Status service definition
+├── discovery.proto   # Discovery service definition
+└── strategy.proto    # Strategy service definition
+```
+
+## Example: Status Adapter in Go
+
+### 1. Set Up Your Project
+
+```bash
+mkdir passage-status-adapter
+cd passage-status-adapter
+go mod init github.com/yourorg/passage-status-adapter
+```
+
+### 2. Copy Proto Files
+
+Copy the proto files from the Passage repository:
+
+```bash
+mkdir -p proto/adapter
+cp /path/to/passage/proto/adapter/*.proto proto/adapter/
+```
+
+### 3. Generate Code
+
+```bash
+# Install protoc compiler and Go plugins
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+# Generate Go code
+protoc --go_out=. --go_opt=paths=source_relative \
+    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+    proto/adapter/*.proto
+```
+
+### 4. Implement the Service
+
+```go
+// main.go
+package main
+
+import (
+    "context"
+    "log"
+    "net"
+
+    pb "github.com/yourorg/passage-status-adapter/proto/adapter"
+    "google.golang.org/grpc"
+)
+
+type statusServer struct {
+    pb.UnimplementedStatusServer
+}
+
+func (s *statusServer) GetStatus(ctx context.Context, req *pb.StatusRequest) (*pb.StatusResponse, error) {
+    log.Printf("Status request from %s:%d",
+        req.ClientAddress.Hostname, req.ClientAddress.Port)
+
+    return &pb.StatusResponse{
+        Status: &pb.StatusData{
+            Version: &pb.ProtocolVersion{
+                Name:     "My Custom Network",
+                Protocol: int32(req.Protocol), // Match client protocol
+            },
+            Players: &pb.Players{
+                Online: 42,
+                Max:    100,
+                Samples: []*pb.PlayerEntry{
+                    {Name: "Steve", Id: "069a79f4-44e9-4726-a5be-fca90e38aaf5"},
+                    {Name: "Alex", Id: "ec561538-f3fd-461d-aff5-086b22154bce"},
+                },
+            },
+            Description:        `{"text":"Welcome to my server!","color":"gold"}`,
+            EnforcesSecureChat: boolPtr(true),
+        },
+    }, nil
+}
+
+func main() {
+    lis, err := net.Listen("tcp", ":3030")
+    if err != nil {
+        log.Fatalf("failed to listen: %v", err)
+    }
+
+    s := grpc.NewServer()
+    pb.RegisterStatusServer(s, &statusServer{})
+
+    log.Printf("Server listening on :3030")
+    if err := s.Serve(lis); err != nil {
+        log.Fatalf("failed to serve: %v", err)
+    }
+}
+
+func boolPtr(b bool) *bool {
+    return &b
+}
+```
+
+### 5. Run the Service
+
+```bash
+go run main.go
+```
+
+### 6. Configure Passage
+
+```toml
+[status]
+adapter = "grpc"
+
+[status.grpc]
+address = "http://localhost:3030"
+```
+
+## Example: Discovery Adapter in Python
+
+### 1. Set Up Project
+
+```bash
+mkdir passage-discovery-adapter
+cd passage-discovery-adapter
+python -m venv venv
+source venv/bin/activate
+pip install grpcio grpcio-tools
+```
+
+### 2. Generate Code
+
+```bash
+python -m grpc_tools.protoc \
+    -I../passage/proto \
+    --python_out=. \
+    --grpc_python_out=. \
+    adapter/*.proto
+```
+
+### 3. Implement the Service
+
+```python
+# server.py
+import grpc
+from concurrent import futures
+import adapter.discovery_pb2 as discovery_pb2
+import adapter.discovery_pb2_grpc as discovery_grpc
+import adapter.adapter_pb2 as adapter_pb2
+
+class DiscoveryService(discovery_grpc.DiscoveryServicer):
+    def GetTargets(self, request, context):
+        # Log the request
+        print(f"Discovery request for user: {request.username}")
+
+        # Query your database or API for available servers
+        servers = [
+            {
+                "id": "hub-1",
+                "host": "10.0.1.10",
+                "port": 25565,
+                "meta": {"type": "hub", "players": "15"}
+            },
+            {
+                "id": "survival-1",
+                "host": "10.0.2.10",
+                "port": 25565,
+                "meta": {"type": "survival", "players": "8"}
+            }
+        ]
+
+        # Convert to proto targets
+        targets = []
+        for server in servers:
+            target = adapter_pb2.Target(
+                identifier=server["id"],
+                address=adapter_pb2.Address(
+                    hostname=server["host"],
+                    port=server["port"]
+                ),
+                meta=[
+                    adapter_pb2.MetaEntry(key=k, value=v)
+                    for k, v in server["meta"].items()
+                ]
+            )
+            targets.append(target)
+
+        return discovery_pb2.TargetsResponse(targets=targets)
+
+def serve():
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    discovery_grpc.add_DiscoveryServicer_to_server(
+        DiscoveryService(), server
+    )
+    server.add_insecure_port('[::]:3030')
+    print("Server started on port 3030")
+    server.start()
+    server.wait_for_termination()
+
+if __name__ == '__main__':
+    serve()
+```
+
+### 4. Configure Passage
+
+```toml
+[target_discovery]
+adapter = "grpc"
+
+[target_discovery.grpc]
+address = "http://localhost:3030"
+```
+
+## Example: Strategy Adapter with Database
+
+This example shows a more complex strategy adapter that queries a database for player preferences:
+
+```go
+// strategy.go
+package main
+
+import (
+    "context"
+    "database/sql"
+    "log"
+
+    pb "github.com/yourorg/passage-strategy/proto/adapter"
+    _ "github.com/lib/pq"
+)
+
+type strategyServer struct {
+    pb.UnimplementedStrategyServer
+    db *sql.DB
+}
+
+func (s *strategyServer) SelectTarget(ctx context.Context, req *pb.SelectRequest) (*pb.SelectResponse, error) {
+    // Get player's preferred region from database
+    var preferredRegion string
+    err := s.db.QueryRowContext(ctx,
+        "SELECT preferred_region FROM player_preferences WHERE uuid = $1",
+        req.UserId,
+    ).Scan(&preferredRegion)
+
+    if err != nil && err != sql.ErrNoRows {
+        log.Printf("Database error: %v", err)
+    }
+
+    // Find servers in preferred region
+    for _, target := range req.Targets {
+        targetRegion := getMetadata(target, "region")
+        if targetRegion == preferredRegion {
+            log.Printf("Routing %s to region %s", req.Username, preferredRegion)
+            return &pb.SelectResponse{Target: target}, nil
+        }
+    }
+
+    // Fallback to first available server
+    if len(req.Targets) > 0 {
+        log.Printf("No preferred region match for %s, using default", req.Username)
+        return &pb.SelectResponse{Target: req.Targets[0]}, nil
+    }
+
+    // No targets available
+    return &pb.SelectResponse{Target: nil}, nil
+}
+
+func getMetadata(target *pb.Target, key string) string {
+    for _, entry := range target.Meta {
+        if entry.Key == key {
+            return entry.Value
+        }
+    }
+    return ""
+}
+
+func main() {
+    // Connect to database
+    db, err := sql.Open("postgres",
+        "postgresql://user:pass@localhost/passage?sslmode=disable")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer db.Close()
+
+    // Start gRPC server
+    lis, err := net.Listen("tcp", ":3030")
+    if err != nil {
+        log.Fatalf("failed to listen: %v", err)
+    }
+
+    s := grpc.NewServer()
+    pb.RegisterStrategyServer(s, &strategyServer{db: db})
+
+    log.Printf("Strategy server listening on :3030")
+    if err := s.Serve(lis); err != nil {
+        log.Fatalf("failed to serve: %v", err)
+    }
+}
+```
+
+## Best Practices
+
+### Performance
+
+- **Keep response times under 50ms**: Slow adapters delay player connections
+- **Use connection pooling**: Reuse database connections and HTTP clients
+- **Cache when appropriate**: Cache expensive operations
+- **Use async operations**: Don't block on external calls
+
+### Reliability
+
+- **Always return a response**: Never leave Passage waiting
+- **Handle errors gracefully**: Return default values on error
+- **Implement health checks**: Use gRPC health checking protocol
+- **Log extensively**: Log all requests and decisions for debugging
+
+### Security
+
+- **Validate inputs**: Don't trust request data blindly
+- **Use TLS**: Configure `https://` addresses in production
+- **Rate limit**: Protect your adapter from abuse
+- **Authenticate**: Use gRPC auth if exposing publicly
+
+### Deployment
+
+- **Run close to Passage**: Minimize network latency
+- **Scale horizontally**: Run multiple adapter instances
+- **Monitor metrics**: Track response times, errors, and throughput
+- **Use containers**: Docker/Kubernetes for easy deployment
+
+## Testing
+
+### Unit Tests
+
+Test your adapter logic independently:
+
+```go
+func TestSelectTarget(t *testing.T) {
+    s := &strategyServer{db: mockDB}
+
+    req := &pb.SelectRequest{
+        Username: "Steve",
+        UserId:   "069a79f4-44e9-4726-a5be-fca90e38aaf5",
+        Targets: []*pb.Target{
+            {Identifier: "hub-1", Address: &pb.Address{Hostname: "10.0.1.10", Port: 25565}},
+        },
+    }
+
+    resp, err := s.SelectTarget(context.Background(), req)
+    assert.NoError(t, err)
+    assert.NotNil(t, resp.Target)
+}
+```
+
+### Integration Tests
+
+Test with Passage using `grpcurl`:
+
+```bash
+# Test status adapter
+grpcurl -plaintext -d '{"client_address":{"hostname":"127.0.0.1","port":12345},"server_address":{"hostname":"localhost","port":25565},"protocol":769}' \
+    localhost:3030 scrayosnet.passage.adapter.Status/GetStatus
+
+# Test discovery adapter
+grpcurl -plaintext -d '{"username":"Steve","user_id":"069a79f4-44e9-4726-a5be-fca90e38aaf5"}' \
+    localhost:3030 scrayosnet.passage.adapter.Discovery/GetTargets
+
+# Test strategy adapter
+grpcurl -plaintext -d '{"username":"Steve","targets":[{"identifier":"hub-1","address":{"hostname":"10.0.1.10","port":25565}}]}' \
+    localhost:3030 scrayosnet.passage.adapter.Strategy/SelectTarget
+```
+
+## Debugging
+
+Enable debug logging in your adapter:
+
+```go
+log.SetFlags(log.LstdFlags | log.Lshortfile)
+log.Printf("Request: %+v", req)
+log.Printf("Response: %+v", resp)
+```
+
+Enable Passage debug logs:
+
+```bash
+RUST_LOG=passage=debug,passage::adapter=trace passage
+```
+
+## Example Projects
+
+Complete example projects are available at:
+- [Go Status Adapter](https://github.com/scrayosnet/passage-examples/tree/main/go-status-adapter)
+- [Python Discovery Adapter](https://github.com/scrayosnet/passage-examples/tree/main/python-discovery-adapter)
+- [Node.js Strategy Adapter](https://github.com/scrayosnet/passage-examples/tree/main/nodejs-strategy-adapter)
+
+## Next Steps
+
+- Review the [gRPC Protocol Reference](/reference/grpc-protocol/)
+- Learn about [Monitoring and Metrics](/advanced/monitoring-and-metrics/)
+- Explore [Deployment Patterns](/setup/kubernetes/)
