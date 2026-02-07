@@ -39,21 +39,14 @@ Passage (per instance):
 
 For networks with < 500 players online, a single Passage instance is sufficient:
 
-```
-┌─────────────┐
-│   Players   │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  Passage 1  │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│   Backend   │
-│   Servers   │
-└─────────────┘
+```mermaid
+flowchart TD
+    Players[Players]
+    Passage[Passage]
+    Backend[Backend Servers]
+
+    Players --> Passage
+    Passage --> Backend
 ```
 
 **Recommended Resources**:
@@ -65,30 +58,22 @@ For networks with < 500 players online, a single Passage instance is sufficient:
 
 For networks with 500+ players online, deploy multiple Passage instances behind a load balancer:
 
-```
-                ┌─────────────┐
-                │   Players   │
-                └──────┬──────┘
-                       │
-                       ▼
-                ┌─────────────┐
-                │     Load    │
-                │   Balancer  │
-                └──────┬──────┘
-                       │
-        ┌──────────────┼──────────────┐
-        ▼              ▼              ▼
-  ┌──────────┐  ┌──────────┐  ┌──────────┐
-  │Passage 1 │  │Passage 2 │  │Passage 3 │
-  └────┬─────┘  └────┬─────┘  └────┬─────┘
-       │             │             │
-       └─────────────┼─────────────┘
-                     │
-                     ▼
-              ┌─────────────┐
-              │   Backend   │
-              │   Servers   │
-              └─────────────┘
+```mermaid
+flowchart TD
+    Players[Players]
+    LB[Load Balancer]
+    P1[Passage 1]
+    P2[Passage 2]
+    P3[Passage 3]
+    Backend[Backend Servers]
+
+    Players --> LB
+    LB --> P1
+    LB --> P2
+    LB --> P3
+    P1 --> Backend
+    P2 --> Backend
+    P3 --> Backend
 ```
 
 **Key Benefits**:
@@ -573,25 +558,31 @@ Recommended with HA: 6 instances (3 for load, 3 for redundancy)
 
 For global networks, deploy Passage in multiple regions:
 
-```
-US-East:                 EU-West:                 AP-Southeast:
-┌──────────┐            ┌──────────┐            ┌──────────┐
-│Players   │            │Players   │            │Players   │
-└────┬─────┘            └────┬─────┘            └────┬─────┘
-     │                       │                       │
-     ▼                       ▼                       ▼
-┌─────────────┐        ┌─────────────┐        ┌─────────────┐
-│Passage (US) │        │Passage (EU) │        │Passage (AP) │
-└──────┬──────┘        └──────┬──────┘        └──────┬──────┘
-       │                      │                      │
-       └──────────────────────┼──────────────────────┘
-                              │
-                              ▼
-                      ┌──────────────┐
-                      │   Backend    │
-                      │   Servers    │
-                      │ (Any Region) │
-                      └──────────────┘
+```mermaid
+flowchart TD
+    subgraph US["US-East"]
+        PlayersUS[Players]
+        PassageUS[Passage US]
+        PlayersUS --> PassageUS
+    end
+
+    subgraph EU["EU-West"]
+        PlayersEU[Players]
+        PassageEU[Passage EU]
+        PlayersEU --> PassageEU
+    end
+
+    subgraph AP["AP-Southeast"]
+        PlayersAP[Players]
+        PassageAP[Passage AP]
+        PlayersAP --> PassageAP
+    end
+
+    Backend[Backend Servers<br/>Any Region]
+
+    PassageUS --> Backend
+    PassageEU --> Backend
+    PassageAP --> Backend
 ```
 
 **Benefits**:
@@ -734,43 +725,6 @@ Restart pods to clear rate limiter state.
 3. Use co-located adapters (same cluster/region)
 4. Switch to simpler adapters (e.g., Fixed instead of gRPC for static configs)
 
-## Performance Benchmarks
-
-### Single Instance Performance
-
-**Test Setup**:
-- Instance: 2 CPU cores, 512 MB RAM
-- Network: 1 Gbps
-- Backend: Fixed adapter (no external dependencies)
-
-**Results**:
-| Metric | Value |
-|--------|-------|
-| Connections/sec | 500-800 |
-| Concurrent handshakes | 1,000+ |
-| Memory usage | 80-120 MB |
-| CPU usage (peak) | 60-80% |
-| P50 latency | 50 ms |
-| P99 latency | 150 ms |
-
-### Multi-Instance Performance
-
-**Test Setup**:
-- Instances: 5 pods × 2 CPU cores, 512 MB RAM
-- Load Balancer: AWS NLB
-- Backend: Agones discovery adapter
-
-**Results**:
-| Metric | Value |
-|--------|-------|
-| Connections/sec | 2,500-4,000 |
-| Peak concurrent | 5,000+ |
-| Memory usage per pod | 100-150 MB |
-| CPU usage per pod | 40-60% |
-| P50 latency | 60 ms |
-| P99 latency | 200 ms |
-
-**Conclusion**: Near-linear scaling with instance count.
 
 ## Summary
 
@@ -787,10 +741,3 @@ Key takeaways:
 3. Monitor connection rate, latency, and error rate
 4. Enable PROXY protocol to preserve client IPs
 5. Test failover scenarios before going live
-
-## Further Reading
-
-- [Kubernetes Deployment Guide](/setup/kubernetes/) - Complete K8s setup
-- [Configuration Reference](/customization/config/) - All configuration options
-- [Custom gRPC Adapters](/advanced/custom-grpc-adapters/) - Build scalable adapters
-- [Architecture Overview](/overview/architecture/) - How Passage works

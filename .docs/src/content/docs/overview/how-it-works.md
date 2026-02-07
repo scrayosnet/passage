@@ -220,9 +220,3 @@ Player → Passage (includes cookie)
 ```
 
 This reduces connection time from ~500ms to ~50ms for returning players.
-
-## Next Steps
-
-- Understand the [Architecture](/overview/architecture/) in detail
-- Learn about [Authentication and Encryption](/overview/authentication-and-encryption/)
-- Configure [Target Discovery](/customization/target-discovery-adapters/) for your network

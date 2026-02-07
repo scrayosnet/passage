@@ -24,124 +24,134 @@ gRPC adapters allow you to:
 
 Passage provides proto definitions for all three adapter types. These are available in the repository at:
 
-```
-proto/adapter/
-├── adapter.proto     # Common types (Target, Address, MetaEntry)
-├── status.proto      # Status service definition
-├── discovery.proto   # Discovery service definition
-└── strategy.proto    # Strategy service definition
-```
+import { FileTree } from '@astrojs/starlight/components';
+
+<FileTree>
+
+- proto/adapter/
+  - adapter.proto Common types (Target, Address, MetaEntry)
+  - status.proto Status service definition
+  - discovery.proto Discovery service definition
+  - strategy.proto Strategy service definition
+
+</FileTree>
 
 ## Example: Status Adapter in Go
 
-### 1. Set Up Your Project
+import { Steps } from '@astrojs/starlight/components';
 
-```bash
-mkdir passage-status-adapter
-cd passage-status-adapter
-go mod init github.com/yourorg/passage-status-adapter
-```
+<Steps>
 
-### 2. Copy Proto Files
+1. **Set Up Your Project**
 
-Copy the proto files from the Passage repository:
+   ```bash
+   mkdir passage-status-adapter
+   cd passage-status-adapter
+   go mod init github.com/yourorg/passage-status-adapter
+   ```
 
-```bash
-mkdir -p proto/adapter
-cp /path/to/passage/proto/adapter/*.proto proto/adapter/
-```
+2. **Copy Proto Files**
 
-### 3. Generate Code
+   Copy the proto files from the Passage repository:
 
-```bash
-# Install protoc compiler and Go plugins
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+   ```bash
+   mkdir -p proto/adapter
+   cp /path/to/passage/proto/adapter/*.proto proto/adapter/
+   ```
 
-# Generate Go code
-protoc --go_out=. --go_opt=paths=source_relative \
-    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-    proto/adapter/*.proto
-```
+3. **Generate Code**
 
-### 4. Implement the Service
+   ```bash
+   # Install protoc compiler and Go plugins
+   go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+   go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
-```go
-// main.go
-package main
+   # Generate Go code
+   protoc --go_out=. --go_opt=paths=source_relative \
+       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+       proto/adapter/*.proto
+   ```
 
-import (
-    "context"
-    "log"
-    "net"
+4. **Implement the Service**
 
-    pb "github.com/yourorg/passage-status-adapter/proto/adapter"
-    "google.golang.org/grpc"
-)
+   ```go
+   // main.go
+   package main
 
-type statusServer struct {
-    pb.UnimplementedStatusServer
-}
+   import (
+       "context"
+       "log"
+       "net"
 
-func (s *statusServer) GetStatus(ctx context.Context, req *pb.StatusRequest) (*pb.StatusResponse, error) {
-    log.Printf("Status request from %s:%d",
-        req.ClientAddress.Hostname, req.ClientAddress.Port)
+       pb "github.com/yourorg/passage-status-adapter/proto/adapter"
+       "google.golang.org/grpc"
+   )
 
-    return &pb.StatusResponse{
-        Status: &pb.StatusData{
-            Version: &pb.ProtocolVersion{
-                Name:     "My Custom Network",
-                Protocol: int32(req.Protocol), // Match client protocol
-            },
-            Players: &pb.Players{
-                Online: 42,
-                Max:    100,
-                Samples: []*pb.PlayerEntry{
-                    {Name: "Steve", Id: "069a79f4-44e9-4726-a5be-fca90e38aaf5"},
-                    {Name: "Alex", Id: "ec561538-f3fd-461d-aff5-086b22154bce"},
-                },
-            },
-            Description:        `{"text":"Welcome to my server!","color":"gold"}`,
-            EnforcesSecureChat: boolPtr(true),
-        },
-    }, nil
-}
+   type statusServer struct {
+       pb.UnimplementedStatusServer
+   }
 
-func main() {
-    lis, err := net.Listen("tcp", ":3030")
-    if err != nil {
-        log.Fatalf("failed to listen: %v", err)
-    }
+   func (s *statusServer) GetStatus(ctx context.Context, req *pb.StatusRequest) (*pb.StatusResponse, error) {
+       log.Printf("Status request from %s:%d",
+           req.ClientAddress.Hostname, req.ClientAddress.Port)
 
-    s := grpc.NewServer()
-    pb.RegisterStatusServer(s, &statusServer{})
+       return &pb.StatusResponse{
+           Status: &pb.StatusData{
+               Version: &pb.ProtocolVersion{
+                   Name:     "My Custom Network",
+                   Protocol: int32(req.Protocol), // Match client protocol
+               },
+               Players: &pb.Players{
+                   Online: 42,
+                   Max:    100,
+                   Samples: []*pb.PlayerEntry{
+                       {Name: "Steve", Id: "069a79f4-44e9-4726-a5be-fca90e38aaf5"},
+                       {Name: "Alex", Id: "ec561538-f3fd-461d-aff5-086b22154bce"},
+                   },
+               },
+               Description:        `{"text":"Welcome to my server!","color":"gold"}`,
+               EnforcesSecureChat: boolPtr(true),
+           },
+       }, nil
+   }
 
-    log.Printf("Server listening on :3030")
-    if err := s.Serve(lis); err != nil {
-        log.Fatalf("failed to serve: %v", err)
-    }
-}
+   func main() {
+       lis, err := net.Listen("tcp", ":3030")
+       if err != nil {
+           log.Fatalf("failed to listen: %v", err)
+       }
 
-func boolPtr(b bool) *bool {
-    return &b
-}
-```
+       s := grpc.NewServer()
+       pb.RegisterStatusServer(s, &statusServer{})
 
-### 5. Run the Service
+       log.Printf("Server listening on :3030")
+       if err := s.Serve(lis); err != nil {
+           log.Fatalf("failed to serve: %v", err)
+       }
+   }
 
-```bash
-go run main.go
-```
+   func boolPtr(b bool) *bool {
+       return &b
+   }
+   ```
 
-### 6. Configure Passage
+5. **Run the Service**
 
-```toml
-[status]
-adapter = "grpc"
+   ```bash
+   go run main.go
+   ```
 
-[status.grpc]
-address = "http://localhost:3030"
-```
+6. **Configure Passage**
+
+   ```toml
+   [status]
+   adapter = "grpc"
+
+   [status.grpc]
+   address = "http://localhost:3030"
+   ```
+
+</Steps>
 
 ## Example: Discovery Adapter in Python
 
@@ -419,9 +429,3 @@ Complete example projects are available at:
 - [Go Status Adapter](https://github.com/scrayosnet/passage-examples/tree/main/go-status-adapter)
 - [Python Discovery Adapter](https://github.com/scrayosnet/passage-examples/tree/main/python-discovery-adapter)
 - [Node.js Strategy Adapter](https://github.com/scrayosnet/passage-examples/tree/main/nodejs-strategy-adapter)
-
-## Next Steps
-
-- Review the [gRPC Protocol Reference](/reference/grpc-protocol/)
-- Learn about [Monitoring and Metrics](/advanced/monitoring-and-metrics/)
-- Explore [Deployment Patterns](/setup/kubernetes/)

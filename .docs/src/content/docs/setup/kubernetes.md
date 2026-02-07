@@ -581,10 +581,3 @@ Passage is stateless and should have constant memory. If memory grows:
 ✅ Configure logging aggregation
 ✅ Set up alerting for key metrics
 ✅ Document your configuration
-
-## Next Steps
-
-- Configure [Agones Discovery](/customization/target-discovery-adapters/#agones-discovery-adapter)
-- Set up [Monitoring](/advanced/monitoring-and-metrics/)
-- Review [Configuration Options](/customization/config/)
-- Learn about [Scaling Strategies](/advanced/scaling/)

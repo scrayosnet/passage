@@ -792,12 +792,3 @@ CONFIG_FILE=config/config.json passage
 ```bash
 CONFIG_FILE=config/config.yaml passage
 ```
-
----
-
-## Next Steps
-
-- Learn about [Status Adapters](/customization/status-adapters/)
-- Configure [Target Discovery](/customization/target-discovery-adapters/)
-- Set up [Target Strategies](/customization/target-strategy-adapters/)
-- See practical examples in [Configuration Basics](/setup/configuration-basics/)

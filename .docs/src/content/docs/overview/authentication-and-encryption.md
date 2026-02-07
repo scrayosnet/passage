@@ -440,10 +440,3 @@ Typical authentication timing:
 | **With cookie** | **~50ms** | **No Mojang API** |
 
 The majority of time is spent waiting for Mojang's APIs. This is unavoidable for first-time connections.
-
-## Further Reading
-
-- [Minecraft Protocol Documentation](https://wiki.vg/Protocol_Encryption) - Official protocol details
-- [How It Works](/overview/how-it-works/) - Step-by-step connection walkthrough
-- [Architecture](/overview/architecture/) - Overall system design
-- [Mojang API Documentation](https://wiki.vg/Mojang_API) - Mojang's authentication endpoints

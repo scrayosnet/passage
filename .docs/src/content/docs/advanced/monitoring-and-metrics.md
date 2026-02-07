@@ -646,12 +646,3 @@ Use metrics to identify performance issues:
 2. Check sample rate (default: 100%)
 3. Verify network connectivity
 4. Check OpenTelemetry Collector logs
-
----
-
-## Next Steps
-
-- Learn about [Scaling Strategies](/advanced/scaling/)
-- Configure [Custom gRPC Adapters](/advanced/custom-grpc-adapters/)
-- Set up [Kubernetes Deployment](/setup/kubernetes/)
-- Review [Configuration Reference](/reference/configuration-reference/)

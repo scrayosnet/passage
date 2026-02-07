@@ -281,12 +281,3 @@ Before deploying your customized Passage:
 For enterprise deployments or custom development:
 - Contact the maintainers via GitHub
 - Consider sponsoring the project for priority support
-
-## Next Steps
-
-Ready to customize? Start here:
-
-1. **Beginners**: [Configuration Basics](/setup/configuration-basics/)
-2. **Intermediate**: [Adapter System Overview](/customization/adapter/)
-3. **Advanced**: [Custom gRPC Adapters](/advanced/custom-grpc-adapters/)
-4. **Production**: [Kubernetes Deployment](/setup/kubernetes/)

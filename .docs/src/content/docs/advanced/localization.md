@@ -559,12 +559,3 @@ disconnect_timeout = "{\"text\":\"Error: \\\\\"}"
 # Use multiline strings for complex JSON
 disconnect_timeout = '''{"text":"Connection timeout","color":"red"}'''
 ```
-
----
-
-## Next Steps
-
-- Review [Configuration Reference](/reference/configuration-reference/)
-- Learn about [Monitoring and Metrics](/advanced/monitoring-and-metrics/)
-- Explore [Customization Options](/customization/customization/)
-- Set up [Configuration Basics](/setup/configuration-basics/)

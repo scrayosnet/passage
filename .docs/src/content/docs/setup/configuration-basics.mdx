@@ -18,12 +18,16 @@ Passage uses a layered configuration system with multiple sources:
 
 ### File Locations
 
-```
-config/
-├── config.toml      # Your custom configuration
-├── auth_secret      # Optional: Authentication secret
-└── default.toml     # Built-in defaults (reference only)
-```
+import { FileTree } from '@astrojs/starlight/components';
+
+<FileTree>
+
+- config/
+  - config.toml Your custom configuration
+  - auth_secret Optional: Authentication secret
+  - default.toml Built-in defaults (reference only)
+
+</FileTree>
 
 ## Minimal Configuration
 
@@ -321,10 +325,3 @@ adapter = "grpc"
 [target_strategy.grpc]
 address = "http://strategy-service:3030"
 ```
-
-## Next Steps
-
-- Explore detailed [Configuration Reference](/reference/configuration-reference/)
-- Learn about [Status Adapters](/customization/status-adapters/)
-- Configure [Target Discovery](/customization/target-discovery-adapters/)
-- Set up [Target Strategies](/customization/target-strategy-adapters/)

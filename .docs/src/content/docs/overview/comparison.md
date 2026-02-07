@@ -19,7 +19,7 @@ This comparison may be biased, but we've done our best to give you an accurate o
 | **Performance** |
 | Resource efficient | ❌ | ✅ | ✅✅ | ✅✅✅ | ✅✅✅✅ |
 | Native binary | ❌ (JVM) | ❌ (JVM) | ❌ (JVM) | ✅ (Go) | ✅ (Rust) |
-| Memory per connection | ~5MB | ~3MB | ~1MB | ~100KB | ~10KB |
+| Stateless (zero memory per player) | ❌ | ❌ | ❌ | ❌ | ✅ |
 | Packet transcoding | ✅ (slow) | ✅ (slow) | ✅ (fast) | ✅ (fast) | ❌ (none!) |
 | **Scalability** |
 | Horizontal scaling | ⚠️ Complex | ⚠️ Complex | ⚠️ Complex | ✅ Good | ✅✅ Trivial |
@@ -57,15 +57,7 @@ After transfer, packets flow directly from player to backend server.
 
 **Memory Efficiency**
 
-| Proxy | Memory per Player | Memory for 1000 Players |
-|-------|-------------------|-------------------------|
-| BungeeCord | ~5MB | ~5GB |
-| Waterfall | ~3MB | ~3GB |
-| Velocity | ~1MB | ~1GB |
-| Gate | ~100KB | ~100MB |
-| **Passage** | **~10KB** | **~10MB** |
-
-After transfer, Passage has **zero memory** per connected player.
+Traditional proxies must maintain state for each connected player, consuming memory proportional to the player count. After transfer, Passage has **zero memory** per connected player since it's completely stateless.
 
 **Native Performance**
 
@@ -143,28 +135,33 @@ Traditional proxies must intercept and modify chat messages, which breaks Mojang
 
 **No Single Point of Failure**
 
-With traditional proxies:
-```
-Proxy Restart → All players disconnected → Angry players
-```
+```mermaid
+flowchart LR
+    subgraph Traditional["Traditional Proxy"]
+        PR[Proxy Restart] --> PD[All Players Disconnected] --> AP[Angry Players]
+    end
 
-With Passage:
-```
-Passage Restart → Players stay connected → No one notices
+    subgraph Pass["Passage"]
+        PAR[Passage Restart] --> PSC[Players Stay Connected] --> NN[No One Notices]
+    end
 ```
 
 **Simplified Architecture**
 
-```
-Traditional:
-Client → Proxy (stateful) → Backend
-         ↓
-    Session storage
-    Plugin state
-    Cross-proxy messaging
+```mermaid
+flowchart LR
+    subgraph Traditional
+        C1[Client] --> Proxy[Proxy<br/>stateful]
+        Proxy --> B1[Backend]
+        Proxy -.-> SS[Session Storage]
+        Proxy -.-> PS[Plugin State]
+        Proxy -.-> CM[Cross-proxy Messaging]
+    end
 
-Passage:
-Client → Passage (stateless) → Backend
+    subgraph Pass["Passage Architecture"]
+        C2[Client] --> Passage[Passage<br/>stateless]
+        Passage --> B2[Backend]
+    end
 ```
 
 Fewer components = fewer failure modes.
@@ -257,41 +254,14 @@ Fewer components = fewer failure modes.
 3. Similar operational patterns
 4. Consider: Why not improve Gate instead?
 
-## Performance Benchmarks
+## Key Performance Differences
 
-*These are approximate figures from typical deployments:*
+Passage's architecture provides distinct performance characteristics:
 
-### Connection Latency
-
-| Proxy | Initial Connection | Subsequent Connections |
-|-------|-------------------|------------------------|
-| BungeeCord | ~300ms | ~300ms |
-| Waterfall | ~250ms | ~250ms |
-| Velocity | ~200ms | ~200ms |
-| Gate | ~150ms | ~150ms |
-| **Passage** | **~250ms** | **~50ms (with cookies)** |
-
-*Note: Mostly limited by Mojang auth latency*
-
-### Throughput
-
-| Proxy | Max Connections/sec | CPU Usage (1000 players) |
-|-------|---------------------|--------------------------|
-| BungeeCord | ~50 | 100% (2 cores) |
-| Waterfall | ~100 | 80% (2 cores) |
-| Velocity | ~200 | 40% (2 cores) |
-| Gate | ~500 | 20% (2 cores) |
-| **Passage** | **~1000** | **10% (2 cores)** |
-
-### Memory Usage
-
-| Proxy | Base | Per Player | 10,000 Players |
-|-------|------|------------|----------------|
-| BungeeCord | 200MB | 5MB | 50GB |
-| Waterfall | 150MB | 3MB | 30GB |
-| Velocity | 100MB | 1MB | 10GB |
-| Gate | 50MB | 100KB | 1GB |
-| **Passage** | **50MB** | **0 (after transfer)** | **50MB** |
+- **Connection latency**: Primarily limited by Mojang authentication API (~200-500ms). Cookie-based auth significantly reduces this for returning players.
+- **Memory usage**: Stateless design means zero memory per connected player after transfer, unlike traditional proxies that maintain per-player state.
+- **CPU efficiency**: No packet transcoding overhead means lower CPU usage compared to traditional proxies.
+- **Throughput**: Native Rust implementation with async I/O provides high connection handling capacity.
 
 ## Summary
 
@@ -327,15 +297,3 @@ The trade-off is a minimum Minecraft version requirement and lack of a plugin sy
 - New networks (1.20.5+): **Use Passage**
 - Existing networks: **Evaluate based on requirements**
 - Legacy support needed: **Use hybrid approach**
-
-## Further Reading
-
-- [Architecture](/overview/architecture/) - Understanding Passage's design
-- [Getting Started](/setup/getting-started/) - Try Passage yourself
-- [Scaling](/advanced/scaling/) - Horizontal scaling strategies
-- [Authentication](/overview/authentication-and-encryption/) - Security deep dive
-
-[velocity-docs]: https://github.com/PaperMC/Velocity
-[gate-docs]: https://gate.minekube.com/
-[waterfall-docs]: https://github.com/PaperMC/Waterfall
-[bungeecord-docs]: https://github.com/SpigotMC/BungeeCord

@@ -20,86 +20,92 @@ You can be up and running in under 5 minutes with our Quick Start below!
 
 ## Quick Start (5 Minutes)
 
-### 1. Create Configuration Directory
+import { Steps } from '@astrojs/starlight/components';
 
-```bash
-mkdir -p passage/config
-cd passage
-```
+<Steps>
 
-### 2. Create Configuration File
+1. **Create Configuration Directory**
 
-Create `config/config.toml` with your backend server details:
+   ```bash
+   mkdir -p passage/config
+   cd passage
+   ```
 
-```toml
-# config/config.toml
+2. **Create Configuration File**
 
-# Bind address for player connections
-address = "0.0.0.0:25565"
+   Create `config/config.toml` with your backend server details:
 
-# Connection timeout in seconds
-timeout = 120
+   ```toml
+   # config/config.toml
 
-# Server status configuration
-[status]
-adapter = "fixed"
+   # Bind address for player connections
+   address = "0.0.0.0:25565"
 
-[status.fixed]
-name = "My Minecraft Network"
-description = "\"Welcome to my server!\""
+   # Connection timeout in seconds
+   timeout = 120
 
-# Target discovery - where to send players
-[target_discovery]
-adapter = "fixed"
+   # Server status configuration
+   [status]
+   adapter = "fixed"
 
-[[target_discovery.fixed.targets]]
-identifier = "lobby-1"
-address = "10.0.1.10:25565"  # Replace with your backend server IP
-meta = { type = "lobby" }
+   [status.fixed]
+   name = "My Minecraft Network"
+   description = "\"Welcome to my server!\""
 
-# Target strategy - how to select servers
-[target_strategy]
-adapter = "fixed"
+   # Target discovery - where to send players
+   [target_discovery]
+   adapter = "fixed"
 
-# Localization
-[localization]
-default_locale = "en_US"
-```
+   [[target_discovery.fixed.targets]]
+   identifier = "lobby-1"
+   address = "10.0.1.10:25565"  # Replace with your backend server IP
+   meta = { type = "lobby" }
 
-:::caution[Important: Update Backend Address]
-Replace `10.0.1.10:25565` with your actual Minecraft server's IP address and port. If running locally, use `host.docker.internal:25565` (Docker Desktop) or `172.17.0.1:25565` (Linux).
-:::
+   # Target strategy - how to select servers
+   [target_strategy]
+   adapter = "fixed"
 
-### 3. Start Passage
+   # Localization
+   [localization]
+   default_locale = "en_US"
+   ```
 
-```bash
-docker run -d \
-  --name passage \
-  -p 25565:25565 \
-  -v $(pwd)/config:/app/config \
-  ghcr.io/scrayosnet/passage:latest
-```
+   :::caution[Important: Update Backend Address]
+   Replace `10.0.1.10:25565` with your actual Minecraft server's IP address and port. If running locally, use `host.docker.internal:25565` (Docker Desktop) or `172.17.0.1:25565` (Linux).
+   :::
 
-### 4. Test Connection
+3. **Start Passage**
 
-Open Minecraft (version 1.20.5+) and add a server:
-- **Server Address**: `localhost:25565` (or your server IP)
-- **Server Name**: My Minecraft Network
+   ```bash
+   docker run -d \
+     --name passage \
+     -p 25565:25565 \
+     -v $(pwd)/config:/app/config \
+     ghcr.io/scrayosnet/passage:latest
+   ```
 
-You should see your configured MOTD and be able to connect!
+4. **Test Connection**
 
-### 5. Check Logs
+   Open Minecraft (version 1.20.5+) and add a server:
+   - **Server Address**: `localhost:25565` (or your server IP)
+   - **Server Name**: My Minecraft Network
 
-```bash
-# View real-time logs
-docker logs -f passage
+   You should see your configured MOTD and be able to connect!
 
-# Expected output:
-# [INFO] Passage starting on 0.0.0.0:25565
-# [INFO] Status adapter: fixed
-# [INFO] Target discovery adapter: fixed
-# [INFO] Target strategy adapter: fixed
-```
+5. **Check Logs**
+
+   ```bash
+   # View real-time logs
+   docker logs -f passage
+
+   # Expected output:
+   # [INFO] Passage starting on 0.0.0.0:25565
+   # [INFO] Status adapter: fixed
+   # [INFO] Target discovery adapter: fixed
+   # [INFO] Target strategy adapter: fixed
+   ```
+
+</Steps>
 
 🎉 **Congratulations!** You now have Passage running and routing players to your backend server.
 
@@ -294,43 +300,6 @@ Expected log flow:
   ```
 - Or use `--network host` when running Docker (Linux only)
 
-## Next Steps
-
-Now that you have Passage running, explore more advanced features:
-
-### 1. **Add Multiple Servers**
-
-Configure multiple backend servers and implement load balancing:
-- [Player Fill Strategy](/customization/target-strategy-adapters/#player-fill-strategy-adapter) - Fill servers sequentially
-- [Fixed Strategy](/customization/target-strategy-adapters/#fixed-strategy-adapter) - Simple routing
-
-### 2. **Customize Server Status**
-
-Enhance your server list appearance:
-- Add a custom favicon
-- Use colored MOTD with JSON formatting
-- Display dynamic player counts
-- [Status Adapters Guide](/customization/status-adapters/)
-
-### 3. **Dynamic Server Discovery**
-
-Replace static configuration with dynamic discovery:
-- [gRPC Adapters](/customization/target-discovery-adapters/#grpc-discovery-adapter) - Custom service integration
-- [Agones Discovery](/customization/target-discovery-adapters/#agones-discovery-adapter) - Kubernetes game servers
-
-### 4. **Production Deployment**
-
-Prepare for production use:
-- [Kubernetes Deployment](/setup/kubernetes/) - High availability and auto-scaling
-- [Configuration Best Practices](/customization/config/) - Security and optimization
-- [Monitoring and Metrics](/advanced/monitoring-and-metrics/) - OpenTelemetry integration
-
-### 5. **Advanced Customization**
-
-Build custom routing logic:
-- [Custom gRPC Adapters](/advanced/custom-grpc-adapters/) - Implement your own adapters
-- [Authentication Cookies](/overview/authentication-and-encryption/#authentication-cookies) - Skip re-authentication
-- [Rate Limiting](/customization/config/#rate_limiter) - Prevent connection floods
 
 ## Configuration Examples
 
@@ -444,10 +413,3 @@ You've learned:
 - ✅ Next steps for advanced features
 
 Passage is now routing players to your backend servers with minimal overhead and maximum performance!
-
-## Further Reading
-
-- [Architecture](/overview/architecture/) - Understand how Passage works
-- [Configuration Reference](/customization/config/) - All configuration options
-- [Adapter System](/customization/adapter/) - Deep dive into adapters
-- [Comparison with Proxies](/overview/comparison/) - Why choose Passage

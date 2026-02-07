@@ -7,19 +7,14 @@ Passage is built on a modular, adapter-based architecture that separates concern
 
 ## High-Level Overview
 
-```
-┌─────────┐         ┌─────────┐         ┌──────────────┐
-│ Player  │────────▶│ Passage │────────▶│ Game Server  │
-└─────────┘         └─────────┘         └──────────────┘
-                         │
-                         │ Uses three adapters:
-                         │
-                    ┌────┴────┐
-                    │         │
-             ┌──────▼───┐ ┌──▼────────┐ ┌──────────▼────────┐
-             │  Status  │ │  Target   │ │  Target Strategy  │
-             │ Adapter  │ │ Discovery │ │     Adapter       │
-             └──────────┘ └───────────┘ └───────────────────┘
+```mermaid
+flowchart LR
+    Player[Player] --> Passage[Passage]
+    Passage --> GameServer[Game Server]
+
+    Passage --> Status[Status Adapter]
+    Passage --> Discovery[Target Discovery Adapter]
+    Passage --> Strategy[Target Strategy Adapter]
 ```
 
 ## The Three-Phase Connection Flow
@@ -100,67 +95,66 @@ The adapter pattern allows Passage to remain:
 
 ## Component Diagram
 
-```
-┌───────────────────────────────────────────────────────────┐
-│                         Passage                           │
-│                                                           │
-│  ┌─────────────────┐  ┌──────────────────────────────┐  │
-│  │ Connection      │  │  Adapter Layer               │  │
-│  │ Handler         │  │                              │  │
-│  │                 │  │  ┌────────────────────────┐  │  │
-│  │ - Handshake     │──┼─▶│  Status Supplier       │  │  │
-│  │ - Authentication│  │  │  (Fixed/HTTP/gRPC)     │  │  │
-│  │ - Encryption    │  │  └────────────────────────┘  │  │
-│  │ - Transfer      │  │                              │  │
-│  │                 │  │  ┌────────────────────────┐  │  │
-│  │                 │──┼─▶│  Target Selector       │  │  │
-│  │                 │  │  │  (Fixed/gRPC/Agones)   │  │  │
-│  │                 │  │  └────────────────────────┘  │  │
-│  │                 │  │                              │  │
-│  │                 │  │  ┌────────────────────────┐  │  │
-│  │                 │──┼─▶│  Target Strategy       │  │  │
-│  │                 │  │  │  (Fixed/Fill/gRPC)     │  │  │
-│  └─────────────────┘  │  └────────────────────────┘  │  │
-│                       └──────────────────────────────┘  │
-│                                                          │
-│  ┌─────────────────┐  ┌──────────────────────────────┐ │
-│  │ Rate Limiter    │  │  Observability               │ │
-│  │                 │  │  - OpenTelemetry             │ │
-│  │ - Per-IP limits │  │  - Sentry (optional)         │ │
-│  │ - Token bucket  │  │  - Metrics & Traces          │ │
-│  └─────────────────┘  └──────────────────────────────┘ │
-└───────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Passage
+        subgraph Connection["Connection Handler"]
+            H[Handshake]
+            A[Authentication]
+            E[Encryption]
+            T[Transfer]
+        end
+
+        subgraph Adapters["Adapter Layer"]
+            Status[Status Supplier<br/>Fixed/HTTP/gRPC]
+            Discovery[Target Selector<br/>Fixed/gRPC/Agones]
+            Strategy[Target Strategy<br/>Fixed/Fill/gRPC]
+        end
+
+        subgraph Support["Supporting Components"]
+            RL[Rate Limiter<br/>Per-IP limits]
+            Obs[Observability<br/>OpenTelemetry/Sentry]
+        end
+
+        Connection --> Status
+        Connection --> Discovery
+        Connection --> Strategy
+    end
 ```
 
 ## Data Flow
 
 ### Successful Connection Flow
 
-```
-Player                    Passage                   Adapters                Backend
-  │                         │                          │                        │
-  │──Handshake─────────────▶│                          │                        │
-  │──Status Request────────▶│                          │                        │
-  │                         │──Get Status─────────────▶│                        │
-  │                         │◀─Status Response─────────│                        │
-  │◀─Status Response────────│                          │                        │
-  │                         │                          │                        │
-  │──Login Start───────────▶│                          │                        │
-  │◀─Encryption Request─────│                          │                        │
-  │──Encryption Response───▶│                          │                        │
-  │                         │──Mojang Auth────────────▶│                        │
-  │                         │◀─Auth Success────────────│                        │
-  │◀─Login Success──────────│                          │                        │
-  │                         │                          │                        │
-  │◀─Transfer to Config─────│                          │                        │
-  │──Config Acknowledge────▶│                          │                        │
-  │                         │──Get Targets────────────▶│                        │
-  │                         │◀─Target List─────────────│                        │
-  │                         │──Select Target──────────▶│                        │
-  │                         │◀─Selected Target─────────│                        │
-  │◀─Transfer Packet────────│                          │                        │
-  │                         │                          │                        │
-  │─────────────Connect directly to backend────────────────────────────────────▶│
+```mermaid
+sequenceDiagram
+    participant Player
+    participant Passage
+    participant Adapters
+    participant Backend
+
+    Player->>Passage: Handshake
+    Player->>Passage: Status Request
+    Passage->>Adapters: Get Status
+    Adapters-->>Passage: Status Response
+    Passage-->>Player: Status Response
+
+    Player->>Passage: Login Start
+    Passage-->>Player: Encryption Request
+    Player->>Passage: Encryption Response
+    Passage->>Adapters: Mojang Auth
+    Adapters-->>Passage: Auth Success
+    Passage-->>Player: Login Success
+
+    Passage-->>Player: Transfer to Config
+    Player->>Passage: Config Acknowledge
+    Passage->>Adapters: Get Targets
+    Adapters-->>Passage: Target List
+    Passage->>Adapters: Select Target
+    Adapters-->>Passage: Selected Target
+    Passage-->>Player: Transfer Packet
+
+    Player->>Backend: Connect directly to backend
 ```
 
 ## Stateless Design Benefits
@@ -178,9 +172,3 @@ Passage's stateless architecture means:
 - **CPU**: Minimal - mostly I/O bound
 - **Network**: ~5-20KB per player connection (authentication + transfer)
 - **Latency**: <50ms added to connection time (depends on Mojang API)
-
-## Next Steps
-
-- Learn about [Authentication and Encryption](/overview/authentication-and-encryption/)
-- Explore [Scaling Strategies](/advanced/scaling/)
-- See how Passage [Compares to Proxies](/overview/comparison/)

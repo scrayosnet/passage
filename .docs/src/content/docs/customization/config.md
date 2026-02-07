@@ -534,10 +534,3 @@ export PASSAGE_STATUS_FIXED_NAME="My Server"
 export PASSAGE_RATE_LIMITER_ENABLED=true
 export PASSAGE_RATE_LIMITER_SIZE=100
 ```
-
-## Next Steps
-
-- Learn about [Status Adapters](/customization/status-adapters/)
-- Configure [Target Discovery](/customization/target-discovery-adapters/)
-- Set up [Target Strategies](/customization/target-strategy-adapters/)
-- See [Configuration Reference](/reference/configuration-reference/) for field-by-field details

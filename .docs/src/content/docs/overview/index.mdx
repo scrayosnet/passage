@@ -19,30 +19,29 @@ This stateless approach eliminates the proxy bottleneck entirely.
 
 ## Why Passage?
 
-### 🚀 Performance
-- No packet transcoding overhead
-- Minimal latency - players connect directly to game servers
-- Written in Rust for maximum efficiency
+import { Card, CardGrid } from '@astrojs/starlight/components';
 
-### 📈 Scalability
-- Stateless architecture means horizontal scaling is trivial
-- No session state to synchronize between instances
-- Handle millions of connections with minimal resources
+<CardGrid>
+  <Card title="🚀 Performance" icon="rocket">
+    No packet transcoding overhead. Players connect directly to game servers with minimal latency. Written in Rust for maximum efficiency.
+  </Card>
 
-### 🔐 Security
-- Full Mojang authentication support
-- Native chat signing preservation
-- Rate limiting to prevent connection floods
+  <Card title="📈 Scalability" icon="up-caret">
+    Stateless architecture means horizontal scaling is trivial. No session state to synchronize. Handle millions of connections with minimal resources.
+  </Card>
 
-### 🔧 Flexibility
-- Pluggable adapter system for status, discovery, and routing
-- Support for fixed configs, HTTP/gRPC adapters, and Kubernetes/Agones
-- Comprehensive observability with OpenTelemetry
+  <Card title="🔐 Security" icon="shield">
+    Full Mojang authentication support with native chat signing preservation. Rate limiting prevents connection floods.
+  </Card>
 
-### 🎯 Future-Proof
-- Works with any Minecraft version 1.20.5+
-- No need to update for new protocol versions
-- Modern, actively maintained codebase
+  <Card title="🔧 Flexibility" icon="setting">
+    Pluggable adapter system for status, discovery, and routing. Support for fixed configs, HTTP/gRPC adapters, and Kubernetes/Agones integration.
+  </Card>
+
+  <Card title="🎯 Future-Proof" icon="star">
+    Works with any Minecraft version 1.20.5+. No need to update for new protocol versions. Modern, actively maintained codebase.
+  </Card>
+</CardGrid>
 
 ## Key Concepts
 
@@ -74,9 +73,7 @@ Passage is ideal for:
 
 - Minecraft client version 1.20.5 or higher
 - Linux, macOS, or Windows server
-- Minimal resource requirements (typically <100MB RAM)
+- Minimal resource requirements (typically less than 100MB RAM)
 - Optional: Kubernetes cluster for Agones integration
 
-## Next Steps
-
-Ready to get started? Check out our [Installation Guide](/setup/installation/) to deploy Passage in minutes.
+Ready to get started? Check out the [Installation Guide](/setup/installation/).
