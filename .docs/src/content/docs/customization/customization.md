@@ -72,7 +72,7 @@ Monitor Passage's performance and health:
 - Sentry error tracking
 - Structured logging
 
-[→ Monitoring Guide](/advanced/monitoring-and-metrics/)
+[→ Monitoring Guide](/advanced/observability/)
 
 ### Localization
 Customize disconnect messages in multiple languages:

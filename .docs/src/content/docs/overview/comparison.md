@@ -1,7 +1,9 @@
 ---
-title: Comparison with Traditional Proxies
+title: Comparison
 description: How Passage compares to BungeeCord, Waterfall, Velocity, and Gate.
 outline: deep
+sidebar:
+    order: 2
 ---
 
 Passage aims to replace existing proxy solutions like [Velocity](https://github.com/PaperMC/Velocity), [Gate](https://gate.minekube.com/), [Waterfall](https://github.com/PaperMC/Waterfall), and [BungeeCord](https://github.com/SpigotMC/BungeeCord). We're convinced that Passage is the ideal way to connect modern Minecraft networks to the internet and that there are many advantages in using Passage over conventional Minecraft network proxies.

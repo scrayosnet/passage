@@ -1,6 +1,8 @@
 ---
-title: Authentication and Encryption
+title: Security
 description: Understanding how Passage authenticates players and encrypts connections.
+sidebar:
+    order: 4
 ---
 
 Passage implements Minecraft's standard authentication and encryption protocol to ensure only legitimate players can connect and all data is encrypted. This page explains the technical details of this process.

@@ -1,6 +1,8 @@
 ---
 title: Introduction
 description: Learn about Passage, the Minecraft Server Transfer Router that revolutionizes network connectivity.
+sidebar:
+  order: 1
 ---
 
 Passage is a fast, secure, and stateless Minecraft Server Transfer Router that connects your network effortlessly—scaling infinitely without the hassles of traditional proxies.
@@ -19,26 +21,32 @@ This stateless approach eliminates the proxy bottleneck entirely.
 
 ## Why Passage?
 
+Switching from traditional proxies to Passage can mean some additional work on your side. Here's why we still think it's worth it:
+
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <CardGrid>
-  <Card title="🚀 Performance" icon="rocket">
+  <Card title="Performance" icon="rocket">
     No packet transcoding overhead. Players connect directly to game servers with minimal latency. Written in Rust for maximum efficiency.
   </Card>
 
-  <Card title="📈 Scalability" icon="up-caret">
+  <Card title="Reliability" icon="approve-check">
+    Perform updates and configuration changes without downtime. High Availability is supported out of the box.
+  </Card>
+
+  <Card title="Scalability" icon="up-caret">
     Stateless architecture means horizontal scaling is trivial. No session state to synchronize. Handle millions of connections with minimal resources.
   </Card>
 
-  <Card title="🔐 Security" icon="shield">
+  <Card title="Security" icon="seti:lock">
     Full Mojang authentication support with native chat signing preservation. Rate limiting prevents connection floods.
   </Card>
 
-  <Card title="🔧 Flexibility" icon="setting">
+  <Card title="Flexibility" icon="setting">
     Pluggable adapter system for status, discovery, and routing. Support for fixed configs, HTTP/gRPC adapters, and Kubernetes/Agones integration.
   </Card>
 
-  <Card title="🎯 Future-Proof" icon="star">
+  <Card title="Future-Proof" icon="star">
     Works with any Minecraft version 1.20.5+. No need to update for new protocol versions. Modern, actively maintained codebase.
   </Card>
 </CardGrid>

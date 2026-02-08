@@ -43,6 +43,7 @@ export default defineConfig({
                 collapsed: true,
             },
         ],
+        lastUpdated: true,
         customCss: [
             './src/styles/global.css',
         ],
