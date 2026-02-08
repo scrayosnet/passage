@@ -1,5 +1,5 @@
 ---
-title: Target Strategy Adapters
+title: Target Strategy Adapter
 description: Configure how Passage selects which server to send each player to.
 ---
 
@@ -52,4 +52,4 @@ adapter = "grpc"
 address = "http://strategy-service:3030"
 ```
 
-See [Custom gRPC Adapters](/advanced/custom-grpc-adapters/) for implementation examples.
+See [Custom gRPC Adapters](/advanced/grpc-adapters/) for implementation examples.

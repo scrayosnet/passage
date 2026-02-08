@@ -1,5 +1,5 @@
 ---
-title: Target Discovery Adapters
+title: Target Discovery Adapter
 description: Configure how Passage discovers available backend servers.
 ---
 
@@ -38,7 +38,7 @@ adapter = "grpc"
 address = "http://discovery-service:3030"
 ```
 
-See [Custom gRPC Adapters](/advanced/custom-grpc-adapters/) for implementation details and proto definitions.
+See [Custom gRPC Adapters](/advanced/grpc-adapters/) for implementation details and proto definitions.
 
 ## Agones Adapter
 

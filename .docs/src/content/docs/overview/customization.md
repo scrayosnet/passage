@@ -1,6 +1,8 @@
 ---
 title: Customization Overview
 description: Learn how to customize Passage for your Minecraft network's specific needs.
+sidebar:
+  order: 5
 ---
 
 Passage is designed to be highly customizable while maintaining simplicity. This page provides an overview of customization options and helps you understand which customizations are right for your network.
@@ -24,7 +26,7 @@ You don't need to use all features at once. Many successful networks run with ju
 - **Rate limiting**: Connection flood protection
 - **PROXY protocol**: Support for load balancers
 
-[→ Configuration Reference](/customization/config/)
+[→ Configuration Reference](/reference/configuration/)
 
 ### Status Information
 Control what players see in their server list:
@@ -38,7 +40,7 @@ Control what players see in their server list:
 - Dynamic HTTP endpoint
 - Custom gRPC service
 
-[→ Status Adapters Guide](/customization/status-adapters/)
+[→ Status Adapters Guide](/adapters/status/)
 
 ### Server Discovery
 Determine which backend servers are available:
@@ -51,7 +53,7 @@ Determine which backend servers are available:
 - gRPC service
 - Agones GameServer discovery
 
-[→ Target Discovery Guide](/customization/target-discovery-adapters/)
+[→ Target Discovery Guide](/adapters/target-discovery/)
 
 ### Routing Strategy
 Choose how players are distributed across servers:
@@ -64,7 +66,7 @@ Choose how players are distributed across servers:
 - Player Fill (consolidate players)
 - gRPC (custom logic)
 
-[→ Target Strategy Guide](/customization/target-strategy-adapters/)
+[→ Target Strategy Guide](/adapters/target-strategy/)
 
 ### Observability
 Monitor Passage's performance and health:
@@ -178,7 +180,7 @@ adapter = "grpc"
 
 **Complexity:** High - requires custom gRPC services
 
-[→ Custom gRPC Adapters Guide](/advanced/custom-grpc-adapters/)
+[→ Custom gRPC Adapters Guide](/advanced/grpc-adapters/)
 
 ## Customization Roadmap
 
@@ -268,9 +270,9 @@ Before deploying your customized Passage:
 ## Getting Help
 
 ### Documentation Resources
-- [Configuration Reference](/customization/config/) - All config options
-- [Adapter Overview](/customization/adapter/) - Understanding adapters
-- [Advanced Topics](/advanced/custom-grpc-adapters/) - Complex customizations
+- [Configuration Reference](/reference/configuration/) - All config options
+- [Adapter Overview](/adapters/) - Understanding adapters
+- [Advanced Topics](/advanced/grpc-adapters/) - Complex customizations
 
 ### Community Support
 - [GitHub Discussions](https://github.com/scrayosnet/passage/discussions) - Ask questions

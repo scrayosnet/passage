@@ -3,7 +3,7 @@ title: Configuration Reference
 description: Complete field-by-field reference for all Passage configuration options.
 ---
 
-This page provides a comprehensive reference for every configuration field in Passage. For practical examples and guides, see [Configuration Basics](/setup/configuration-basics/).
+This page provides a comprehensive reference for every configuration field in Passage. For a beginner-friendly introduction, see [Configuration Basics](/setup/configuration-basics/).
 
 ## Table of Contents
 
@@ -12,6 +12,35 @@ This page provides a comprehensive reference for every configuration field in Pa
 - [Observability Settings](#observability-settings)
 - [Adapter Configuration](#adapter-configuration)
 - [Localization](#localization)
+- [Complete Example Configurations](#complete-example-configurations)
+- [Environment Variable Mapping](#environment-variable-mapping)
+- [Configuration File Formats](#configuration-file-formats)
+
+## Configuration Structure
+
+Passage uses TOML format with the following top-level sections:
+
+```toml
+# Core connection settings
+address = "0.0.0.0:25565"
+timeout = 120
+
+# Security and monitoring
+[sentry]
+[otel]
+[rate_limiter]
+[proxy_protocol]
+
+# Adapter configuration
+[status]
+[target_discovery]
+[target_strategy]
+
+# Internationalization
+[localization]
+```
+
+---
 
 ## Core Settings
 
@@ -35,7 +64,7 @@ address = "0.0.0.0:25565"
 address = "192.168.1.100:25565"
 
 # Use custom port
-address = "0.0.0.0:19132"
+address = "0.0.0.0:25566"
 ```
 
 **Notes:**
@@ -313,6 +342,8 @@ metrics_token = "base64_encoded_token_here"
 - Honeycomb
 - Any OTLP-compatible backend
 
+For Grafana Cloud, get tokens from: **Configuration → Data Sources → OpenTelemetry**.
+
 ---
 
 ## Adapter Configuration
@@ -330,7 +361,7 @@ Server status response configuration (for server list pings).
 
 The adapter type for status responses.
 
-For detailed information, see [Status Adapters](/customization/status-adapters/).
+For detailed information, see [Status Adapters](/adapters/status/).
 
 ---
 
@@ -485,7 +516,7 @@ Backend server discovery configuration.
 
 The adapter type for discovering backend servers.
 
-For detailed information, see [Target Discovery Adapters](/customization/target-discovery-adapters/).
+For detailed information, see [Target Discovery Adapters](/adapters/target-discovery/).
 
 ---
 
@@ -591,7 +622,7 @@ Server selection strategy configuration.
 
 The adapter type for selecting which server to route players to.
 
-For detailed information, see [Target Strategy Adapters](/customization/target-strategy-adapters/).
+For detailed information, see [Target Strategy Adapters](/adapters/target-strategy/).
 
 ---
 
@@ -739,6 +770,89 @@ disconnect_no_target = "{\"text\":\"Kein Server verfügbar\",\"color\":\"yellow\
 [localization.messages.fr]
 disconnect_timeout = "{\"text\":\"Délai de connexion dépassé\",\"color\":\"red\"}"
 disconnect_no_target = "{\"text\":\"Aucun serveur disponible\",\"color\":\"yellow\"}"
+```
+
+---
+
+## Complete Example Configurations
+
+### Minimal Setup
+
+A basic configuration for getting started:
+
+```toml
+address = "0.0.0.0:25565"
+timeout = 120
+
+[status]
+adapter = "fixed"
+[status.fixed]
+name = "My Server"
+
+[target_discovery]
+adapter = "fixed"
+[[target_discovery.fixed.targets]]
+identifier = "main"
+address = "127.0.0.1:25566"
+
+[target_strategy]
+adapter = "fixed"
+
+[localization]
+default_locale = "en_US"
+```
+
+---
+
+### Production Setup
+
+A production-ready configuration with all features enabled:
+
+```toml
+address = "0.0.0.0:25565"
+timeout = 120
+
+[rate_limiter]
+enabled = true
+duration = 60
+size = 100
+
+[proxy_protocol]
+enabled = true
+
+[sentry]
+enabled = true
+debug = false
+address = "https://key@sentry.io/project"
+environment = "production"
+
+[otel]
+environment = "production"
+traces_endpoint = "https://traces.grafana.net/otlp/v1/traces"
+traces_token = "token"
+metrics_endpoint = "https://metrics.grafana.net/otlp/v1/metrics"
+metrics_token = "token"
+
+[status]
+adapter = "http"
+[status.http]
+address = "https://status.example.com/minecraft"
+cache_duration = 5
+
+[target_discovery]
+adapter = "agones"
+[target_discovery.agones]
+namespace = "minecraft"
+label_selector = "game=minecraft"
+
+[target_strategy]
+adapter = "player_fill"
+[target_strategy.player_fill]
+field = "players"
+max_players = 50
+
+[localization]
+default_locale = "en_US"
 ```
 
 ---

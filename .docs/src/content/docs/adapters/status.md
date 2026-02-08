@@ -1,5 +1,5 @@
 ---
-title: Status Adapters
+title: Status Adapter
 description: Configure how Passage responds to server list pings.
 ---
 
@@ -66,4 +66,4 @@ adapter = "grpc"
 address = "http://status-service:3030"
 ```
 
-See [Custom gRPC Adapters](/advanced/custom-grpc-adapters/) for implementation details and proto definitions.
+See [Custom gRPC Adapters](/advanced/grpc-adapters/) for implementation details and proto definitions.

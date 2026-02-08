@@ -3,7 +3,7 @@ title: Installation
 description: Install Passage on your server using Docker, binary, or Kubernetes.
 ---
 
-Installation methods for Passage. For a complete setup guide, see [Getting Started](/setup/getting-started/).
+Installation methods for Passage. For a complete setup guide, see [Getting Started](/setup/).
 
 ## Docker
 

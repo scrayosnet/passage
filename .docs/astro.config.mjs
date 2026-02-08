@@ -30,8 +30,8 @@ export default defineConfig({
                 autogenerate: {directory: 'setup'},
             },
             {
-                label: 'Customization',
-                autogenerate: {directory: 'customization'},
+                label: 'Adapters',
+                autogenerate: {directory: 'adapters'},
             },
             {
                 label: 'Advanced',
@@ -39,7 +39,7 @@ export default defineConfig({
             },
             {
                 label: 'Reference',
-                autogenerate: {directory: 'reference', collapsed: true},
+                autogenerate: {directory: 'reference'},
                 collapsed: true,
             },
         ],
