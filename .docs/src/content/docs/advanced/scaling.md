@@ -28,7 +28,7 @@ Traditional Proxy (per instance):
 
 Passage (per instance):
 ├─ 50,000+ concurrent handshakes/minute
-├─ 50-100 MB RAM baseline
+├─ 2-5 MB RAM baseline
 ├─ Zero packet transcoding
 └─ No state synchronization needed
 ```
@@ -50,8 +50,8 @@ flowchart TD
 ```
 
 **Recommended Resources**:
-- CPU: 1-2 cores
-- RAM: 256 MB
+- CPU: 1 core
+- RAM: 5 MB
 - Network: 1 Gbps
 
 ### Multi-Instance (Production/Large Networks)
@@ -545,10 +545,10 @@ Recommended with HA: 6 instances (3 for load, 3 for redundancy)
 
 | Network Size | Peak Players | Instances | CPU per Pod | RAM per Pod |
 |--------------|--------------|-----------|-------------|-------------|
-| Small        | < 500        | 2-3       | 0.5 cores   | 128 MB      |
-| Medium       | 500-2,000    | 3-5       | 1 core      | 256 MB      |
-| Large        | 2,000-10,000 | 5-10      | 2 cores     | 512 MB      |
-| Enterprise   | 10,000+      | 10-20     | 4 cores     | 1 GB        |
+| Small        | < 500        | 1         | 0.5 cores   | 3 MB        |
+| Medium       | 500-2,000    | 1-3       | 1 core      | 5 MB        |
+| Large        | 2,000-10,000 | 2-3       | 2 cores     | 10 MB       |
+| Enterprise   | 10,000+      | 3-5       | 2 cores     | 15 MB       |
 
 **Headroom Recommendation**: Always provision 50% extra capacity for traffic spikes and failover scenarios.
 
@@ -662,7 +662,7 @@ Before deploying Passage at scale, verify:
 
 ### Issue: High Memory Usage
 
-**Symptoms**: Pods consuming > 512 MB RAM, OOMKilled events
+**Symptoms**: Pods consuming > 10 MB RAM, OOMKilled events
 
 **Causes**:
 - Rate limiter tracking too many IPs
