@@ -1,0 +1,72 @@
+---
+title: Passage
+description: Minecraft Server Transfer Router
+template: splash
+editUrl: false
+hero:
+  title: <div class="leading-14"><span class="text-transparent bg-clip-text bg-linear-to-r from-secondary to-primary">Passage</span><br/><span class="text-4xl text-gray-500">Minecraft Server Transfer Router</span></div>
+  tagline: Connect your Minecraft network to the world without any limits to scaling, security or infrastructure in a few seconds!
+  image:
+    alt: An orange logo, representing a wobbly portal
+    file: ../../assets/logo.svg
+  actions:
+    - text: Get Started
+      link: /overview/
+      icon: right-arrow
+    - text: Join our Discord
+      link: https://discord.gg/xZ4wbuuKZf
+      icon: external
+      variant: minimal
+    - text: View on GitHub
+      link: https://github.com/scrayosnet/passage
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+import { LinkButton } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+	<Card title="Stateless and proxy-less" icon="star">
+        Passage holds no connection and can therefore be updated and restarted without any downtime.
+
+        <LinkButton href="/overview/architecture/" variant="minimal" icon="right-arrow">
+            Explore the architecture
+        </LinkButton>
+	</Card>
+	<Card title="Modern and Secure" icon="seti:lock">
+        Passage uses modern cryptography and makes sure that only valid players are let through.
+
+        <LinkButton href="/overview/security/" variant="minimal" icon="right-arrow">
+            Read about the details
+        </LinkButton>
+	</Card>
+	<Card title="Fast and reliable" icon="seti:rust">
+        Passage is faster and more reliable than any proxy software and needs less than 1MB.
+
+        <LinkButton href="/overview/comparison/" variant="minimal" icon="right-arrow">
+            Compare with other proxies
+        </LinkButton>
+	</Card>
+	<Card title="Fast to set up" icon="rocket">
+        Passage is ready to connect your network with your players in seconds. Batteries included!
+
+        <LinkButton href="/setup/installation/" variant="minimal" icon="right-arrow">
+            Install it now
+        </LinkButton>
+	</Card>
+	<Card title="Fully Customizable" icon="setting">
+        All algorithms, messages and adapters can be customized and tailored to your needs.
+
+        <LinkButton href="/setup/configuration-basics/" variant="minimal" icon="right-arrow">
+            Explore the configuration
+        </LinkButton>
+	</Card>
+    <Card title="Scales infinitely" icon="approve-check">
+        Passage can handle an unlimited number of players without any additional effort.
+
+        <LinkButton href="/advanced/scaling/" variant="minimal" icon="right-arrow">
+            Scale without downtime
+        </LinkButton>
+    </Card>
+</CardGrid>

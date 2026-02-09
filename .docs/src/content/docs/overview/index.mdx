@@ -1,0 +1,87 @@
+---
+title: Introduction
+description: Learn about Passage, the Minecraft Server Transfer Router that revolutionizes network connectivity.
+sidebar:
+  order: 1
+---
+
+Passage is a fast, secure, and stateless Minecraft Server Transfer Router that connects your network effortlessly—scaling infinitely without the hassles of traditional proxies.
+
+## What is Passage?
+
+Passage is a modern alternative to traditional Minecraft proxies like BungeeCord, Waterfall, and Velocity. Instead of maintaining persistent connections and transcoding every packet, Passage acts as a smart entrypoint that:
+
+1. **Authenticates** connecting players with Mojang
+2. **Validates** their connection and handles resource packs
+3. **Routes** them to the appropriate backend server
+4. **Transfers** them using Minecraft's native transfer packet
+5. **Disconnects**, leaving the player directly connected to the backend
+
+This stateless approach eliminates the proxy bottleneck entirely.
+
+## Why Passage?
+
+Switching from traditional proxies to Passage can mean some additional work on your side. Here's why we still think it's worth it:
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid>
+  <Card title="Performance" icon="rocket">
+    No packet transcoding overhead. Players connect directly to game servers with minimal latency. Written in Rust for maximum efficiency.
+  </Card>
+
+  <Card title="Reliability" icon="approve-check">
+    Perform updates and configuration changes without downtime. High Availability is supported out of the box.
+  </Card>
+
+  <Card title="Scalability" icon="up-caret">
+    Stateless architecture means horizontal scaling is trivial. No session state to synchronize. Handle millions of connections with minimal resources.
+  </Card>
+
+  <Card title="Security" icon="seti:lock">
+    Full Mojang authentication support with native chat signing preservation. Rate limiting prevents connection floods.
+  </Card>
+
+  <Card title="Flexibility" icon="setting">
+    Pluggable adapter system for status, discovery, and routing. Support for fixed configs, HTTP/gRPC adapters, and Kubernetes/Agones integration.
+  </Card>
+
+  <Card title="Future-Proof" icon="star">
+    Works with any Minecraft version 1.20.5+. No need to update for new protocol versions. Modern, actively maintained codebase.
+  </Card>
+</CardGrid>
+
+## Key Concepts
+
+### Transfer Packet
+Passage leverages the `Transfer (configuration)` packet introduced in Minecraft 1.20.5. This packet allows servers to transfer players to a different server address, enabling seamless routing without persistent proxy connections.
+
+### Adapters
+Passage uses a flexible adapter system with three types:
+- **Status Adapters**: Provide server status information (MOTD, player count, etc.)
+- **Target Discovery Adapters**: Discover available backend servers
+- **Target Strategy Adapters**: Select the best server for each connecting player
+
+### Stateless Design
+Unlike traditional proxies, Passage doesn't maintain long-lived connections. Each player connection goes through authentication and routing, then Passage steps aside. This means:
+- No memory overhead per connected player
+- Instant recovery from Passage restarts
+- No split-brain scenarios in clustered deployments
+
+## Use Cases
+
+Passage is ideal for:
+- **Large Minecraft networks** needing to scale beyond single-proxy limitations
+- **Cloud-native deployments** on Kubernetes with dynamic server discovery
+- **High-availability setups** requiring zero-downtime deployments
+- **Networks prioritizing chat signing** and authentication security
+- **Modern architectures** wanting to eliminate proxy bottlenecks
+
+## System Requirements
+
+- Minecraft client version 1.20.5 or higher
+- Linux, macOS, or Windows server
+- Minimal resource requirements (typically less than 5MB RAM)
+- Optional: Kubernetes cluster for Agones integration
+
+Ready to get started? Check out the [Installation Guide](/setup/installation/).
