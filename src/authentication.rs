@@ -4,7 +4,7 @@ use cfb8::cipher::KeyIvInit;
 use hmac::{Hmac, Mac};
 use num_bigint::BigInt;
 use packets::VerifyToken;
-use rand::TryRngCore;
+use rand::TryRng;
 use rand::rand_core::UnwrapErr;
 use rand::rngs::SysRng;
 use rsa::pkcs8::EncodePublicKey;
@@ -27,7 +27,7 @@ pub static ENCODED_PUB: LazyLock<Vec<u8>> =
 
 /// The internal error type for all errors related to the authentication and cryptography.
 ///
-/// This includes errors with the expected packets, packet contents or encoding of the exchanged fields. Errors of the
+/// This includes errors with the expected packets, packet contents, or encoding of the exchanged fields. Errors of the
 /// underlying data layer (for Byte exchange) are wrapped from the underlying IO errors. Additionally, the internal
 /// timeout limits also are covered as errors.
 #[derive(thiserror::Error, Debug)]
@@ -245,14 +245,14 @@ mod tests {
         let token1 = generate_token().expect("failed to generate token");
         let token2 = generate_token().expect("failed to generate token");
         let Err(_) = verify_token(token1, &token2) else {
-            panic!("should be different token")
+            panic!("should be a different token")
         };
     }
 
     #[test]
     fn can_hash() {
         let shared_secret = b"verysecuresecret";
-        let (_, key) = generate_keypair().expect("failed to generate keypair");
+        let (_, key) = generate_keypair().expect("failed to generate a keypair");
         let encoded = encode_public_key(&key).expect("failed to encode keypair");
         let _ = minecraft_hash("justchunks", shared_secret, &encoded);
     }
