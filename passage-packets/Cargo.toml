@@ -1,20 +1,20 @@
 [package]
 name = "passage-packets"
-description = "Minecraft Server Packets for Passage"
-version = "0.1.22"
+description = "Minecraft Server Packets"
 authors = [
     "Joshua Dean Küpper <admin@joshua-kuepper.de>",
     "Paul Wagner <contact@paulwagner.dev>",
 ]
 license = "MIT"
-repository = "https://github.com/scrayosnet/passage"
-readme = "../README.md"
-documentation = "https://passage.scrayos.net/docs"
-homepage = "https://passage.scrayos.net"
-keywords = ["minecraft"]
+readme = "README.md"
+keywords = ["minecraft", "opentelemetry", "monitoring", "package"]
 categories = ["emulators", "network-programming"]
-edition = "2024"
-rust-version = "1.88.0"
+version.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal"] }

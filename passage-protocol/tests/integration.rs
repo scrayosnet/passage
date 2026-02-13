@@ -11,12 +11,14 @@ use passage_packets::{
     AsyncReadPacket, AsyncWritePacket, ChatMode, DisplayedSkinParts, MainHand, ParticleStatus,
     State,
 };
-use passage_proxy::Error;
-use passage_proxy::connection::Connection;
-use passage_proxy::cookie::{AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign};
-use passage_proxy::crypto::stream::CipherStream;
-use passage_proxy::localization::Localization;
-use passage_proxy::mojang::{Mojang, Profile};
+use passage_protocol::Error;
+use passage_protocol::connection::Connection;
+use passage_protocol::cookie::{
+    AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign,
+};
+use passage_protocol::crypto::stream::CipherStream;
+use passage_protocol::localization::Localization;
+use passage_protocol::mojang::{Mojang, Profile};
 use proxy_header::ParseConfig;
 use proxy_header::io::ProxiedStream;
 use rand::rngs::SysRng;

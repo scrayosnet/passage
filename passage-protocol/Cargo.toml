@@ -1,7 +1,20 @@
 [package]
-name = "passage-proxy"
-version = "0.1.0"
-edition = "2024"
+name = "passage-protocol"
+description = "Minecraft Server Transfer Protocol"
+authors = [
+    "Joshua Dean Küpper <admin@joshua-kuepper.de>",
+    "Paul Wagner <contact@paulwagner.dev>",
+]
+license = "MIT"
+readme = "README.md"
+keywords = ["minecraft", "opentelemetry", "monitoring", "package"]
+categories = ["emulators", "network-programming"]
+version.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 passage-packets = { workspace = true }

@@ -1,5 +1,13 @@
 [workspace]
-members = ["passage-adapters", "passage-proxy", "passage-packets", "passage-adapters/grpc", "passage-adapters/agones", "passage-adapters/http"]
+members = ["passage-adapters", "passage-protocol", "passage-packets", "passage-adapters/grpc", "passage-adapters/agones", "passage-adapters/http"]
+
+[workspace.package]
+version = "0.1.24"
+repository = "https://github.com/scrayosnet/passage"
+documentation = "https://passage.scrayos.net/docs"
+homepage = "https://passage.scrayos.net"
+edition = "2024"
+rust-version = "1.88.0"
 
 [workspace.dependencies]
 # workspace
@@ -8,7 +16,7 @@ passage-adapters = { path = "passage-adapters" }
 passage-adapters-grpc = { path = "passage-adapters/grpc" }
 passage-adapters-agones = { path = "passage-adapters/agones" }
 passage-adapters-http = { path = "passage-adapters/http" }
-passage-proxy = { path = "passage-proxy" }
+passage-protocol = { path = "passage-protocol" }
 
 # external
 tokio = { version = "1.49" }
@@ -54,20 +62,20 @@ fastnbt = { version = "2.6.0" }
 [package]
 name = "passage"
 description = "Minecraft Server Transfer Router"
-version = "0.1.24"
 authors = [
     "Joshua Dean Küpper <admin@joshua-kuepper.de>",
     "Paul Wagner <contact@paulwagner.dev>",
 ]
 license = "MIT"
-repository = "https://github.com/scrayosnet/passage"
 readme = "README.md"
-documentation = "https://passage.scrayos.net/docs"
-homepage = "https://passage.scrayos.net"
 keywords = ["minecraft", "opentelemetry", "monitoring", "package"]
 categories = ["emulators", "network-programming"]
-edition = "2024"
-rust-version = "1.88.0"
+version.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 passage-packets = { workspace = true, features = ["server"] }
@@ -75,7 +83,7 @@ passage-adapters = { workspace = true }
 passage-adapters-grpc = { workspace = true, optional = true }
 passage-adapters-agones = { workspace = true, optional = true }
 passage-adapters-http = { workspace = true, optional = true }
-passage-proxy = { workspace = true }
+passage-protocol = { workspace = true }
 
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal", "test-util"] }
 tokio-util = { workspace = true, features = ["rt"] }

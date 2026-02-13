@@ -2377,7 +2377,7 @@ dependencies = [
  "passage-adapters-grpc",
  "passage-adapters-http",
  "passage-packets",
- "passage-proxy",
+ "passage-protocol",
  "sentry",
  "sentry-tracing",
  "serde",
@@ -2391,7 +2391,7 @@ dependencies = [
 
 [[package]]
 name = "passage-adapters"
-version = "0.1.0"
+version = "0.1.24"
 dependencies = [
  "serde",
  "serde_json",
@@ -2402,7 +2402,7 @@ dependencies = [
 
 [[package]]
 name = "passage-adapters-agones"
-version = "0.1.0"
+version = "0.1.24"
 dependencies = [
  "futures-util",
  "k8s-openapi",
@@ -2419,7 +2419,7 @@ dependencies = [
 
 [[package]]
 name = "passage-adapters-grpc"
-version = "0.1.0"
+version = "0.1.24"
 dependencies = [
  "passage-adapters",
  "prost",
@@ -2437,13 +2437,10 @@ dependencies = [
 
 [[package]]
 name = "passage-adapters-http"
-version = "0.1.0"
+version = "0.1.24"
 dependencies = [
  "passage-adapters",
  "reqwest 0.13.2",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
@@ -2451,7 +2448,7 @@ dependencies = [
 
 [[package]]
 name = "passage-packets"
-version = "0.1.22"
+version = "0.1.24"
 dependencies = [
  "criterion",
  "fake",
@@ -2465,8 +2462,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "passage-proxy"
-version = "0.1.0"
+name = "passage-protocol"
+version = "0.1.24"
 dependencies = [
  "aes",
  "cfb8",
