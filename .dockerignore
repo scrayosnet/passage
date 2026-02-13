@@ -3,10 +3,10 @@
 !Cargo.lock
 !build.rs
 !src
-!benches
-!config
-!proto
-!passage-packets/Cargo.toml
-!passage-packets/Cargo.lock
-!passage-packets/src
-!passage-packets/benches
+!config/default.toml
+!passage-adapters/
+!passage-adapters/agones
+!passage-adapters/grpc
+!passage-adapters/http
+!passage-packets/
+!passage-protocol/

@@ -28,7 +28,7 @@ tonic = { workspace = true }
 tonic-prost = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
-uuid = { version = "1.20.0", features = ["v4"] }
+uuid = { workspace = true, features = ["v4"] }
 
 [build-dependencies]
 tonic-build = { workspace = true }

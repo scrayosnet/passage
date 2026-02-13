@@ -28,7 +28,7 @@ proxy-header = { workspace = true }
 tracing = { workspace = true }
 opentelemetry = { workspace = true, features = ["trace", "metrics"] }
 uuid = { workspace = true }
-serde = { workspace = true, version = "1.0.0", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 num-bigint = { workspace = true }
 rand = { workspace = true }
