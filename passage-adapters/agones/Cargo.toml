@@ -1,0 +1,19 @@
+[package]
+name = "passage-adapters-agones"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+passage-adapters = { workspace = true }
+
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true, features = ["sync", "macros"] }
+tokio-util = { workspace = true, features = ["rt"] }
+
+kube = { workspace = true, default-features = false, features = ["runtime", "derive", "rustls-tls", "aws-lc-rs"] }
+k8s-openapi = { workspace = true, features = ["latest", "default"] }
+schemars = { workspace = true, features = ["default"] }
+futures-util = { workspace = true, features = ["default"] }

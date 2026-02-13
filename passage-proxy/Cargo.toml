@@ -1,0 +1,35 @@
+[package]
+name = "passage-proxy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+passage-packets = { workspace = true }
+passage-adapters = { workspace = true }
+
+thiserror = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
+proxy-header = { workspace = true }
+tracing = { workspace = true }
+opentelemetry = { workspace = true, features = ["trace", "metrics"] }
+uuid = { workspace = true }
+serde = { workspace = true, version = "1.0.0", features = ["derive"] }
+serde_json = { workspace = true }
+num-bigint = { workspace = true }
+rand = { workspace = true }
+rsa = { workspace = true }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
+hmac = { workspace = true }
+aes = { workspace = true }
+cfb8 = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+criterion = { workspace = true, features = ["async_tokio"] }
+
+[[bench]]
+name = "rate_limiter"
+harness = false

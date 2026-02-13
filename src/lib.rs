@@ -1,46 +1,22 @@
 #![deny(clippy::all)]
 #![forbid(unsafe_code)]
 
-pub mod adapter;
-pub mod authentication;
-pub mod cipher_stream;
 pub mod config;
-pub mod connection;
-mod metrics;
-pub mod mojang;
-pub mod rate_limiter;
+pub mod discovery_adapter;
+pub mod status_adapter;
+pub mod strategy_adapter;
 
-use crate::adapter::status::StatusSupplier;
-#[cfg(feature = "grpc")]
-use crate::adapter::status::grpc::GrpcStatusSupplier;
-use crate::adapter::status::http::HttpStatusSupplier;
-use crate::adapter::target_selection::TargetSelector;
-#[cfg(feature = "agones")]
-use crate::adapter::target_selection::agones::AgonesTargetSelector;
-use crate::adapter::target_selection::fixed::FixedTargetSelector;
-#[cfg(feature = "grpc")]
-use crate::adapter::target_selection::grpc::GrpcTargetSelector;
-use crate::adapter::target_strategy::TargetSelectorStrategy;
-use crate::adapter::target_strategy::fixed::FixedTargetSelectorStrategy;
-#[cfg(feature = "grpc")]
-use crate::adapter::target_strategy::grpc::GrpcTargetSelectorStrategy;
-use crate::adapter::target_strategy::player_fill::PlayerFillTargetSelectorStrategy;
 use crate::config::Config;
-use crate::connection::{Connection, Error};
-use crate::mojang::Api;
-use crate::mojang::Mojang;
-use crate::rate_limiter::RateLimiter;
-use adapter::status::fixed::FixedStatusSupplier;
-use proxy_header::ParseConfig;
-use proxy_header::io::ProxiedStream;
+use crate::discovery_adapter::DynDiscoveryAdapter;
+use crate::status_adapter::DynStatusAdapter;
+use crate::strategy_adapter::DynStrategyAdapter;
+use passage_proxy::listener::Listener;
+use passage_proxy::localization::Localization;
+use passage_proxy::mojang::Api;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpListener;
-use tokio::select;
-use tokio::time::{Instant, timeout};
-use tokio_util::task::TaskTracker;
-use tracing::{Instrument, debug, info, warn};
+use tokio_util::sync::CancellationToken;
+use tracing::debug;
 
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
 ///
@@ -53,243 +29,49 @@ use tracing::{Instrument, debug, info, warn};
 /// Will return an appropriate error if the socket cannot be bound to the supplied address, or the TCP server cannot be
 /// properly initialized.
 pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
-    debug!("starting protocol server");
+    // initialize the adapters
+    debug!("building adapters");
+    let status_adapter = Arc::new(DynStatusAdapter::from_config(&config.status).await?);
+    let discovery_adapter =
+        Arc::new(DynDiscoveryAdapter::from_config(&config.target_discovery).await?);
+    let strategy_adapter =
+        Arc::new(DynStrategyAdapter::from_config(&config.target_strategy).await?);
+    let mojang = Arc::new(Api::default());
+    let localization = Arc::new(Localization {
+        default_locale: config.localization.default_locale,
+        messages: config.localization.messages,
+    });
+
+    // build stop signal
+    let stop_token = CancellationToken::new();
+    let stop_token_signal = stop_token.clone();
+    tokio::spawn(async move {
+        // the thread will stop if either the stop signal is received of the application stops
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => stop_token_signal.cancel(),
+            _ = stop_token_signal.cancelled() => { },
+        }
+    });
 
     // retrieve config params
     let timeout_duration = Duration::from_secs(config.timeout);
     let auth_secret = config.auth_secret.clone().map(String::into_bytes);
-    let localization = Arc::new(config.localization.clone());
 
-    // initialize status supplier
-    debug!(
-        adaper = config.status.adapter.as_str(),
-        "initializing status supplier"
-    );
-    let status_supplier = match config.status.adapter.as_str() {
-        #[cfg(feature = "grpc")]
-        "grpc" => {
-            let Some(grpc) = config.status.grpc.clone() else {
-                return Err("grpc status adapter requires a configuration".into());
-            };
-            Arc::new(GrpcStatusSupplier::new(grpc).await?) as Arc<dyn StatusSupplier>
-        }
-        "http" => {
-            let Some(http) = config.status.http.clone() else {
-                return Err("http status adapter requires a configuration".into());
-            };
-            Arc::new(HttpStatusSupplier::new(http).await?) as Arc<dyn StatusSupplier>
-        }
-        "fixed" => {
-            let Some(fixed) = config.status.fixed.clone() else {
-                return Err("fixed status adapter requires a configuration".into());
-            };
-            Arc::new(FixedStatusSupplier::new(fixed)) as Arc<dyn StatusSupplier>
-        }
-        _ => return Err("unknown status supplier configured".into()),
-    };
+    // build and start the listener
+    debug!("building listener");
+    let mut listener = Listener::new(
+        status_adapter,
+        discovery_adapter,
+        strategy_adapter,
+        mojang,
+        localization,
+    )
+    .with_auth_secret_opt(auth_secret)
+    .with_connection_timeout(timeout_duration)
+    .with_proxy_protocol(config.proxy_protocol.enabled);
 
-    // initialize target selector strategy
-    debug!(
-        adaper = config.target_strategy.adapter.as_str(),
-        "initializing target selector strategy"
-    );
-    let target_strategy = match config.target_strategy.adapter.as_str() {
-        #[cfg(feature = "grpc")]
-        "grpc" => {
-            let Some(grpc) = config.target_strategy.grpc.clone() else {
-                return Err("grpc target strategy adapter requires a configuration".into());
-            };
-            Arc::new(GrpcTargetSelectorStrategy::new(grpc).await?)
-                as Arc<dyn TargetSelectorStrategy>
-        }
-        "player_fill" => {
-            let Some(player_fill) = config.target_strategy.player_fill.clone() else {
-                return Err("player_fill target strategy adapter requires a configuration".into());
-            };
-            Arc::new(PlayerFillTargetSelectorStrategy::new(player_fill))
-                as Arc<dyn TargetSelectorStrategy>
-        }
-        "fixed" => Arc::new(FixedTargetSelectorStrategy) as Arc<dyn TargetSelectorStrategy>,
-        _ => return Err("unknown target selector strategy configured".into()),
-    };
-
-    // initialize target selector
-    debug!(
-        adaper = config.target_discovery.adapter.as_str(),
-        "initializing target selector"
-    );
-    let target_selector = match config.target_discovery.adapter.as_str() {
-        #[cfg(feature = "grpc")]
-        "grpc" => {
-            let Some(grpc) = config.target_discovery.grpc.clone() else {
-                return Err("grpc target discovery adapter requires a configuration".into());
-            };
-            Arc::new(GrpcTargetSelector::new(target_strategy, grpc).await?)
-                as Arc<dyn TargetSelector>
-        }
-        #[cfg(feature = "agones")]
-        "agones" => {
-            let Some(agones) = config.target_discovery.agones.clone() else {
-                return Err("agones target discovery adapter requires a configuration".into());
-            };
-            Arc::new(AgonesTargetSelector::new(target_strategy, agones).await?)
-                as Arc<dyn TargetSelector>
-        }
-        "fixed" => {
-            let Some(fixed) = config.target_discovery.fixed.clone() else {
-                return Err("fixed target selector adapter requires a configuration".into());
-            };
-            Arc::new(FixedTargetSelector::new(target_strategy, fixed)) as Arc<dyn TargetSelector>
-        }
-        _ => return Err("unknown target selector discovery configured".into()),
-    };
-
-    // initialize mojang client
-    debug!("initializing mojang client");
-    let mojang = Arc::new(Api::default()) as Arc<dyn Mojang>;
-
-    // bind the socket address on all interfaces
-    info!(addr = config.address.to_string(), "binding socket address");
-    let listener = TcpListener::bind(&config.address).await?;
-
-    // initialize rate limiting and timeout
-    debug!(
-        enabled = config.rate_limiter.enabled,
-        "initializing rate limiter"
-    );
-    let rate_limiter_enabled = config.rate_limiter.enabled;
-    let mut rate_limiter = RateLimiter::new(
-        Duration::from_secs(config.rate_limiter.duration),
-        config.rate_limiter.size,
-    );
-
-    // initialize connection tracker
-    let tracker = TaskTracker::new();
-
-    loop {
-        // accept the next incoming connection
-        let (stream, addr) = select! {
-            accepted = listener.accept() => accepted?,
-            _ = tokio::signal::ctrl_c() => {
-                info!("received ctrl-c signal, shutting down");
-                break;
-            },
-        };
-        let connection_start = Instant::now();
-
-        // extract the proxy header (if any) from the stream
-        let (mut stream, client_addr) = if config.proxy_protocol.enabled {
-            match ProxiedStream::create_from_tokio(
-                stream,
-                ParseConfig {
-                    // not required for our use case
-                    include_tlvs: false,
-                    allow_v1: true,
-                    allow_v2: true,
-                },
-            )
-            .await
-            {
-                Ok(stream) => {
-                    let client_addr = stream
-                        .proxy_header()
-                        .proxied_address()
-                        .map(|address| address.source)
-                        .unwrap_or(addr);
-                    (stream, client_addr)
-                }
-                Err(e) => {
-                    debug!(
-                        cause = e.to_string(),
-                        addr = addr.to_string(),
-                        "failed to parse proxy protocol header, connection closed"
-                    );
-                    continue;
-                }
-            }
-        } else {
-            (ProxiedStream::unproxied(stream), addr)
-        };
-
-        debug!(
-            addr = client_addr.to_string(),
-            "received protocol connection"
-        );
-
-        // check rate limiter (use real client address)
-        if rate_limiter_enabled && !rate_limiter.enqueue(client_addr.ip()) {
-            info!(addr = client_addr.to_string(), "rate limited client");
-            metrics::request_duration::record(connection_start, "rejected");
-
-            if let Err(e) = stream.shutdown().await {
-                debug!(
-                    cause = e.to_string(),
-                    addr = &client_addr.to_string(),
-                    "failed to close a client connection"
-                );
-            }
-            continue;
-        }
-
-        // clone values to be moved
-        let status_supplier = Arc::clone(&status_supplier);
-        let target_selector = Arc::clone(&target_selector);
-        let mojang = Arc::clone(&mojang);
-        let localization = Arc::clone(&localization);
-        let auth_secret = auth_secret.clone();
-
-        let connection_id = uuid::Uuid::new_v4();
-        let connection_span = tracing::info_span!(
-            "protocol",
-            addr = client_addr.to_string(),
-            id = connection_id.to_string(),
-        );
-
-        tracker.spawn(
-            async move {
-                info!("accepted new connection");
-                metrics::open_connections::inc();
-
-                // build connection wrapper for stream
-                let mut con = Connection::new(
-                    &mut stream,
-                    Arc::clone(&status_supplier),
-                    Arc::clone(&target_selector),
-                    Arc::clone(&mojang),
-                    Arc::clone(&localization),
-                    auth_secret,
-                );
-
-                // handle the client connection (ignore connection closed by the client)
-                let timeout = timeout(timeout_duration, con.listen(client_addr)).await;
-                let connection_result = match timeout {
-                    Ok(Err(Error::ConnectionClosed(_))) => "connection-closed",
-                    Ok(Err(err)) => {
-                        warn!(cause = err.to_string(), "failed to handle connection");
-                        err.as_label()
-                    }
-                    Ok(_) => "success",
-                    Err(_) => "timeout",
-                };
-
-                // flush connection and shutdown
-                if let Err(err) = stream.shutdown().await {
-                    warn!(cause = err.to_string(), "failed to shutdown connection");
-                }
-                debug!("closed connection");
-
-                // update metrics
-                metrics::request_duration::record(connection_start, connection_result);
-                metrics::open_connections::dec();
-            }
-            .instrument(connection_span),
-        );
-    }
-
-    // wait for all connections to finish
-    tracker.close();
-    tracker.wait().await;
-
-    info!("protocol server stopped successfully");
+    debug!("starting listener");
+    listener.listen(config.address, stop_token.clone()).await?;
+    stop_token.cancel();
     Ok(())
 }

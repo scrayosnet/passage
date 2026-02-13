@@ -60,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     // build future to execute
-    let run = async {
+    let runner = async {
         // initialize opentelemetry meter (metrics)
         let metrics_headers = HashMap::from_iter([(
             "authorization".to_string(),
@@ -120,14 +120,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(feature = "sentry")]
         if sentry_instance.is_enabled() {
             info!("sentry is enabled");
+        } else {
+            info!("sentry is disabled");
         }
 
         if config.auth_secret.is_some() {
             info!("auth cookie is enabled");
+        } else {
+            info!("auth cookie is disabled");
         }
-
-        let locale = config.localization.localize_default("locale", &[]);
-        info!(locale = locale, "using localization");
 
         // run passage blocking
         let result = passage::start(config).await;
@@ -146,5 +147,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(run)
+        .block_on(runner)
 }

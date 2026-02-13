@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package scrayosnet.passage.adapter;
+
+import "adapter/adapter.proto";
+
+service Status {
+    rpc GetStatus(StatusRequest) returns (StatusResponse);
+}
+
+message StatusRequest {
+    Address client_address = 1;
+    Address server_address = 2;
+    uint64 protocol = 3;
+}
+
+message StatusResponse {
+    optional StatusData status = 1;
+}
+
+message StatusData {
+    // The version and protocol information of the server.
+    ProtocolVersion version = 1;
+    // The current, maximum and sampled players of the server.
+    optional Players players = 2;
+    // The description (MOTD) of this server.
+    optional string description = 3;
+    // The optional favicon of the server.
+    optional bytes favicon = 4;
+    // Whether the server enforces the use of secure chat.
+    optional bool enforces_secure_chat = 5;
+}
+
+message ProtocolVersion {
+    // The textual protocol version to display this version visually.
+    string name = 1;
+    // The numeric protocol version (for compatibility checking).
+    int32 protocol = 2;
+}
+
+message Players {
+    // The current number of players that are online at this moment.
+    uint32 online = 1;
+    // The maximum number of players that can join (slots).
+    uint32 max = 2;
+    // An optional list of player information samples (version hover).
+    repeated PlayerEntry samples = 3;
+}
+
+message PlayerEntry {
+    // The visual name to display this player.
+    string name = 1;
+    // The unique identifier to reference this player.
+    string id = 2;
+}

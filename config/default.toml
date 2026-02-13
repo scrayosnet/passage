@@ -58,6 +58,9 @@ namespace = "minecraft"
 [target_strategy]
 adapter = "fixed"
 
+[target_strategy.fixed]
+placeholder = ""
+
 [target_strategy.grpc]
 address = "http://127.0.0.1:3030"
 

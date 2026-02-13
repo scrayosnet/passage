@@ -40,11 +40,10 @@
 //! let config: Config = Config::new()?;
 //! ```
 
-use crate::adapter;
-use adapter::status::Protocol;
 use config::{
     ConfigError, Environment, File, FileFormat, FileStoredFormat, Format, Map, Value, ValueKind,
 };
+use passage_adapters::{Protocol, Target};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -239,7 +238,7 @@ pub struct TargetDiscovery {
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixedTargetDiscovery {
     /// The targets that should be served.
-    pub targets: Vec<adapter::target_selection::Target>,
+    pub targets: Vec<Target>,
 }
 
 /// [`GrpcTargetDiscovery`] hold the gRPC target discovery configuration.
@@ -265,12 +264,22 @@ pub struct TargetStrategy {
     /// Adapter to retrieve the results.
     pub adapter: String,
 
+    /// The config for the fixed target strategy.
+    pub fixed: Option<FixedTargetStrategy>,
+
     /// The config for the grpc target strategy.
     pub grpc: Option<GrpcTargetStrategy>,
 
     /// The config for the player fill target strategy.
     #[serde(alias = "playerfill")]
     pub player_fill: Option<PlayerFillTargetStrategy>,
+}
+
+/// [`FixedTargetStrategy`] hold the fixed target strategy configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FixedTargetStrategy {
+    /// A placeholder such that the config may be set
+    pub placeholder: String,
 }
 
 /// [`GrpcTargetStrategy`] hold the gRPC target strategy configuration.

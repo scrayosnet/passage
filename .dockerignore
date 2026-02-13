@@ -6,7 +6,7 @@
 !benches
 !config
 !proto
-!packets/Cargo.toml
-!packets/Cargo.lock
-!packets/src
-!packets/benches
+!passage-packets/Cargo.toml
+!passage-packets/Cargo.lock
+!passage-packets/src
+!passage-packets/benches

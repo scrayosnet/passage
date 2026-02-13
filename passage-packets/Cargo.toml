@@ -1,0 +1,40 @@
+[package]
+name = "passage-packets"
+description = "Minecraft Server Packets for Passage"
+version = "0.1.22"
+authors = [
+    "Joshua Dean Küpper <admin@joshua-kuepper.de>",
+    "Paul Wagner <contact@paulwagner.dev>",
+]
+license = "MIT"
+repository = "https://github.com/scrayosnet/passage"
+readme = "../README.md"
+documentation = "https://passage.scrayos.net/docs"
+homepage = "https://passage.scrayos.net"
+keywords = ["minecraft"]
+categories = ["emulators", "network-programming"]
+edition = "2024"
+rust-version = "1.88.0"
+
+[dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal"] }
+thiserror = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+fake = { workspace = true, features = ["derive", "uuid"] }
+fastnbt = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+fake = { workspace = true, features = ["derive", "uuid"] }
+criterion = { workspace = true, features = ["async_tokio"] }
+
+[features]
+default = ["client", "server"]
+client = []
+server = []
+
+[[bench]]
+name = "packets"
+harness = false
