@@ -202,7 +202,7 @@ PROXY protocol support for preserving real client IP addresses when behind load 
 
 **Type:** `boolean`
 **Default:** `false`
-**Environment:** `passage_protocol_PROTOCOL_ENABLED`
+**Environment:** `PASSAGE_PROXY_PROTOCOL_ENABLED`
 
 Enable PROXY protocol v1 and v2 support.
 
