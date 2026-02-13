@@ -2,7 +2,7 @@
 members = ["passage-adapters", "passage-protocol", "passage-packets", "passage-adapters/grpc", "passage-adapters/agones", "passage-adapters/http"]
 
 [workspace.package]
-version = "0.1.24"
+version = "0.2.0"
 repository = "https://github.com/scrayosnet/passage"
 documentation = "https://passage.scrayos.net/docs"
 homepage = "https://passage.scrayos.net"
@@ -25,8 +25,8 @@ thiserror = { version = "2.0" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 uuid = { version = "1.20", features = ["v4", "serde"] }
-rsa = { version = "0.10.0-rc.10" }
-rand = { version = "0.10.0-rc.5" }
+rsa = { version = "0.10.0-rc.15" }
+rand = { version = "0.10.0" }
 num-bigint = { version = "0.4" }
 sha1 = { version = "0.10" }
 cfb8 = { version = "0.8" }
@@ -78,7 +78,6 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-passage-packets = { workspace = true, features = ["server"] }
 passage-adapters = { workspace = true }
 passage-adapters-grpc = { workspace = true, optional = true }
 passage-adapters-agones = { workspace = true, optional = true }
@@ -101,9 +100,6 @@ opentelemetry-otlp = { workspace = true, features = ["http-proto", "metrics", "t
 
 sentry = { workspace = true, features = ["backtrace", "contexts", "panic", "debug-images", "reqwest", "rustls", "tower"], optional = true }
 sentry-tracing = { workspace = true, optional = true }
-
-[dev-dependencies]
-criterion = { version = "0.8", features = ["async_tokio"] }
 
 [features]
 default = ["sentry", "adapters-grpc", "adapters-agones", "adapters-http"]

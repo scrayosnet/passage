@@ -4,7 +4,7 @@ pub mod stream;
 pub(crate) use crate::crypto::error::Error;
 use num_bigint::BigInt;
 use passage_packets::VerifyToken;
-use rand::TryRngCore;
+use rand::TryRng;
 use rand::rand_core::UnwrapErr;
 use rand::rngs::SysRng;
 use rsa::pkcs8::EncodePublicKey;

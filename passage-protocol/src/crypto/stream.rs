@@ -134,7 +134,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::TryRngCore;
+    use rand::TryRng;
     use rand::rngs::SysRng;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
