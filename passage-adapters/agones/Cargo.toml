@@ -30,3 +30,6 @@ kube = { workspace = true, default-features = false, features = ["runtime", "der
 k8s-openapi = { workspace = true, features = ["latest", "default"] }
 schemars = { workspace = true, features = ["default"] }
 futures-util = { workspace = true, features = ["default"] }
+
+[package.metadata.cargo-machete]
+ignored = ["k8s-openapi"]

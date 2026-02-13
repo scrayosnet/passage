@@ -33,3 +33,6 @@ uuid = { version = "1.20.0", features = ["v4"] }
 [build-dependencies]
 tonic-build = { workspace = true }
 tonic-prost-build = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["tonic-prost", "tonic-build", "tonic-prost-build", "prost", "prost-types", "serde"]

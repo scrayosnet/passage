@@ -107,6 +107,3 @@ sentry = ["dep:sentry", "dep:sentry-tracing"]
 adapters-grpc = ["dep:passage-adapters-grpc"]
 adapters-agones = ["dep:passage-adapters-agones"]
 adapters-http = ["dep:passage-adapters-http"]
-
-[package.metadata.cargo-machete]
-ignored = ["tonic-prost", "tonic-build", "tonic-prost-build", "prost", "prost-types", "k8s-openapi"]
