@@ -1,8 +1,8 @@
 use crate::connection::{Connection, Error};
-use crate::helper::rate_limiter::RateLimiter;
 use crate::localization::Localization;
 use crate::metrics;
 use crate::mojang::Mojang;
+use crate::rate_limiter::RateLimiter;
 use passage_adapters::discovery::DiscoveryAdapter;
 use passage_adapters::status::StatusAdapter;
 use passage_adapters::strategy::StrategyAdapter;
