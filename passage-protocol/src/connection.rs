@@ -455,7 +455,7 @@ where
 
         // handle authentication if not already authenticated by the token
         if should_authenticate {
-            debug!("authenticating with mojang");
+            debug!("authenticating user");
             let request_start = Instant::now();
             let auth_response = self
                 .authentication_adapter
@@ -470,10 +470,10 @@ where
                 .await
                 .inspect_err(|err| {
                     // track request failed
-                    error!(err = %err, "mojang request failed");
-                    metrics::mojang_request_duration::record(request_start, "failed");
+                    error!(err = %err, "authentication request failed");
+                    metrics::authentication_request_duration::record(request_start, "failed");
                 })?;
-            metrics::mojang_request_duration::record(request_start, "success");
+            metrics::authentication_request_duration::record(request_start, "success");
 
             // update state for actual use info
             login_start.user_name = auth_response.name;
