@@ -11,16 +11,16 @@ use passage_packets::{
     AsyncReadPacket, AsyncWritePacket, ChatMode, DisplayedSkinParts, MainHand, ParticleStatus,
     State,
 };
-use passage_protocol::Error;
 use passage_protocol::connection::{Connection, KEEP_ALIVE_INTERVAL};
 use passage_protocol::cookie::{
-    AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign,
+    sign, AuthCookie, SessionCookie, AUTH_COOKIE_KEY, SESSION_COOKIE_KEY,
 };
 use passage_protocol::crypto::stream::CipherStream;
 use passage_protocol::localization::Localization;
 use passage_protocol::mojang::{Mojang, Profile};
-use proxy_header::ParseConfig;
+use passage_protocol::Error;
 use proxy_header::io::ProxiedStream;
+use proxy_header::ParseConfig;
 use rand::rngs::SysRng;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::rand_core::UnwrapErr;
@@ -379,7 +379,7 @@ async fn simulate_slow_transfer_no_configuration() {
     // build supplier
     let status_adapter = Arc::new(FixedStatusAdapter::new(None, 0, 0, 0));
     let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
-    let discovery_adapter = Arc::new(SlowDiscoveryAdapter::new(2 * KEEP_ALIVE_INTERVAL));
+    let discovery_adapter = Arc::new(SlowDiscoveryAdapter::new(2 * KEEP_ALIVE_INTERVAL + 1));
     let mojang = Arc::new(MojangMock::default());
     let localization = Arc::new(Localization::default());
 
