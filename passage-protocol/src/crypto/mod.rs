@@ -4,9 +4,9 @@ pub mod stream;
 pub(crate) use crate::crypto::error::Error;
 use num_bigint::BigInt;
 use passage_packets::VerifyToken;
+use rand::TryRng;
 use rand::rand_core::UnwrapErr;
 use rand::rngs::SysRng;
-use rand::TryRng;
 use rsa::pkcs8::EncodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use sha1::Sha1;
@@ -100,6 +100,7 @@ pub fn minecraft_hash(server_id: &str, shared_secret: &[u8], encoded_public: &[u
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn create_keypair() {
@@ -112,9 +113,10 @@ mod tests {
         encode_public_key(&key).expect("failed to encode keypair");
     }
 
-    #[test]
-    fn generate_different_keep_alive() {
+    #[tokio::test(start_paused = true)]
+    async fn generate_different_keep_alive() {
         let id1 = generate_keep_alive();
+        tokio::time::advance(Duration::new(1, 1)).await;
         let id2 = generate_keep_alive();
         assert_ne!(id1, id2);
     }

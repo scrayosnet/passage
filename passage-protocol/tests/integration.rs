@@ -11,16 +11,16 @@ use passage_packets::{
     AsyncReadPacket, AsyncWritePacket, ChatMode, DisplayedSkinParts, MainHand, ParticleStatus,
     State,
 };
-use passage_protocol::Error;
-use passage_protocol::connection::Connection;
+use passage_protocol::connection::{Connection, KEEP_ALIVE_INTERVAL};
 use passage_protocol::cookie::{
-    AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign,
+    sign, AuthCookie, SessionCookie, AUTH_COOKIE_KEY, SESSION_COOKIE_KEY,
 };
 use passage_protocol::crypto::stream::CipherStream;
 use passage_protocol::localization::Localization;
 use passage_protocol::mojang::{Mojang, Profile};
-use proxy_header::ParseConfig;
+use passage_protocol::Error;
 use proxy_header::io::ProxiedStream;
+use proxy_header::ParseConfig;
 use rand::rngs::SysRng;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::rand_core::UnwrapErr;
@@ -379,7 +379,7 @@ async fn simulate_slow_transfer_no_configuration() {
     // build supplier
     let status_adapter = Arc::new(FixedStatusAdapter::new(None, 0, 0, 0));
     let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
-    let discovery_adapter = Arc::new(SlowDiscoveryAdapter::new(29));
+    let discovery_adapter = Arc::new(SlowDiscoveryAdapter::new(2 * KEEP_ALIVE_INTERVAL));
     let mojang = Arc::new(MojangMock::default());
     let localization = Arc::new(Localization::default());
 
@@ -521,11 +521,18 @@ async fn simulate_slow_transfer_no_configuration() {
         .await
         .expect("send client information packet failed");
 
-    let _: conf_out::KeepAlivePacket = client_stream
+    // handle the first fmt exchange
+    let keep_alive: conf_out::KeepAlivePacket = client_stream
         .read_packet()
         .await
         .expect("keep-alive packet read failed");
 
+    client_stream
+        .write_packet(conf_in::KeepAlivePacket { id: keep_alive.id })
+        .await
+        .expect("send keep-alive packet failed");
+
+    // start the second exchange
     let _: conf_out::KeepAlivePacket = client_stream
         .read_packet()
         .await
@@ -991,18 +998,13 @@ async fn no_respond_keep_alive() {
         .await
         .expect("send login acknowledged packet failed");
 
-    // advance multiple times to ensure keep-alive is sent multiple times
-    tokio::time::advance(Duration::from_secs(10)).await;
+    // advance to ensure keep-alive is sent at least once
+    tokio::time::advance(Duration::from_secs(KEEP_ALIVE_INTERVAL)).await;
     let _: conf_out::KeepAlivePacket = client_stream
         .read_packet()
         .await
         .expect("keep-alive packet read failed");
-    tokio::time::advance(Duration::from_secs(10)).await;
-    let _: conf_out::KeepAlivePacket = client_stream
-        .read_packet()
-        .await
-        .expect("keep-alive packet read failed");
-    tokio::time::advance(Duration::from_secs(10)).await;
+    tokio::time::advance(Duration::from_secs(KEEP_ALIVE_INTERVAL)).await;
 
     // disconnect as no target configured
     let _disconnect_packet: conf_out::DisconnectPacket = client_stream

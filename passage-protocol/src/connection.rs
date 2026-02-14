@@ -4,7 +4,6 @@ use crate::cookie::{
 };
 use crate::crypto::stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream, create_ciphers};
 pub(crate) use crate::error::Error;
-use crate::helper::keep_alive::KeepAlive;
 use crate::localization::Localization;
 use crate::mojang::Mojang;
 use crate::{crypto, metrics};
@@ -29,7 +28,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::time::Instant;
+use tokio::time::{Instant, Interval};
 use tracing::{Instrument, debug, error, field, info, instrument};
 use uuid::Uuid;
 
@@ -59,7 +58,11 @@ macro_rules! match_packet {
 }
 
 /// The max packet length in bytes. Larger packets are rejected.
-const DEFAULT_MAX_PACKET_LENGTH: VarInt = 10_000;
+pub const DEFAULT_MAX_PACKET_LENGTH: VarInt = 10_000;
+
+/// The interval in seconds at which keep-alive packets are sent. Has to be between 15 and 20 seconds,
+/// such that at most one keep-alive packet is in transit at any point.
+pub const KEEP_ALIVE_INTERVAL: u64 = 16;
 
 pub struct Connection<S, Disc, Stat, Stra, Api> {
     stream: CipherStream<S, Aes128Cfb8Enc, Aes128Cfb8Dec>,
@@ -73,7 +76,8 @@ pub struct Connection<S, Disc, Stat, Stra, Api> {
     localization: Arc<Localization>,
 
     // config and internal state
-    keep_alive: KeepAlive<2>,
+    keep_alive_id: Option<u64>,
+    keep_alive_interval: Interval,
     auth_secret: Option<Vec<u8>>,
     max_packet_length: VarInt,
 
@@ -100,17 +104,14 @@ where
         auth_secret: Option<Vec<u8>>,
         client_address: SocketAddr,
     ) -> Self {
-        // start ticker for keep-alive packets (use delay so that we don't miss any)
-        let mut interval = tokio::time::interval(Duration::from_secs(10));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // start ticker for keep-alive packets, it has to be sent at least every 20 seconds.
+        // Then, the client has 15 seconds to respond with a keep-alive packet. We ensure that only
+        // one keep-alive is in transit at any time and has to be answered before the next is sent.
+        let mut interval = tokio::time::interval(Duration::from_secs(KEEP_ALIVE_INTERVAL));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+        // use the default locale as the client locale until the real locale is known
         let client_locale = localization.default_locale.clone();
-        let keep_alive = KeepAlive {
-            // array size is based on interval duration
-            packets: [0; 2],
-            last_sent: Instant::now(),
-            interval,
-        };
 
         Self {
             stream: CipherStream::from_stream(stream),
@@ -122,7 +123,8 @@ where
             mojang,
             localization,
             // config and internal state
-            keep_alive,
+            keep_alive_id: None,
+            keep_alive_interval: interval,
             auth_secret,
             max_packet_length: DEFAULT_MAX_PACKET_LENGTH,
             // client information
@@ -141,27 +143,23 @@ where
         &mut self,
         keep_alive: bool,
     ) -> Result<(VarInt, Cursor<Vec<u8>>), Error> {
-        // start ticker for keep-alive packets (use delay so that we don't miss any)
-        let duration = Duration::from_secs(10);
-        let mut interval = tokio::time::interval_at(self.keep_alive.last_sent + duration, duration);
-
         // wait for the next packet, send keep-alive packets as necessary
         let length = loop {
             tokio::select! {
                 // use biased selection such that branches are checked in order
                 biased;
                 // await the next timer tick for keep-alive
-                _ = interval.tick() => {
+                _ = self.keep_alive_interval.tick() => {
                     if !keep_alive { continue; }
                     debug!("checking that keep-alive packet was received");
-                    self.keep_alive.last_sent = Instant::now();
-                    let id = crypto::generate_keep_alive();
-                    if !self.keep_alive.replace(0, id) {
+                    if self.keep_alive_id.is_some() {
                         let reason = self.localization.localize(&self.client_locale, "disconnect_timeout", &[]);
                         self.send_packet(conf_out::DisconnectPacket { reason }).await?;
                         return Err(Error::MissedKeepAlive);
                     }
                     debug!("sending next keep-alive packet");
+                    let id = crypto::generate_keep_alive();
+                    self.keep_alive_id = Some(id);
                     let packet = conf_out::KeepAlivePacket { id };
                     self.send_packet(packet).await?;
                 },
@@ -239,6 +237,14 @@ where
         Ok(())
     }
 
+    fn handle_keep_alive(&mut self, id: u64) {
+        if self.keep_alive_id == Some(id) {
+            self.keep_alive_id = None;
+        } else {
+            debug!(id = id, "keep alive packet id unknown");
+        }
+    }
+
     // TODO check whether this may result in partially written packets?
     /** Endlessly receives and sends keep-alive packets. It should be used with a `tokio::select!` */
     async fn keep_alive<T>(&mut self) -> Result<T, Error> {
@@ -246,9 +252,7 @@ where
             match_packet! { self, keep_alive,
                 // handle keep alive packets
                 packet = conf_in::KeepAlivePacket => {
-                    if !self.keep_alive.replace(packet.id, 0) {
-                        debug!(id = packet.id, "keep alive packet id unknown");
-                    }
+                    self.handle_keep_alive(packet.id);
                     continue
                 },
                 // ignore unsupported packets but don't throw an error
@@ -481,9 +485,7 @@ where
             match_packet! { self, keep_alive,
                 // handle keep alive packets
                 packet = conf_in::KeepAlivePacket => {
-                    if !self.keep_alive.replace(packet.id, 0) {
-                        debug!(id = packet.id, "keep alive packet id unknown");
-                    }
+                    self.handle_keep_alive(packet.id);
                     continue;
                 },
                 // wait for a client information packet
