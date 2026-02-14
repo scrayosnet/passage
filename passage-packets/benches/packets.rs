@@ -11,18 +11,18 @@ pub async fn rw_packet<T>(packet: T, buf: Vec<u8>)
 where
     T: PartialEq + Eq + ReadPacket + WritePacket + Send + Sync + Debug + Clone,
 {
-    // write passage-packets
+    // write packets
     let mut writer: Cursor<Vec<u8>> = Cursor::new(buf);
     packet
         .write_to_buffer(&mut writer)
         .await
-        .expect("failed to write passage-packets");
+        .expect("failed to write packets");
 
-    // read passage-packets
+    // read packets
     let mut reader: Cursor<Vec<u8>> = Cursor::new(writer.into_inner());
     T::read_from_buffer(&mut reader)
         .await
-        .expect("failed to read passage-packets");
+        .expect("failed to read packets");
 }
 
 fn criterion_benchmark(c: &mut Criterion) {

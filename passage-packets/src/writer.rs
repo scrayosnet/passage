@@ -10,14 +10,14 @@ impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
         &mut self,
         packet: T,
     ) -> Result<usize, Error> {
-        // create a new buffer (our passage-packets are very small)
+        // create a new buffer (our packets are very small)
         let mut buffer = Vec::with_capacity(INITIAL_BUFFER_SIZE);
 
-        // write the passage-packets id and the respective passage-packets content
+        // write the packets id and the respective packets content
         buffer.write_varint(T::ID as VarInt).await?;
         packet.write_to_buffer(&mut buffer).await?;
 
-        // prepare a final buffer (leaving max 2 bytes for varint as passage-packets never get that big)
+        // prepare a final buffer (leaving max 2 bytes for varint as packets never get that big)
         let packet_len = buffer.len();
         let mut final_buffer = Vec::with_capacity(packet_len + 2);
         final_buffer.write_varint(packet_len as VarInt).await?;

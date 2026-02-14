@@ -4,14 +4,15 @@ pub mod stream;
 pub(crate) use crate::crypto::error::Error;
 use num_bigint::BigInt;
 use passage_packets::VerifyToken;
-use rand::TryRng;
 use rand::rand_core::UnwrapErr;
 use rand::rngs::SysRng;
+use rand::TryRng;
 use rsa::pkcs8::EncodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use sha1::Sha1;
 use sha2::Digest;
 use std::sync::LazyLock;
+use tokio::time::Instant;
 
 /// The RSA keypair of the application.
 pub static KEY_PAIR: LazyLock<(RsaPrivateKey, RsaPublicKey)> =
@@ -21,14 +22,14 @@ pub static KEY_PAIR: LazyLock<(RsaPrivateKey, RsaPublicKey)> =
 pub static ENCODED_PUB: LazyLock<Vec<u8>> =
     LazyLock::new(|| encode_public_key(&KEY_PAIR.1).expect("failed to encode keypair"));
 
-/// Generates a random id for a keep alive packet.
+/// A time anchor for generating keep alive packet IDs.
+static TIME_ANCHOR: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+/// Generates a random id for a keep alive packet. Just like vanilla servers, it uses a
+/// system-dependent time in milliseconds to generate the keep alive ID value.
 #[must_use]
 pub fn generate_keep_alive() -> u64 {
-    // retrieve a new mutable instance of an OS RNG
-    let mut rng = SysRng;
-
-    // generate random number
-    rng.try_next_u64().expect("failed to generate randomness")
+    TIME_ANCHOR.elapsed().as_millis() as u64
 }
 
 /// Generates a new RSA keypair.

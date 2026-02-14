@@ -1,6 +1,6 @@
 /// The internal error type for all errors related to the authentication and cryptography.
 ///
-/// This includes errors with the expected passage-packets, packet contents or encoding of the exchanged fields. Errors of the
+/// This includes errors with the expected packets, packet contents or encoding of the exchanged fields. Errors of the
 /// underlying data layer (for Byte exchange) are wrapped from the underlying IO errors. Additionally, the internal
 /// timeout limits also are covered as errors.
 #[derive(thiserror::Error, Debug)]

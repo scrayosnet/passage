@@ -5,13 +5,13 @@ use uuid::Uuid;
 
 impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
     async fn read_packet<T: ReadPacket + Send + Sync>(&mut self) -> Result<T, Error> {
-        // extract the length of the passage-packets and check for any following content
+        // extract the length of the packets and check for any following content
         let length = self.read_varint().await?;
         if length == 0 || length > 10_000 {
             return Err(Error::IllegalPacketLength);
         }
 
-        // extract the encoded passage-packets id and validate if it is expected
+        // extract the encoded packets id and validate if it is expected
         let packet_id = self.read_varint().await?;
         let expected_packet_id = T::ID;
         if packet_id != expected_packet_id {
@@ -24,7 +24,7 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
         // split a separate reader from the stream
         let mut take = self.take(length as u64);
 
-        // convert the received buffer into our expected passage-packets
+        // convert the received buffer into our expected packets
         T::read_from_buffer(&mut take).await
     }
 

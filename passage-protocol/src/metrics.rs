@@ -103,7 +103,7 @@ pub(crate) mod packet_size {
     static INSTRUMENT: LazyLock<Histogram<u64>> = LazyLock::new(|| {
         METER
             .u64_histogram("packet_size")
-            .with_description("The size of passage-packets")
+            .with_description("The size of packets")
             .with_unit("bytes")
             .with_boundaries(linear_buckets(0.0, 512.0, 10))
             .build()

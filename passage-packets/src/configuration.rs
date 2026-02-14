@@ -178,7 +178,7 @@ pub mod clientbound {
     /// any keep-alive for 20 seconds, the client will disconnect and yield a "Timed out" exception.
     /// The vanilla server uses a system-dependent time in milliseconds to generate the keep alive ID value.
     ///
-    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Finish_Configuration)
+    /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Clientbound_Keep_Alive_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]
     pub struct KeepAlivePacket {
@@ -593,9 +593,9 @@ pub mod clientbound {
     /// The clientbound [`KnownPacksPacket`]. (Placeholder)
     ///
     /// Informs the client of which data packs are present on the server. The client is expected to respond
-    /// with its own Serverbound Known Packs passage-packets. The vanilla server does not continue with Configuration
+    /// with its own Serverbound Known Packs packets. The vanilla server does not continue with Configuration
     /// until it receives a response. The vanilla client requires the minecraft:core pack with version
-    /// 1.21.4 for a normal login sequence. This packet must be sent before the Registry Data passage-packets.
+    /// 1.21.4 for a normal login sequence. This packet must be sent before the Registry Data packets.
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Clientbound_Known_Packs)
     #[derive(Debug, Clone, Eq, PartialEq)]
@@ -951,7 +951,7 @@ pub mod serverbound {
 
     /// The serverbound [`PongPacket`]. (Placeholder)
     ///
-    /// Response to the clientbound passage-packets (Ping) with the same id
+    /// Response to the clientbound packets (Ping) with the same id
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Pong_(configuration))
     #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1036,7 +1036,7 @@ pub mod serverbound {
     ///
     /// Informs the server of which data packs are present on the client. The client sends this in response
     /// to Clientbound Known Packs. If the client specifies a pack in this packet, the server should omit
-    /// its contained data from the Registry Data passage-packets.
+    /// its contained data from the Registry Data packets.
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Serverbound_Known_Packs)
     #[derive(Debug, Clone, Eq, PartialEq)]

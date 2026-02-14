@@ -101,7 +101,3 @@ build/
 # local configuration
 config/config.toml
 config/auth_secret
-
-# web development
-/.web/node_modules/
-/.web/.vitepress/cache/

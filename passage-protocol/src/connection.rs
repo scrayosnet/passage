@@ -35,15 +35,15 @@ use uuid::Uuid;
 
 #[macro_export]
 macro_rules! match_packet {
-    // macro variant without sending keep-alive passage-packets
+    // macro variant without sending keep-alive packets
     { $con:expr, $($packet:pat = $packet_type:ty => $handler:expr,)* } => {
         match_packet! { $con, false, $($packet = $packet_type => $handler,)* }
     };
-    // macro variant with sending keep-alive passage-packets
+    // macro variant with sending keep-alive packets
     { $con:expr, keep_alive, $($packet:pat = $packet_type:ty => $handler:expr,)* } => {
         match_packet! { $con, true, $($packet = $packet_type => $handler,)* }
     };
-    // general macro implementation with boolean for sending keep-alive passage-packets
+    // general macro implementation with boolean for sending keep-alive packets
     {$con:expr, $keep_alive:expr, $($packet:pat = $packet_type:ty => $handler:expr,)* } => {{
         let (id, mut buf) = $con.receive_packet($keep_alive).await?;
         match id {
@@ -58,7 +58,7 @@ macro_rules! match_packet {
     }};
 }
 
-/// The max packet length in bytes. Larger passage-packets are rejected.
+/// The max packet length in bytes. Larger packets are rejected.
 const DEFAULT_MAX_PACKET_LENGTH: VarInt = 10_000;
 
 pub struct Connection<S, Disc, Stat, Stra, Api> {
@@ -100,7 +100,7 @@ where
         auth_secret: Option<Vec<u8>>,
         client_address: SocketAddr,
     ) -> Self {
-        // start ticker for keep-alive passage-packets (use delay so that we don't miss any)
+        // start ticker for keep-alive packets (use delay so that we don't miss any)
         let mut interval = tokio::time::interval(Duration::from_secs(10));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -141,11 +141,11 @@ where
         &mut self,
         keep_alive: bool,
     ) -> Result<(VarInt, Cursor<Vec<u8>>), Error> {
-        // start ticker for keep-alive passage-packets (use delay so that we don't miss any)
+        // start ticker for keep-alive packets (use delay so that we don't miss any)
         let duration = Duration::from_secs(10);
         let mut interval = tokio::time::interval_at(self.keep_alive.last_sent + duration, duration);
 
-        // wait for the next packet, send keep-alive passage-packets as necessary
+        // wait for the next packet, send keep-alive packets as necessary
         let length = loop {
             tokio::select! {
                 // use biased selection such that branches are checked in order
@@ -214,12 +214,12 @@ where
         &mut self,
         packet: T,
     ) -> Result<(), Error> {
-        // write the passage-packets id and the respective passage-packets content
+        // write the packets id and the respective packets content
         self.buffer.clear();
         self.buffer.write_varint(T::ID as VarInt).await?;
         packet.write_to_buffer(&mut self.buffer).await?;
 
-        // prepare a final buffer (leaving max 2 bytes for varint as passage-packets never get that big)
+        // prepare a final buffer (leaving max 2 bytes for varint as packets never get that big)
         let packet_len = self.buffer.len();
         // TODO reuse buffer here or write twice!
         let mut final_buffer = Vec::with_capacity(packet_len + 2);
@@ -244,14 +244,14 @@ where
     async fn keep_alive<T>(&mut self) -> Result<T, Error> {
         loop {
             match_packet! { self, keep_alive,
-                // handle keep alive passage-packets
+                // handle keep alive packets
                 packet = conf_in::KeepAlivePacket => {
                     if !self.keep_alive.replace(packet.id, 0) {
                         debug!(id = packet.id, "keep alive packet id unknown");
                     }
                     continue
                 },
-                // ignore unsupported passage-packets but don't throw an error
+                // ignore unsupported packets but don't throw an error
                 _ = conf_in::ClientInformationPacket => continue,
                 _ = conf_in::PluginMessagePacket => continue,
                 _ = conf_in::ResourcePackResponsePacket => continue,
@@ -479,7 +479,7 @@ where
         debug!("awaiting client information packet");
         let client_info = loop {
             match_packet! { self, keep_alive,
-                // handle keep alive passage-packets
+                // handle keep alive packets
                 packet = conf_in::KeepAlivePacket => {
                     if !self.keep_alive.replace(packet.id, 0) {
                         debug!(id = packet.id, "keep alive packet id unknown");
@@ -488,7 +488,7 @@ where
                 },
                 // wait for a client information packet
                 packet = conf_in::ClientInformationPacket => break packet,
-                // ignore unsupported passage-packets but don't throw an error
+                // ignore unsupported packets but don't throw an error
                 _ = conf_in::PluginMessagePacket => continue,
                 _ = conf_in::ResourcePackResponsePacket => continue,
                 _ = conf_in::CookieResponsePacket => continue,
@@ -501,7 +501,7 @@ where
             u64::try_from(client_info.view_distance).unwrap_or(0u64),
         );
 
-        // wait for target task to finish and send keep alive passage-packets
+        // wait for target task to finish and send keep alive packets
         // technically, this could be done a lot earlier (maybe even in a separate threat), however
         // in the future we might want to consider the client information when selecting a target
         debug!("discovering targets");
@@ -513,7 +513,7 @@ where
 
         debug!("selecting target");
         let strategy_adapter = self.strategy_adapter.clone();
-        let client_address = self.client_address.clone();
+        let client_address = self.client_address;
         let target = tokio::select! {
             result = self.keep_alive() => result?,
             maybe_target = strategy_adapter.select(

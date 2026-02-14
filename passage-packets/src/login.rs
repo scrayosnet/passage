@@ -166,10 +166,10 @@ pub mod clientbound {
 
     /// The [`SetCompressionPacket`]. (Placeholder)
     ///
-    /// Enables compression. If compression is enabled, all following passage-packets are encoded in the compressed
-    /// passage-packets format. Negative values will disable compression, meaning the passage-packets format should remain
-    /// in the uncompressed passage-packets format. However, this passage-packets is entirely optional, and if not sent,
-    /// compression will also not be enabled (the vanilla server does not send the passage-packets when compression
+    /// Enables compression. If compression is enabled, all following packets are encoded in the compressed
+    /// packets format. Negative values will disable compression, meaning the packets format should remain
+    /// in the uncompressed packets format. However, this packet is entirely optional, and if not sent,
+    /// compression will also not be enabled (the vanilla server does not send the packets when compression
     /// is disabled).
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Set_Compression)

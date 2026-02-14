@@ -34,8 +34,8 @@ pub enum Error {
     #[error("The connection was closed (by the client)")]
     ConnectionClosed(std::io::Error),
 
-    /// The received passage-packets is of an invalid length that we cannot process.
-    #[error("illegal passage-packets length")]
+    /// The received packets is of an invalid length that we cannot process.
+    #[error("illegal packets length")]
     IllegalPacketLength,
 
     /// The received value index cannot be mapped to an existing enum.
@@ -47,7 +47,7 @@ pub enum Error {
         value: VarInt,
     },
 
-    /// The received passage-packets ID is not mapped to an expected packet.
+    /// The received packets ID is not mapped to an expected packet.
     #[error("unexpected packet id received {0}")]
     UnexpectedPacketId(VarInt),
 

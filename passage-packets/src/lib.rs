@@ -23,7 +23,7 @@ pub type VarLong = i64;
 
 /// The internal error type for all errors related to the protocol communication.
 ///
-/// This includes errors with the expected passage-packets, packet contents or encoding of the exchanged fields. Errors of the
+/// This includes errors with the expected packets, packet contents or encoding of the exchanged fields. Errors of the
 /// underlying data layer (for Byte exchange) are wrapped from the underlying IO errors. Additionally, the internal
 /// timeout limits also are covered as errors.
 #[derive(thiserror::Error, Debug)]
@@ -32,8 +32,8 @@ pub enum Error {
     #[error("error reading or writing data: {0}")]
     Io(#[from] std::io::Error),
 
-    /// The received passage-packets is of an invalid length that we cannot process.
-    #[error("illegal passage-packets length")]
+    /// The received packets is of an invalid length that we cannot process.
+    #[error("illegal packets length")]
     IllegalPacketLength,
 
     /// The received value index cannot be mapped to an existing enum.
@@ -45,8 +45,8 @@ pub enum Error {
         value: VarInt,
     },
 
-    /// The received passage-packets ID is not mapped to an expected packet.
-    #[error("illegal passage-packets ID: {actual} (expected {expected})")]
+    /// The received packets ID is not mapped to an expected packet.
+    #[error("illegal packets ID: {actual} (expected {expected})")]
     IllegalPacketId {
         /// The expected value that should be present.
         expected: VarInt,
@@ -327,13 +327,13 @@ impl TryFrom<VarInt> for ParticleStatus {
     }
 }
 
-/// Packets are network passage-packets that are part of the protocol definition and identified by a context and ID.
+/// Packets are network packets that are part of the protocol definition and identified by a context and ID.
 pub trait Packet {
     /// Returns the defined ID of this network packet.
     const ID: VarInt;
 }
 
-/// `WritePacket`s are passage-packets that can be written to a buffer.
+/// `WritePacket`s are packets that can be written to a buffer.
 pub trait WritePacket: Packet {
     /// Writes the data from this packet into the supplied [`S`].
     fn write_to_buffer<S>(&self, buffer: &mut S) -> impl Future<Output = Result<(), Error>>
@@ -341,7 +341,7 @@ pub trait WritePacket: Packet {
         S: AsyncWrite + Unpin + Send + Sync;
 }
 
-/// `ReadPacket`s are passage-packets that can be read from a buffer.
+/// `ReadPacket`s are packets that can be read from a buffer.
 pub trait ReadPacket: Packet + Sized {
     /// Creates a new instance of this packet with the data from the buffer.
     fn read_from_buffer<S>(buffer: &mut S) -> impl Future<Output = Result<Self, Error>>
@@ -351,7 +351,7 @@ pub trait ReadPacket: Packet + Sized {
 
 /// `AsyncWritePacket` allows writing a specific [`WritePacket`] to an [`AsyncWrite`].
 ///
-/// Only [`WritePacket`s](WritePacket) can be written as only those passage-packets are sent. There are additional
+/// Only [`WritePacket`s](WritePacket) can be written as only those packets are sent. There are additional
 /// methods to write the data that is encoded in a Minecraft-specific manner. Their implementation is analogous to the
 /// [read implementation](AsyncReadPacket).
 pub trait AsyncWritePacket {
@@ -402,7 +402,7 @@ pub trait AsyncWritePacket {
 
 /// `AsyncReadPacket` allows reading a specific [`ReadPacket`] from an [`AsyncWrite`].
 ///
-/// Only [`ReadPacket`s](ReadPacket) can be read as only those passage-packets are received. There are additional
+/// Only [`ReadPacket`s](ReadPacket) can be read as only those packets are received. There are additional
 /// methods to read the data that is encoded in a Minecraft-specific manner. Their implementation is analogous to the
 /// [write implementation](AsyncWritePacket).
 pub trait AsyncReadPacket {
@@ -464,18 +464,18 @@ mod tests {
         // generate data
         let expected: T = Faker.fake();
 
-        // write passage-packets
+        // write packets
         let mut writer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
         expected
             .write_to_buffer(&mut writer)
             .await
-            .expect("failed to write passage-packets");
+            .expect("failed to write packets");
 
-        // read passage-packets
+        // read packets
         let mut reader: Cursor<Vec<u8>> = Cursor::new(writer.into_inner());
         let actual = T::read_from_buffer(&mut reader)
             .await
-            .expect("failed to read passage-packets");
+            .expect("failed to read packets");
 
         assert_eq!(T::ID, packet_id, "mismatching packet id");
         assert_eq!(expected, actual);
