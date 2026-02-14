@@ -1,18 +1,22 @@
 #![deny(clippy::all)]
 #![forbid(unsafe_code)]
 
+pub mod authentication_adapter;
 pub mod config;
 pub mod discovery_adapter;
+pub mod filter_adapter;
+pub mod localization_adapter;
 pub mod status_adapter;
 pub mod strategy_adapter;
 
+use crate::authentication_adapter::DynAuthenticationAdapter;
 use crate::config::Config;
 use crate::discovery_adapter::DynDiscoveryAdapter;
+use crate::localization_adapter::DynLocalizationAdapter;
 use crate::status_adapter::DynStatusAdapter;
 use crate::strategy_adapter::DynStrategyAdapter;
 use passage_protocol::listener::Listener;
 use passage_protocol::localization::Localization;
-use passage_protocol::mojang::Api;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -36,11 +40,11 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(DynDiscoveryAdapter::from_config(&config.target_discovery).await?);
     let strategy_adapter =
         Arc::new(DynStrategyAdapter::from_config(&config.target_strategy).await?);
-    let mojang = Arc::new(Api::default());
-    let localization = Arc::new(Localization {
-        default_locale: config.localization.default_locale,
-        messages: config.localization.messages,
-    });
+    let authentication_adapter = Arc::new(DynAuthenticationAdapter::from_config(
+        &config.target_strategy,
+    ));
+    let localization_adapter =
+        Arc::new(DynLocalizationAdapter::from_config(&config.target_strategy));
 
     // build stop signal
     let stop_token = CancellationToken::new();
@@ -63,8 +67,8 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         status_adapter,
         discovery_adapter,
         strategy_adapter,
-        mojang,
-        localization,
+        authentication_adapter,
+        localization_adapter,
     )
     .with_auth_secret_opt(auth_secret)
     .with_connection_timeout(timeout_duration)

@@ -20,46 +20,24 @@ impl StrategyAdapter for DynStrategyAdapter {
         client_addr: &SocketAddr,
         server_addr: (&str, u16),
         protocol: Protocol,
-        username: &str,
-        user_id: &Uuid,
+        user: (&str, &Uuid),
         targets: Vec<Target>,
     ) -> passage_adapters::Result<Option<Target>> {
         match self {
             DynStrategyAdapter::Fixed(adapter) => {
                 adapter
-                    .select(
-                        client_addr,
-                        server_addr,
-                        protocol,
-                        username,
-                        user_id,
-                        targets,
-                    )
+                    .select(client_addr, server_addr, protocol, user, targets)
                     .await
             }
             DynStrategyAdapter::PlayerFill(adapter) => {
                 adapter
-                    .select(
-                        client_addr,
-                        server_addr,
-                        protocol,
-                        username,
-                        user_id,
-                        targets,
-                    )
+                    .select(client_addr, server_addr, protocol, user, targets)
                     .await
             }
             #[cfg(feature = "adapters-grpc")]
             DynStrategyAdapter::Grpc(adapter) => {
                 adapter
-                    .select(
-                        client_addr,
-                        server_addr,
-                        protocol,
-                        username,
-                        user_id,
-                        targets,
-                    )
+                    .select(client_addr, server_addr, protocol, user, targets)
                     .await
             }
         }

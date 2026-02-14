@@ -1,9 +1,10 @@
 use crate::connection::{Connection, Error};
-use crate::localization::Localization;
 use crate::metrics;
-use crate::mojang::Mojang;
 use crate::rate_limiter::RateLimiter;
+use passage_adapters::authentication::AuthenticationAdapter;
 use passage_adapters::discovery::DiscoveryAdapter;
+use passage_adapters::filter::FilterAdapter;
+use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::status::StatusAdapter;
 use passage_adapters::strategy::StrategyAdapter;
 use proxy_header::ParseConfig;
@@ -23,12 +24,13 @@ use uuid::Uuid;
 const DEFAULT_CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
 // the server listener
-pub struct Listener<Disc, Stat, Stra, Api> {
+pub struct Listener<Stat, Disc, Filt, Stra, Auth, Loca> {
     status_adapter: Arc<Stat>,
     discovery_adapter: Arc<Disc>,
+    filter_adapter: Arc<Filt>,
     strategy_adapter: Arc<Stra>,
-    mojang: Arc<Api>,
-    localization: Arc<Localization>,
+    authentication_adapter: Arc<Auth>,
+    localization_adapter: Arc<Loca>,
     tracker: TaskTracker,
     rate_limiter: Option<RateLimiter<IpAddr>>,
     use_proxy_protocol: bool,
@@ -36,26 +38,30 @@ pub struct Listener<Disc, Stat, Stra, Api> {
     auth_secret: Option<Vec<u8>>,
 }
 
-impl<Disc, Stat, Stra, Api> Listener<Disc, Stat, Stra, Api>
+impl<Stat, Disc, Filt, Stra, Auth, Loca> Listener<Stat, Disc, Filt, Stra, Auth, Loca>
 where
-    Disc: DiscoveryAdapter + 'static,
     Stat: StatusAdapter + 'static,
+    Disc: DiscoveryAdapter + 'static,
+    Filt: FilterAdapter + 'static,
     Stra: StrategyAdapter + 'static,
-    Api: Mojang + 'static,
+    Auth: AuthenticationAdapter + 'static,
+    Loca: LocalizationAdapter + 'static,
 {
     pub fn new(
         status_adapter: Arc<Stat>,
         discovery_adapter: Arc<Disc>,
+        filter_adapter: Arc<Filt>,
         strategy_adapter: Arc<Stra>,
-        mojang: Arc<Api>,
-        localization: Arc<Localization>,
+        authentication_adapter: Arc<Auth>,
+        localization_adapter: Arc<Loca>,
     ) -> Self {
         Self {
-            discovery_adapter,
             status_adapter,
+            discovery_adapter,
+            filter_adapter,
             strategy_adapter,
-            mojang,
-            localization,
+            authentication_adapter,
+            localization_adapter,
             tracker: TaskTracker::new(),
             rate_limiter: None,
             use_proxy_protocol: false,
@@ -172,9 +178,10 @@ where
         let connection_timeout = self.connection_timeout;
         let status_adapter = self.status_adapter.clone();
         let discovery_adapter = self.discovery_adapter.clone();
+        let filter_adapter = self.filter_adapter.clone();
         let strategy_adapter = self.strategy_adapter.clone();
-        let mojang = self.mojang.clone();
-        let localization = self.localization.clone();
+        let authentication_adapter = self.authentication_adapter.clone();
+        let localization_adapter = self.localization_adapter.clone();
         let auth_secret = self.auth_secret.clone();
 
         // create a new connection and run protocol
@@ -184,9 +191,10 @@ where
                 &mut stream,
                 status_adapter,
                 discovery_adapter,
+                filter_adapter,
                 strategy_adapter,
-                mojang,
-                localization,
+                authentication_adapter,
+                localization_adapter,
                 auth_secret,
                 client_addr,
             );
