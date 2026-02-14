@@ -22,7 +22,7 @@
 //!
 //! The next layer is an optional configuration file intended to be used by deployments and local testing. The file
 //! location can be configured using the `CONFIG_FILE` environment variable, defaulting to `config/config`.
-//! It can be of any file type supported by [config] (e.g. `config/config.toml`). The file should not be
+//! It can be of any file type supported by [config] (e.g. `config/old_config.toml`). The file should not be
 //! published by git as its configuration is context-dependent (e.g. local/cluster) and probably contains
 //! secrets.
 //!
@@ -47,7 +47,6 @@ use passage_adapters::{Protocol, Target};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
-use std::net::SocketAddr;
 
 macro_rules! hashmap {
     ($($key:expr => $value:expr),* $(,)?) => {{
@@ -63,9 +62,10 @@ macro_rules! hashmap {
 /// If both the grpc and rest server are disabled, the application will exit immediately after startup
 /// with status ok.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct Config {
     /// The network address that should be used to bind the HTTP server for connection requests.
-    pub address: SocketAddr,
+    pub address: String,
 
     /// The timeout in seconds that is used for connection timeouts.
     pub timeout: u64,
@@ -74,7 +74,7 @@ pub struct Config {
     pub sentry: Option<Sentry>,
 
     /// The OpenTelemetry configuration (disabled if empty).
-    #[serde(default, alias = "opentelemetry")]
+    #[serde(alias = "opentelemetry")]
     pub otel: OpenTelemetry,
 
     /// The rate limiter config (disabled if empty).
@@ -89,27 +89,28 @@ pub struct Config {
     #[serde(alias = "authsecret")]
     pub auth_secret: Option<String>,
 
-    /// The adapters configuration.
+    /// The adapter configuration.
     pub adapters: Adapters,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            address: "0.0.0.0:25565".parse().expect("invalid default address"),
+            address: "0.0.0.0:25565".to_string(),
             timeout: 120,
             sentry: None,
-            otel: Default::default(),
+            otel: OpenTelemetry::default(),
             rate_limiter: None,
             proxy_protocol: None,
             auth_secret: None,
-            adapters: Default::default(),
+            adapters: Adapters::default(),
         }
     }
 }
 
 /// [`Sentry`] hold the sentry configuration. The release is automatically inferred from cargo.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct Sentry {
     /// Whether sentry should have debug enabled.
     pub debug: bool,
@@ -121,18 +122,9 @@ pub struct Sentry {
     pub address: String,
 }
 
-impl Default for Sentry {
-    fn default() -> Self {
-        Self {
-            debug: false,
-            environment: "staging".to_string(),
-            address: "https://key@sentry.io/42".to_string(),
-        }
-    }
-}
-
 /// [`OpenTelemetry`] hold the OpenTelemetry configuration. The release is automatically inferred from cargo.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct OpenTelemetry {
     /// The OpenTelemetry environment of the application.
     pub environment: String,
@@ -144,18 +136,9 @@ pub struct OpenTelemetry {
     pub metrics: Option<OpenTelemetryEndpoint>,
 }
 
-impl Default for OpenTelemetry {
-    fn default() -> Self {
-        Self {
-            environment: "staging".to_string(),
-            traces: None,
-            metrics: None,
-        }
-    }
-}
-
 /// [`OpenTelemetryEndpoint`] hold the OpenTelemetry configuration for a specific endpoint.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct OpenTelemetryEndpoint {
     /// The address of the http/protobuf.
     pub address: String,
@@ -164,17 +147,9 @@ pub struct OpenTelemetryEndpoint {
     pub token: String,
 }
 
-impl Default for OpenTelemetryEndpoint {
-    fn default() -> Self {
-        Self {
-            address: "http://localhost:3000".to_string(),
-            token: "".to_string(),
-        }
-    }
-}
-
 /// [`RateLimiter`] hold the connection rate limiting configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct RateLimiter {
     /// Duration in seconds.
     pub duration: u64,
@@ -194,11 +169,14 @@ impl Default for RateLimiter {
 
 /// [`ProxyProtocol`] hold the PROXY protocol configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct ProxyProtocol {
     /// Whether to allow V1 headers
+    #[serde(alias = "allowv1")]
     pub allow_v1: bool,
 
     /// Whether to allow V2 headers
+    #[serde(alias = "allowv2")]
     pub allow_v2: bool,
 }
 
@@ -212,7 +190,8 @@ impl Default for ProxyProtocol {
 }
 
 /// [`Adapters`] holds the adapter configurations.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct Adapters {
     /// The status (ping) adapter configuration.
     pub status: StatusAdapter,
@@ -233,19 +212,6 @@ pub struct Adapters {
     pub localization: LocalizationAdapter,
 }
 
-impl Default for Adapters {
-    fn default() -> Self {
-        Self {
-            status: Default::default(),
-            discovery: Default::default(),
-            filter: vec![],
-            strategy: Default::default(),
-            authentication: Default::default(),
-            localization: Default::default(),
-        }
-    }
-}
-
 /// [`StatusAdapter`] hold the status adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -257,14 +223,16 @@ pub enum StatusAdapter {
 
 impl Default for StatusAdapter {
     fn default() -> Self {
-        Self::Fixed(Default::default())
+        Self::Fixed(FixedStatus::default())
     }
 }
 
 /// [`FixedStatus`] hold the fixed status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct FixedStatus {
     /// The name of the server.
+    #[serde(alias = "servername")]
     pub name: String,
 
     /// The description of the server.
@@ -295,7 +263,7 @@ impl Default for FixedStatus {
         Self {
             name: "Passage".to_string(),
             description: Some("\"Minecraft Server Transfer Router\"".to_string()),
-            favicon: Some("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABABAMAAABYR2ztAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAeUExURdJDACIiIshABV4oHnQtHKI3FEElILs9DDAjIZMzF3zpuzQAAAIISURBVEjH5ZU7T8MwEMettCUwhpQ0bOG9JoW2jIQWWAMUEBsJr7IV1ErtRkQlxIaQQOLb4sfZPidCfABuiWL/cne++/tCnD+M/FfgbrvXaw9+BXZOAsJsqz/AgJuKt5cTom0NAeFGxB4PQ4It0kBAKOEdcO/W+ELsW6kCfPo6/ubr1mlaBz81HcJTXu224xyVc6jLfWuXJpzAy7EGliRwzmiIYEcaaMD+Oo/3gVMQwCIEEN/MhIsFBDzjrCSBgSsBxLLes6AQ4goHZXbLkkw1EHJgE/VsXznkwJ4ZgXUvMOrAATvHbW9KjwDQvKuGLuryGADQRk1M5byDS0iyP7RiE8iwHkLyeDDNTcCFLKEOK+5hQZz+kKwoICNzZb2HpIKaVSkDmTgX6KFWBmARFGWlJcAllgJcOJJhnvhKyn5S3O7SRQ0kpSzfxvGQu4WbVUpin4wSBDRkc1GZ7IQLQADLoGjcTNphDXiBlDTYq5IQzIdEa9oxNUbUAu63F6j7D8A9U3WKysxN10GsrOdmBAws84VRrjXNLC8CkmjCXXUKIejSFy8COLAR0IEBMGJHkBOk5hh14HZKq9yU46SK5qR0GjteRw2sOQ0sqQjXfJTal5/0rs1rIAMHZ0/8uUHvQCtAsof7L23KS9oKonIOYpRCua7xtPdvLgSz2o9++1/4dzu9bjv9p//NH77UnP1UgYF9AAAAAElFTkSuQmCC".to_string()),
+            favicon: Some("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABABAMAAABYR2ztAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAeUExURdJDACIiIshABV4oHnQtHKI3FEElILs9DDAjIZMzF3zpuzQAAAIISURBVEjH5ZU7T8MwEMettCUwhpQ0bOG9JoW2jIQWWAMUEBsJr7IV1ErtRkQlxIaQQOLb4sfZPidCfABuiWL/cne++/tCnD+M/FfgbrvXaw9+BXZOAsJsqz/AgJuKt5cTom0NAeFGxB4PQ4It0kBAKOEdcO/W+ELsW6kCfPo6/ubr1mlaBz81HcJTXu224xyVc6jLfWuXJpzAy7EGliRwzmiIYEcaaMD+Oo/3gVMQwCIEEN/MhIsFBDzjrCSBgSsBxLLes6AQ4goHZXbLkkw1EHJgE/VsXznkwJ4ZgXUvMOrAATvHbW9KjwDQvKuGLuryGADQRk1M5byDS0iyP7RiE8iwHkLyeDDNTcCFLKEOK+5hQZz+kKwoICNzZb2HpIKaVSkDmTgX6KFWBmARFGWlJcAllgJcOJJhnvhKyn5S3O7SRQ0kpSzfxvGQu4WbVUpin4wSBDRkc1GZ7IQLQADLoGjcTNphDXiBlDTYq5IQzIdEa9oxNUbUAu63F6j7D8A9U3WKysxN10GsrOdmBAws84VRrjXNLC8CkmjCXXUKIejSFy8CITAR0IEBMGJHkBOk5hh14HZKq9yU46SK5qR0GjteRw2sOQ0sqQjXfJTal5/0rs1rIAMHZ0/8uUHvQCtAsof7L23KS9oKonIOYpRCua7xtPdvLgSz2o9++1/4dzu9bjv9p//NH77UnP1UgYF9AAAAAElFTkSuQmCC".to_string()),
             enforces_secure_chat: Some(true),
             preferred_version: 769,
             min_version: 0,
@@ -305,27 +273,21 @@ impl Default for FixedStatus {
 }
 
 /// [`GrpcStatus`] hold the gRPC status (ping) configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct GrpcStatus {
     /// The address of the gRPC adapter server.
     pub address: String,
 }
 
-impl Default for GrpcStatus {
-    fn default() -> Self {
-        Self {
-            address: "localhost:50051".to_string(),
-        }
-    }
-}
-
 /// [`HttpStatus`] hold the http status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct HttpStatus {
     /// The address of the http adapter server.
     pub address: String,
 
-    /// The cache duration in seconds to store the queried status.
+    /// The cache duration in seconds to store the queried status. Must be greater than zero.
     #[serde(alias = "cacheduration")]
     pub cache_duration: u64,
 }
@@ -333,7 +295,7 @@ pub struct HttpStatus {
 impl Default for HttpStatus {
     fn default() -> Self {
         Self {
-            address: "http://localhost:5000".to_string(),
+            address: "http://localhost:8080".to_string(),
             cache_duration: 60,
         }
     }
@@ -350,25 +312,21 @@ pub enum DiscoveryAdapter {
 
 impl Default for DiscoveryAdapter {
     fn default() -> Self {
-        Self::Fixed(Default::default())
+        Self::Fixed(FixedDiscovery::default())
     }
 }
 
 /// [`FixedDiscovery`] hold the fixed discovery configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct FixedDiscovery {
     /// The targets that should be served by the discovery adapter.
     pub targets: Vec<Target>,
 }
 
-impl Default for FixedDiscovery {
-    fn default() -> Self {
-        Self { targets: vec![] }
-    }
-}
-
 /// [`AgonesDiscovery`] hold the agones discovery configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct AgonesDiscovery {
     /// The namespace to apply to the watcher.
     pub namespace: Option<String>,
@@ -380,29 +338,12 @@ pub struct AgonesDiscovery {
     pub field_selector: Option<String>,
 }
 
-impl Default for AgonesDiscovery {
-    fn default() -> Self {
-        Self {
-            namespace: None,
-            label_selector: None,
-            field_selector: None,
-        }
-    }
-}
-
 /// [`GrpcDiscovery`] hold the gRPC discovery configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct GrpcDiscovery {
     /// The address of the gRPC adapter server.
     pub address: String,
-}
-
-impl Default for GrpcDiscovery {
-    fn default() -> Self {
-        Self {
-            address: "localhost:50052".to_string(),
-        }
-    }
 }
 
 /// [`FilterAdapter`] hold the filter adapter configuration.
@@ -414,20 +355,15 @@ pub enum FilterAdapter {
 
 impl Default for FilterAdapter {
     fn default() -> Self {
-        Self::Fixed(Default::default())
+        Self::Fixed(FixedFilter::default())
     }
 }
 
 /// [`FixedFilter`] hold the fixed filter configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct FixedFilter {
     // TODO add some logic here!
-}
-
-impl Default for FixedFilter {
-    fn default() -> Self {
-        Self {}
-    }
 }
 
 /// [`StrategyAdapter`] hold the strategy adapter configuration.
@@ -441,55 +377,34 @@ pub enum StrategyAdapter {
 
 impl Default for StrategyAdapter {
     fn default() -> Self {
-        Self::Fixed(Default::default())
+        Self::Fixed(FixedStrategy::default())
     }
 }
 
 /// [`FixedStrategy`] hold the fixed strategy configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct FixedStrategy {
     // TODO add some logic here!
 }
 
-impl Default for FixedStrategy {
-    fn default() -> Self {
-        Self {}
-    }
-}
-
 /// [`FixedStrategy`] hold the fixed strategy configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct PlayerFillStrategy {
     /// The name of the field that stores the player amount.
     pub field: String,
 
     /// The number of players that will be filled at maximum.
-    #[serde(alias = "maxplayers")]
     pub max_players: u32,
 }
 
-impl Default for PlayerFillStrategy {
-    fn default() -> Self {
-        Self {
-            field: "players".to_string(),
-            max_players: 50,
-        }
-    }
-}
-
 /// [`GrpcStrategy`] hold the gRPC strategy configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct GrpcStrategy {
     /// The address of the gRPC adapter server.
     pub address: String,
-}
-
-impl Default for GrpcStrategy {
-    fn default() -> Self {
-        Self {
-            address: "localhost:50053".to_string(),
-        }
-    }
 }
 
 /// [`AuthenticationAdapter`] hold the authentication adapter configuration.
@@ -502,39 +417,25 @@ pub enum AuthenticationAdapter {
 
 impl Default for AuthenticationAdapter {
     fn default() -> Self {
-        Self::Fixed(Default::default())
+        Self::Mojang(MojangAuthentication::default())
     }
 }
 
 /// [`FixedAuthentication`] hold the fixed authentication configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct FixedAuthentication {
     /// The fixed profile that should be used for authentication.
     pub profile: Profile,
 }
 
-impl Default for FixedAuthentication {
-    fn default() -> Self {
-        Self {
-            profile: Default::default(),
-        }
-    }
-}
-
 /// [`MojangAuthentication`] hold the mojang authentication configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct MojangAuthentication {
     /// The server id passed to the Mojang authentication server.
-    #[serde(default, alias = "serverid")]
+    #[serde(alias = "serverid")]
     pub server_id: String,
-}
-
-impl Default for MojangAuthentication {
-    fn default() -> Self {
-        Self {
-            server_id: "".to_string(),
-        }
-    }
 }
 
 /// [`LocalizationAdapter`] hold the localization adapter configuration.
@@ -546,12 +447,13 @@ pub enum LocalizationAdapter {
 
 impl Default for LocalizationAdapter {
     fn default() -> Self {
-        Self::Fixed(Default::default())
+        Self::Fixed(FixedLocalization::default())
     }
 }
 
 /// [`FixedLocalization`] hold the fixed localization configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct FixedLocalization {
     /// The locale to be used in case the client locale is unknown or unsupported.
     #[serde(alias = "defaultlocale")]

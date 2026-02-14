@@ -116,7 +116,7 @@ Secret key for signing authentication cookies. If not set, authentication cookie
 
 **Examples:**
 ```toml
-# In config.toml (not recommended for production)
+# In old_config.toml (not recommended for production)
 auth_secret = "your-secret-key-here"
 ```
 
@@ -894,7 +894,7 @@ Passage supports multiple configuration file formats:
 
 ### TOML (default)
 ```bash
-CONFIG_FILE=config/config.toml passage
+CONFIG_FILE=config/old_config.toml passage
 ```
 
 ### JSON
