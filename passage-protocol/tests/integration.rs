@@ -82,9 +82,8 @@ async fn simulate_handshake() {
         strategy_adapter,
         authentication_adapter,
         localization_adapter,
-        None,
-        client_address,
-    );
+    )
+    .with_client_address(client_address);
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
@@ -136,10 +135,8 @@ async fn simulate_status() {
         strategy_adapter,
         authentication_adapter,
         localization_adapter,
-        None,
-        client_address,
-    );
-
+    )
+    .with_client_address(client_address);
     // start the server in its own thread
     let server = tokio::spawn(async move {
         server.listen().await.expect("server listen failed");
@@ -210,9 +207,9 @@ async fn simulate_transfer_no_configuration() {
         strategy_adapter,
         authentication_adapter,
         localization_adapter,
-        Some(auth_secret.clone()),
-        client_address,
-    );
+    )
+    .with_client_address(client_address)
+    .with_auth_secret(Some(auth_secret.clone()));
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
@@ -378,9 +375,9 @@ async fn simulate_slow_transfer_no_configuration() {
         strategy_adapter,
         authentication_adapter,
         localization_adapter,
-        Some(auth_secret.clone()),
-        client_address,
-    );
+    )
+    .with_client_address(client_address)
+    .with_auth_secret(Some(auth_secret.clone()));
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
@@ -568,9 +565,8 @@ async fn simulate_login_no_configuration() {
         strategy_adapter,
         authentication_adapter,
         localization_adapter,
-        None,
-        client_address,
-    );
+    )
+    .with_client_address(client_address);
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
@@ -707,9 +703,9 @@ async fn sends_keep_alive() {
         strategy_adapter,
         authentication_adapter,
         localization_adapter,
-        Some(auth_secret.clone()),
-        client_address,
-    );
+    )
+    .with_client_address(client_address)
+    .with_auth_secret(Some(auth_secret.clone()));
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
@@ -881,9 +877,9 @@ async fn no_respond_keep_alive() {
         strategy_adapter,
         authentication_adapter,
         localization_adapter,
-        Some(auth_secret.clone()),
-        client_address,
-    );
+    )
+    .with_client_address(client_address)
+    .with_auth_secret(Some(auth_secret.clone()));
 
     // start the server in its own thread
     let server = tokio::spawn(async move {

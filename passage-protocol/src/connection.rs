@@ -106,8 +106,6 @@ where
         strategy_adapter: Arc<Stra>,
         authentication_adapter: Arc<Auth>,
         localization_adapter: Arc<Loca>,
-        auth_secret: Option<Vec<u8>>,
-        client_address: SocketAddr,
     ) -> Self {
         // start ticker for keep-alive packets, it has to be sent at least every 20 seconds.
         // Then, the client has 15 seconds to respond with a keep-alive packet. We ensure that only
@@ -128,16 +126,26 @@ where
             // config and internal state
             keep_alive_id: None,
             keep_alive_interval: interval,
-            auth_secret,
+            auth_secret: None,
             max_packet_length: DEFAULT_MAX_PACKET_LENGTH,
             // client information
-            client_address,
+            client_address: "127.0.0.1:8080".parse().expect("hardcoded default address"),
             client_locale: None,
         }
     }
 
     pub fn with_max_packet_length(mut self, max_packet_length: VarInt) -> Self {
         self.max_packet_length = max_packet_length;
+        self
+    }
+
+    pub fn with_auth_secret(mut self, auth_secret: Option<Vec<u8>>) -> Self {
+        self.auth_secret = auth_secret;
+        self
+    }
+
+    pub fn with_client_address(mut self, client_address: SocketAddr) -> Self {
+        self.client_address = client_address;
         self
     }
 

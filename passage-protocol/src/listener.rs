@@ -182,9 +182,9 @@ where
                 strategy_adapter,
                 authentication_adapter,
                 localization_adapter,
-                auth_secret,
-                client_addr,
-            );
+            )
+            .with_client_address(client_addr)
+            .with_auth_secret(auth_secret);
 
             // handle the client connection (ignore connection closed by the client)
             let timeout = timeout(connection_timeout, connection.listen()).await;
