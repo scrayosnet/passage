@@ -11,16 +11,16 @@ use passage_packets::{
     AsyncReadPacket, AsyncWritePacket, ChatMode, DisplayedSkinParts, MainHand, ParticleStatus,
     State,
 };
+use passage_protocol::Error;
 use passage_protocol::connection::{Connection, KEEP_ALIVE_INTERVAL};
 use passage_protocol::cookie::{
-    sign, AuthCookie, SessionCookie, AUTH_COOKIE_KEY, SESSION_COOKIE_KEY,
+    AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign,
 };
 use passage_protocol::crypto::stream::CipherStream;
 use passage_protocol::localization::Localization;
 use passage_protocol::mojang::{Mojang, Profile};
-use passage_protocol::Error;
-use proxy_header::io::ProxiedStream;
 use proxy_header::ParseConfig;
+use proxy_header::io::ProxiedStream;
 use rand::rngs::SysRng;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::rand_core::UnwrapErr;

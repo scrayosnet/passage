@@ -85,9 +85,12 @@ impl Mojang for Api {
         let url = format!(
             "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}"
         );
-        let response = HTTP_CLIENT.get(&url).send().await?.error_for_status()?;
-
-        // extract the fields of the response
-        Ok(response.json().await?)
+        HTTP_CLIENT
+            .get(&url)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await
     }
 }
