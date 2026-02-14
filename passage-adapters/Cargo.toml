@@ -1,0 +1,24 @@
+[package]
+name = "passage-adapters"
+description = "Minecraft Server Passage Adapters"
+authors = [
+    "Joshua Dean Küpper <admin@joshua-kuepper.de>",
+    "Paul Wagner <contact@paulwagner.dev>",
+]
+license = "MIT"
+readme = "README.md"
+keywords = ["minecraft", "opentelemetry", "monitoring", "package"]
+categories = ["emulators", "network-programming"]
+version.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }

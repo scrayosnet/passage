@@ -1,0 +1,27 @@
+[package]
+name = "passage-adapters-http"
+description = "Minecraft Server Passage HTTP Adapters"
+authors = [
+    "Joshua Dean Küpper <admin@joshua-kuepper.de>",
+    "Paul Wagner <contact@paulwagner.dev>",
+]
+license = "MIT"
+readme = "README.md"
+keywords = ["minecraft", "opentelemetry", "monitoring", "package"]
+categories = ["emulators", "network-programming"]
+version.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+passage-adapters = { workspace = true }
+
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["sync", "macros"] }
+tokio-util = { workspace = true, features = ["rt"] }
+
+reqwest = { workspace = true, features = ["json"] }
+

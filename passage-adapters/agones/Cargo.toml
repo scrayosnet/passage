@@ -1,0 +1,35 @@
+[package]
+name = "passage-adapters-agones"
+description = "Minecraft Server Passage Agones Adapters"
+authors = [
+    "Joshua Dean Küpper <admin@joshua-kuepper.de>",
+    "Paul Wagner <contact@paulwagner.dev>",
+]
+license = "MIT"
+readme = "README.md"
+keywords = ["minecraft", "opentelemetry", "monitoring", "package"]
+categories = ["emulators", "network-programming"]
+version.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+passage-adapters = { workspace = true }
+
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true, features = ["sync", "macros"] }
+tokio-util = { workspace = true, features = ["rt"] }
+
+kube = { workspace = true, default-features = false, features = ["runtime", "derive", "rustls-tls", "aws-lc-rs"] }
+k8s-openapi = { workspace = true, features = ["latest", "default"] }
+schemars = { workspace = true, features = ["default"] }
+futures-util = { workspace = true, features = ["default"] }
+
+[package.metadata.cargo-machete]
+ignored = ["k8s-openapi"]

@@ -1,0 +1,38 @@
+[package]
+name = "passage-adapters-grpc"
+description = "Minecraft Server Passage gRPC Adapters"
+authors = [
+    "Joshua Dean Küpper <admin@joshua-kuepper.de>",
+    "Paul Wagner <contact@paulwagner.dev>",
+]
+license = "MIT"
+readme = "README.md"
+keywords = ["minecraft", "opentelemetry", "monitoring", "package"]
+categories = ["emulators", "network-programming"]
+version.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+passage-adapters = { workspace = true }
+
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+tonic-prost-build = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["tonic-prost", "tonic-build", "tonic-prost-build", "prost", "prost-types", "serde"]
