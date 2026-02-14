@@ -116,7 +116,7 @@ Secret key for signing authentication cookies. If not set, authentication cookie
 
 **Examples:**
 ```toml
-# In old_config.toml (not recommended for production)
+# In config.toml (not recommended for production)
 auth_secret = "your-secret-key-here"
 ```
 
