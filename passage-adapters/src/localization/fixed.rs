@@ -18,6 +18,15 @@ impl FixedLocalizationAdapter {
     }
 }
 
+impl Default for FixedLocalizationAdapter {
+    fn default() -> Self {
+        Self {
+            default_locale: "en_us".to_string(),
+            messages: HashMap::new(),
+        }
+    }
+}
+
 impl LocalizationAdapter for FixedLocalizationAdapter {
     #[tracing::instrument(skip_all)]
     async fn localize(

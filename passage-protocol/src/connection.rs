@@ -531,8 +531,7 @@ where
                 &client_address,
                 (&handshake.server_address, handshake.server_port),
                 handshake.protocol_version as Protocol,
-                (&login_start.user_name,
-                &login_start.user_id,)
+                (&login_start.user_name, &login_start.user_id),
                 targets,
             ) => maybe_targets?,
         };
@@ -545,8 +544,7 @@ where
                 &client_address,
                 (&handshake.server_address, handshake.server_port),
                 handshake.protocol_version as Protocol,
-                (&login_start.user_name,
-                &login_start.user_id,)
+                (&login_start.user_name, &login_start.user_id),
                 targets,
             ) => maybe_target?,
         };

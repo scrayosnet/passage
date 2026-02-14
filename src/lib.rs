@@ -11,8 +11,9 @@ use crate::adapter::localization::DynLocalizationAdapter;
 use crate::adapter::status::DynStatusAdapter;
 use crate::adapter::strategy::DynStrategyAdapter;
 use crate::config::Config;
-use passage_protocol::listener::Listener;
-use passage_protocol::localization::Localization;
+use passage_protocol::listener::{Listener, ParseConfig};
+use passage_protocol::rate_limiter::RateLimiter;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -31,12 +32,18 @@ use tracing::debug;
 pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // initialize the adapters
     debug!("building adapters");
-    let status = DynStatusAdapter::from_config(&config.status).await?;
-    let discovery = DynDiscoveryAdapter::from_config(&config.target_discovery).await?;
-    let filter = DynFilterAdapter::from_config(&config.target_strategy).await?;
-    let strategy = DynStrategyAdapter::from_config(&config.target_strategy).await?;
-    let authentication = DynAuthenticationAdapter::from_config(&config.target_strategy);
-    let localization = DynLocalizationAdapter::from_config(&config.target_strategy);
+    let status = DynStatusAdapter::from_config(config.adapters.status).await?;
+    let discovery = DynDiscoveryAdapter::from_config(config.adapters.discovery).await?;
+    let filter = DynFilterAdapter::from_configs(config.adapters.filter).await?;
+    let strategy = DynStrategyAdapter::from_config(config.adapters.strategy).await?;
+    let authentication =
+        DynAuthenticationAdapter::from_config(config.adapters.authentication).await?;
+    let localization = DynLocalizationAdapter::from_config(config.adapters.localization).await?;
+
+    // initialize the rate limiter
+    let rate_limiter = config.rate_limiter.map(|config| {
+        RateLimiter::<IpAddr>::new(Duration::from_secs(config.duration), config.size)
+    });
 
     // build stop signal
     let stop_token = CancellationToken::new();
@@ -63,9 +70,14 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(authentication),
         Arc::new(localization),
     )
-    .with_auth_secret_opt(auth_secret)
+    .with_rate_limiter(rate_limiter)
+    .with_auth_secret(auth_secret)
     .with_connection_timeout(timeout_duration)
-    .with_proxy_protocol(config.proxy_protocol.enabled);
+    .with_proxy_protocol(config.proxy_protocol.map(|config| ParseConfig {
+        include_tlvs: false,
+        allow_v1: config.allow_v1,
+        allow_v2: config.allow_v2,
+    }));
 
     debug!("starting listener");
     listener.listen(config.address, stop_token.clone()).await?;

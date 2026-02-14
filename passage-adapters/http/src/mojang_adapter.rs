@@ -37,10 +37,9 @@ impl AuthenticationAdapter for MojangAdapter {
         let hash = minecraft_hash(&self.server_id, shared_secret, encoded_public);
 
         // issue a request to Mojang's authentication endpoint
+        let username = user.0;
         let url = format!(
-            "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={}&serverId={}"
-            user.0,
-            hash,
+            "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}"
         );
         let profile = HTTP_CLIENT
             .get(&url)

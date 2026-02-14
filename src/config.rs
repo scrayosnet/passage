@@ -43,120 +43,91 @@
 use config::{
     ConfigError, Environment, File, FileFormat, FileStoredFormat, Format, Map, Value, ValueKind,
 };
+use passage_adapters::authentication::Profile;
 use passage_adapters::{Protocol, Target};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
-use tracing::warn;
 
-/// [Localization] holds all localizable messages of the application.
+/// [`Config`] holds all configuration for the application. I.g. one immutable instance is created
+/// on startup and then shared among the application components.
+///
+/// If both the grpc and rest server are disabled, the application will exit immediately after startup
+/// with status ok.
 #[derive(Debug, Clone, Deserialize)]
-pub struct Localization {
-    /// The locale to be used in case the client locale is unknown or unsupported.
-    #[serde(alias = "defaultlocale")]
-    pub default_locale: String,
+pub struct Config {
+    /// The sentry configuration (disabled if empty).
+    pub sentry: Option<Sentry>,
 
-    /// The localizable messages.
-    pub messages: HashMap<String, HashMap<String, String>>,
+    /// The OpenTelemetry configuration (disabled if empty).
+    #[serde(default, alias = "opentelemetry")]
+    pub otel: OpenTelemetry,
+
+    /// The rate limiter config (disabled if empty).
+    #[serde(alias = "ratelimiter")]
+    pub rate_limiter: Option<RateLimiter>,
+
+    /// The PROXY protocol config (disabled if empty).
+    #[serde(alias = "proxyprotocol")]
+    pub proxy_protocol: Option<ProxyProtocol>,
+
+    /// The network address that should be used to bind the HTTP server for connection requests.
+    pub address: SocketAddr,
+
+    /// The timeout in seconds that is used for connection timeouts.
+    pub timeout: u64,
+
+    /// The auth cookie secret, disabled if empty.
+    #[serde(alias = "authsecret")]
+    pub auth_secret: Option<String>,
+
+    /// The adapters configuration.
+    pub adapters: Adapters,
 }
 
-impl Localization {
-    #[must_use]
-    pub fn localize_default(&self, key: &str, params: &[(&'static str, String)]) -> String {
-        self.localize(&self.default_locale, key, params)
-    }
-
-    #[must_use]
-    pub fn localize(&self, locale: &str, key: &str, params: &[(&'static str, String)]) -> String {
-        let locales = [
-            locale,
-            &locale[..2],
-            &self.default_locale,
-            &self.default_locale[..2],
-        ];
-
-        let mut locale_messages = None;
-        for locale in &locales {
-            locale_messages = self.messages.get(*locale);
-            if locale_messages.is_some() {
-                break;
-            }
-        }
-
-        let Some(locale_messages) = locale_messages else {
-            warn!(locales = ?locales, "cannot find locales");
-            return key.to_string();
-        };
-
-        let Some(template) = locale_messages.get(key) else {
-            return key.to_string();
-        };
-
-        let mut message = template.clone();
-        for (param_key, param_val) in params {
-            message = message.replace(param_key, param_val);
-        }
-        message
-    }
-}
-
-impl Default for Localization {
-    fn default() -> Self {
-        Self {
-            default_locale: "en_US".to_string(),
-            messages: HashMap::new(),
-        }
-    }
-}
-
-/// [Sentry] hold the sentry configuration. The release is automatically inferred from cargo.
+/// [`Sentry`] hold the sentry configuration. The release is automatically inferred from cargo.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Sentry {
-    /// Whether sentry should be enabled.
-    pub enabled: bool,
-
     /// Whether sentry should have debug enabled.
     pub debug: bool,
 
-    /// The address of the sentry instance. This can either be the official sentry or a self-hosted instance.
-    /// The address has to bes event if sentry is disabled. In that case, the address can be any non-nil value.
-    pub address: String,
-
-    /// The environment of the application that should be communicated to sentry.
+    /// The sentry environment of the application.
     pub environment: String,
+
+    /// The address of the sentry instance. This can either be the official sentry or a self-hosted instance.
+    pub address: String,
 }
 
-/// [OpenTelemetry] hold the OpenTelemetry configuration. The release is automatically inferred from cargo.
-#[derive(Debug, Clone, Deserialize)]
+/// [`OpenTelemetry`] hold the OpenTelemetry configuration. The release is automatically inferred from cargo.
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct OpenTelemetry {
-    /// The environment of the application that should be communicated to sentry.
+    /// The OpenTelemetry environment of the application.
     pub environment: String,
 
-    /// The base64 basic auth token traces endpoint.
-    #[serde(alias = "tracestoken")]
-    pub traces_token: String,
+    /// The traces configuration (disabled if empty).
+    pub traces: Option<OpenTelemetryEndpoint>,
 
-    /// The address of the http/protobuf traces endpoint.
-    #[serde(alias = "tracesendpoint")]
-    pub traces_endpoint: String,
+    /// The traces configuration (disabled if empty).
+    pub metrics: Option<OpenTelemetryEndpoint>,
+}
 
-    /// The base64 basic auth token metrics endpoint.
-    #[serde(alias = "metricstoken")]
-    pub metrics_token: String,
+/// [`OpenTelemetryEndpoint`] hold the OpenTelemetry configuration for a specific endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OpenTelemetryEndpoint {
+    /// The address of the http/protobuf.
+    pub address: String,
 
-    /// The address of the http/protobuf metrics endpoint.
-    #[serde(alias = "metricsendpoint")]
-    pub metrics_endpoint: String,
+    /// The base64 basic auth token.
+    pub token: String,
 }
 
 /// [`RateLimiter`] hold the connection rate limiting configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RateLimiter {
-    /// Whether the rate limiter should be enabled.
-    pub enabled: bool,
     /// Duration in seconds.
     pub duration: u64,
+
     /// Maximum amount of connections per duration.
     pub size: usize,
 }
@@ -164,38 +135,78 @@ pub struct RateLimiter {
 /// [`ProxyProtocol`] hold the PROXY protocol configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProxyProtocol {
-    /// Whether PROXY protocol support should be enabled.
-    pub enabled: bool,
+    /// Whether to allow V1 headers
+    pub allow_v1: bool,
+
+    /// Whether to allow V2 headers
+    pub allow_v2: bool,
 }
 
-/// [`Status`] hold the status (ping) configuration.
+impl Default for ProxyProtocol {
+    fn default() -> Self {
+        Self {
+            allow_v1: true,
+            allow_v2: true,
+        }
+    }
+}
+
+/// [`Adapters`] holds the adapter configurations.
 #[derive(Debug, Clone, Deserialize)]
-pub struct Status {
-    /// Adapter to retrieve the results.
-    pub adapter: String,
+pub struct Adapters {
+    /// The status (ping) adapter configuration.
+    pub status: StatusAdapter,
 
-    /// The config for the fixed status.
-    pub fixed: Option<FixedStatus>,
+    /// The discovery adapter configuration.
+    pub discovery: DiscoveryAdapter,
 
-    /// The config for the grpc status.
-    pub grpc: Option<GrpcStatus>,
+    /// The filter adapter configuration.
+    pub filter: Vec<FilterAdapter>,
 
-    /// The config for the http status.
-    pub http: Option<HttpStatus>,
+    /// The strategy adapter configuration.
+    pub strategy: StrategyAdapter,
+
+    /// The authentication adapter configuration.
+    pub authentication: AuthenticationAdapter,
+
+    /// The localization adapter configuration.
+    pub localization: LocalizationAdapter,
+}
+
+/// [`StatusAdapter`] hold the status adapter configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StatusAdapter {
+    Fixed(FixedStatus),
+    Grpc(GrpcStatus),
+    Http(HttpStatus),
 }
 
 /// [`FixedStatus`] hold the fixed status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixedStatus {
+    /// The name of the server.
     pub name: String,
+
+    /// The description of the server.
     pub description: Option<String>,
+
+    /// The favicon of the server.
     pub favicon: Option<String>,
+
+    /// Whether the server requires secure chat.
     #[serde(alias = "enforcessecurechat")]
     pub enforces_secure_chat: Option<bool>,
+
+    /// The preferred protocol version of the server.
     #[serde(alias = "preferredversion")]
     pub preferred_version: Protocol,
+
+    /// The minimum protocol version supported by the server.
     #[serde(alias = "minversion")]
     pub min_version: Protocol,
+
+    /// The maximum protocol version supported by the server.
     #[serde(alias = "maxversion")]
     pub max_version: Protocol,
 }
@@ -218,80 +229,73 @@ pub struct HttpStatus {
     pub cache_duration: u64,
 }
 
-/// [`TargetDiscovery`] hold the target discovery configuration.
+/// [`DiscoveryAdapter`] hold the discovery adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
-pub struct TargetDiscovery {
-    /// Adapter to retrieve the results.
-    pub adapter: String,
-
-    /// The config for the fixed target discovery configuration.
-    pub fixed: Option<FixedTargetDiscovery>,
-
-    /// The config for the grpc target discovery configuration.
-    pub grpc: Option<GrpcTargetDiscovery>,
-
-    /// The config for the agones target discovery configuration.
-    pub agones: Option<AgonesTargetDiscovery>,
+#[serde(rename_all = "lowercase")]
+pub enum DiscoveryAdapter {
+    Fixed(FixedDiscovery),
+    Agones(AgonesDiscovery),
+    Grpc(GrpcDiscovery),
 }
 
-/// [`FixedTargetDiscovery`] hold the target discovery configuration for a fixed target.
+/// [`FixedDiscovery`] hold the fixed discovery configuration.
 #[derive(Debug, Clone, Deserialize)]
-pub struct FixedTargetDiscovery {
-    /// The targets that should be served.
+pub struct FixedDiscovery {
+    /// The targets that should be served by the discovery adapter.
     pub targets: Vec<Target>,
 }
 
-/// [`GrpcTargetDiscovery`] hold the gRPC target discovery configuration.
+/// [`AgonesDiscovery`] hold the agones discovery configuration.
 #[derive(Debug, Clone, Deserialize)]
-pub struct GrpcTargetDiscovery {
-    /// The address of the gRPC adapter server.
-    pub address: String,
-}
+pub struct AgonesDiscovery {
+    /// The namespace to apply to the watcher.
+    pub namespace: Option<String>,
 
-/// [`AgonesTargetDiscovery`] hold the agones target discovery configuration.
-#[derive(Debug, Clone, Deserialize)]
-pub struct AgonesTargetDiscovery {
-    /// The namespace to search for agones game servers.
-    pub namespace: String,
-    /// The labels to search for agones game servers.
-    #[serde(alias = "labelselector")]
+    /// The label selector to apply to the watcher.
     pub label_selector: Option<String>,
+
+    /// The field selector to apply to the watcher.
+    pub field_selector: Option<String>,
 }
 
-/// [`TargetStrategy`] hold the target strategy configuration.
+/// [`GrpcDiscovery`] hold the gRPC discovery configuration.
 #[derive(Debug, Clone, Deserialize)]
-pub struct TargetStrategy {
-    /// Adapter to retrieve the results.
-    pub adapter: String,
-
-    /// The config for the fixed target strategy.
-    pub fixed: Option<FixedTargetStrategy>,
-
-    /// The config for the grpc target strategy.
-    pub grpc: Option<GrpcTargetStrategy>,
-
-    /// The config for the player fill target strategy.
-    #[serde(alias = "playerfill")]
-    pub player_fill: Option<PlayerFillTargetStrategy>,
-}
-
-/// [`FixedTargetStrategy`] hold the fixed target strategy configuration.
-#[derive(Debug, Clone, Deserialize)]
-pub struct FixedTargetStrategy {
-    /// A placeholder such that the config may be set
-    pub placeholder: String,
-}
-
-/// [`GrpcTargetStrategy`] hold the gRPC target strategy configuration.
-#[derive(Debug, Clone, Deserialize)]
-pub struct GrpcTargetStrategy {
+pub struct GrpcDiscovery {
     /// The address of the gRPC adapter server.
     pub address: String,
 }
 
-/// [`PlayerFillTargetStrategy`] hold the player fill target strategy configuration.
+/// [`FilterAdapter`] hold the filter adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
-pub struct PlayerFillTargetStrategy {
+#[serde(rename_all = "lowercase")]
+pub enum FilterAdapter {
+    Fixed(FixedFilter),
+}
+
+/// [`FixedFilter`] hold the fixed filter configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FixedFilter {
+    // TODO add some logic here!
+}
+
+/// [`StrategyAdapter`] hold the strategy adapter configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StrategyAdapter {
+    Fixed(FixedStrategy),
+    PlayerFill(PlayerFillStrategy),
+    Grpc(GrpcStrategy),
+}
+
+/// [`FixedStrategy`] hold the fixed strategy configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FixedStrategy {
+    // TODO add some logic here!
+}
+
+/// [`FixedStrategy`] hold the fixed strategy configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlayerFillStrategy {
     /// The name of the field that stores the player amount.
     pub field: String,
 
@@ -300,50 +304,52 @@ pub struct PlayerFillTargetStrategy {
     pub max_players: u32,
 }
 
-/// [`Config`] holds all configuration for the application. I.g. one immutable instance is created
-/// on startup and then shared among the application components.
-///
-/// If both the grpc and rest server are disabled, the application will exit immediately after startup
-/// with status ok.
+/// [`GrpcStrategy`] hold the gRPC strategy configuration.
 #[derive(Debug, Clone, Deserialize)]
-pub struct Config {
-    /// The sentry configuration.
-    pub sentry: Sentry,
+pub struct GrpcStrategy {
+    /// The address of the gRPC adapter server.
+    pub address: String,
+}
 
-    /// The OpenTelemetry configuration.
-    pub otel: OpenTelemetry,
+/// [`AuthenticationAdapter`] hold the authentication adapter configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthenticationAdapter {
+    Fixed(FixedAuthentication),
+    Mojang(MojangAuthentication),
+}
 
-    /// The rate limiter config.
-    #[serde(alias = "ratelimiter")]
-    pub rate_limiter: RateLimiter,
+/// [`FixedAuthentication`] hold the fixed authentication configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FixedAuthentication {
+    /// The fixed profile that should be used for authentication.
+    pub profile: Profile,
+}
 
-    /// The PROXY protocol config.
-    #[serde(alias = "proxyprotocol")]
-    pub proxy_protocol: ProxyProtocol,
+/// [`MojangAuthentication`] hold the mojang authentication configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MojangAuthentication {
+    /// The server id passed to the Mojang authentication server.
+    #[serde(default, alias = "serverid")]
+    pub server_id: String,
+}
 
-    /// The network address that should be used to bind the HTTP server for connection requests.
-    pub address: SocketAddr,
+/// [`LocalizationAdapter`] hold the localization adapter configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LocalizationAdapter {
+    Fixed(FixedLocalization),
+}
 
-    /// The timeout in seconds that is used for connection timeouts.
-    pub timeout: u64,
+/// [`FixedLocalization`] hold the fixed localization configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FixedLocalization {
+    /// The locale to be used in case the client locale is unknown or unsupported.
+    #[serde(alias = "defaultlocale")]
+    pub default_locale: String,
 
-    /// The auth cookie secret, disabled if empty.
-    #[serde(alias = "authsecret")]
-    pub auth_secret: Option<String>,
-
-    /// The status (ping) configuration.
-    pub status: Status,
-
-    /// The target discovery configuration.
-    #[serde(alias = "targetdiscovery")]
-    pub target_discovery: TargetDiscovery,
-
-    /// The target strategy configuration.
-    #[serde(alias = "targetstrategy")]
-    pub target_strategy: TargetStrategy,
-
-    /// The localization configuration.
-    pub localization: Localization,
+    /// The localizable messages.
+    pub messages: HashMap<String, HashMap<String, String>>,
 }
 
 impl Config {

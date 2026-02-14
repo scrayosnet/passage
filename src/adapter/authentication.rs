@@ -55,27 +55,20 @@ impl AuthenticationAdapter for DynAuthenticationAdapter {
 
 impl DynAuthenticationAdapter {
     pub async fn from_config(
-        config: &config::TargetStrategy,
+        config: config::AuthenticationAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        match config.adapter.as_str() {
-            "fixed" => {
-                let Some(config) = config.fixed.clone() else {
-                    return Err("fixed strategy adapter requires a configuration".into());
-                };
-                // TODO get profile from config
-                let adapter = FixedAuthenticationAdapter::new();
+        #[allow(unreachable_patterns)]
+        match config {
+            config::AuthenticationAdapter::Fixed(config) => {
+                let adapter = FixedAuthenticationAdapter::new(config.profile);
                 Ok(DynAuthenticationAdapter::Fixed(adapter))
             }
             #[cfg(feature = "adapters-http")]
-            "mojang" => {
-                let Some(config) = config.fixed.clone() else {
-                    return Err("fixed strategy adapter requires a configuration".into());
-                };
-                // TODO get server id from config
-                let adapter = MojangAdapter::default().with_server_id("".to_string());
+            config::AuthenticationAdapter::Mojang(config) => {
+                let adapter = MojangAdapter::default().with_server_id(config.server_id);
                 Ok(DynAuthenticationAdapter::Mojang(adapter))
             }
-            _ => Err("unknown filter adapter configured".into()),
+            _ => Err("unknown authentication adapter configured".into()),
         }
     }
 }

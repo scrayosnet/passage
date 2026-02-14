@@ -28,7 +28,7 @@ impl Debug for AgonesDiscoveryAdapter {
 }
 
 impl AgonesDiscoveryAdapter {
-    pub async fn new(namespace: Option<&str>, watch_config: Config) -> Result<Self, Error> {
+    pub async fn new(namespace: Option<String>, watch_config: Config) -> Result<Self, Error> {
         let inner: Arc<RwLock<Vec<Target>>> = Arc::new(RwLock::new(Vec::new()));
         let token = CancellationToken::new();
 
@@ -40,7 +40,7 @@ impl AgonesDiscoveryAdapter {
                 cause: err.into(),
             })?;
         let servers: Api<GameServer> = if let Some(namespace) = namespace {
-            Api::namespaced(client.clone(), namespace)
+            Api::namespaced(client.clone(), &namespace)
         } else {
             Api::all(client.clone())
         };

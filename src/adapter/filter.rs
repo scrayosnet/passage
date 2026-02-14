@@ -30,17 +30,25 @@ impl FilterAdapter for DynFilterAdapter {
 
 impl DynFilterAdapter {
     pub async fn from_config(
-        config: &config::TargetStrategy,
+        config: config::FilterAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        match config.adapter.as_str() {
-            "fixed" => {
-                let Some(config) = config.fixed.clone() else {
-                    return Err("fixed strategy adapter requires a configuration".into());
-                };
+        #[allow(unreachable_patterns)]
+        match config {
+            config::FilterAdapter::Fixed(_config) => {
                 let adapter = FixedFilterAdapter::new();
                 Ok(DynFilterAdapter::Fixed(adapter))
             }
             _ => Err("unknown filter adapter configured".into()),
         }
+    }
+
+    pub async fn from_configs(
+        configs: Vec<config::FilterAdapter>,
+    ) -> Result<Vec<Self>, Box<dyn std::error::Error>> {
+        let mut filters = Vec::with_capacity(configs.len());
+        for config in configs {
+            filters.push(Self::from_config(config).await?);
+        }
+        Ok(filters)
     }
 }

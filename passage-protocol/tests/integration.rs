@@ -1,5 +1,9 @@
+use passage_adapters::authentication::Profile;
 use passage_adapters::discovery::DiscoveryAdapter;
-use passage_adapters::{FixedDiscoveryAdapter, FixedStatusAdapter, FixedStrategyAdapter, Target};
+use passage_adapters::{
+    FixedAuthenticationAdapter, FixedDiscoveryAdapter, FixedFilterAdapter,
+    FixedLocalizationAdapter, FixedStatusAdapter, FixedStrategyAdapter, Target,
+};
 use passage_packets::configuration::clientbound as conf_out;
 use passage_packets::configuration::serverbound as conf_in;
 use passage_packets::handshake::serverbound as hand_in;
@@ -17,8 +21,6 @@ use passage_protocol::cookie::{
     AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign,
 };
 use passage_protocol::crypto::stream::CipherStream;
-use passage_protocol::localization::Localization;
-use passage_protocol::mojang::{Mojang, Profile};
 use proxy_header::ParseConfig;
 use proxy_header::io::ProxiedStream;
 use rand::rngs::SysRng;
@@ -31,29 +33,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use uuid::uuid;
-
-#[derive(Default)]
-struct MojangMock {
-    pub response: Profile,
-}
-
-impl MojangMock {
-    pub fn new(response: Profile) -> Self {
-        Self { response }
-    }
-}
-
-impl Mojang for MojangMock {
-    async fn authenticate(
-        &self,
-        _username: &str,
-        _shared_secret: &[u8],
-        _server_id: &str,
-        _encoded_public: &[u8],
-    ) -> Result<Profile, reqwest::Error> {
-        Ok(self.response.clone())
-    }
-}
 
 pub fn encrypt(key: &RsaPublicKey, value: &[u8]) -> Vec<u8> {
     key.encrypt(&mut UnwrapErr(SysRng), Pkcs1v15Encrypt, value)
@@ -87,20 +66,22 @@ async fn simulate_handshake() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::new(None, 0, 0, 0));
+    let status_adapter = Arc::new(FixedStatusAdapter::default());
     let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
     let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
-    let mojang = Arc::new(MojangMock::default());
-    let localization = Arc::new(Localization::default());
+    let filter_adapter = Arc::new(FixedFilterAdapter::new());
+    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
+    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
 
     // build connection
     let mut server = Connection::new(
         server_stream,
         status_adapter,
         discovery_adapter,
+        filter_adapter,
         strategy_adapter,
-        mojang,
-        localization,
+        authentication_adapter,
+        localization_adapter,
         None,
         client_address,
     );
@@ -139,20 +120,22 @@ async fn simulate_status() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::new(None, 0, 0, 0));
+    let status_adapter = Arc::new(FixedStatusAdapter::default());
     let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
     let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
-    let mojang = Arc::new(MojangMock::default());
-    let localization = Arc::new(Localization::default());
+    let filter_adapter = Arc::new(FixedFilterAdapter::new());
+    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
+    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
 
     // build connection
     let mut server = Connection::new(
         server_stream,
         status_adapter,
         discovery_adapter,
+        filter_adapter,
         strategy_adapter,
-        mojang,
-        localization,
+        authentication_adapter,
+        localization_adapter,
         None,
         client_address,
     );
@@ -211,20 +194,22 @@ async fn simulate_transfer_no_configuration() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::new(None, 0, 0, 0));
+    let status_adapter = Arc::new(FixedStatusAdapter::default());
     let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
     let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
-    let mojang = Arc::new(MojangMock::default());
-    let localization = Arc::new(Localization::default());
+    let filter_adapter = Arc::new(FixedFilterAdapter::new());
+    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
+    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
 
     // build connection
     let mut server = Connection::new(
         server_stream,
         status_adapter,
         discovery_adapter,
+        filter_adapter,
         strategy_adapter,
-        mojang,
-        localization,
+        authentication_adapter,
+        localization_adapter,
         Some(auth_secret.clone()),
         client_address,
     );
@@ -377,20 +362,22 @@ async fn simulate_slow_transfer_no_configuration() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::new(None, 0, 0, 0));
+    let status_adapter = Arc::new(FixedStatusAdapter::default());
     let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
     let discovery_adapter = Arc::new(SlowDiscoveryAdapter::new(2 * KEEP_ALIVE_INTERVAL + 1));
-    let mojang = Arc::new(MojangMock::default());
-    let localization = Arc::new(Localization::default());
+    let filter_adapter = Arc::new(FixedFilterAdapter::new());
+    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
+    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
 
     // build connection
     let mut server = Connection::new(
         server_stream,
         status_adapter,
         discovery_adapter,
+        filter_adapter,
         strategy_adapter,
-        mojang,
-        localization,
+        authentication_adapter,
+        localization_adapter,
         Some(auth_secret.clone()),
         client_address,
     );
@@ -553,31 +540,34 @@ async fn simulate_login_no_configuration() {
     let shared_secret = b"verysecuresecret";
     let user_name = "Hydrofin".to_owned();
     let user_id = uuid!("09879557-e479-45a9-b434-a56377674627");
+    let profile = Profile {
+        id: user_id,
+        name: user_name.clone(),
+        properties: vec![],
+        profile_actions: vec![],
+    };
 
     // create stream
     let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::new(None, 0, 0, 0));
+    let status_adapter = Arc::new(FixedStatusAdapter::default());
     let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
     let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
-    let mojang = Arc::new(MojangMock::new(Profile {
-        id: user_id,
-        name: user_name.clone(),
-        properties: vec![],
-        profile_actions: vec![],
-    }));
-    let localization = Arc::new(Localization::default());
+    let filter_adapter = Arc::new(FixedFilterAdapter::new());
+    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::new(profile));
+    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
 
     // build connection
     let mut server = Connection::new(
         server_stream,
         status_adapter,
         discovery_adapter,
+        filter_adapter,
         strategy_adapter,
-        mojang,
-        localization,
+        authentication_adapter,
+        localization_adapter,
         None,
         client_address,
     );
@@ -701,20 +691,22 @@ async fn sends_keep_alive() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::new(None, 0, 0, 0));
+    let status_adapter = Arc::new(FixedStatusAdapter::default());
     let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
     let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
-    let mojang = Arc::new(MojangMock::default());
-    let localization = Arc::new(Localization::default());
+    let filter_adapter = Arc::new(FixedFilterAdapter::new());
+    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
+    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
 
     // build connection
     let mut server = Connection::new(
         server_stream,
         status_adapter,
         discovery_adapter,
+        filter_adapter,
         strategy_adapter,
-        mojang,
-        localization,
+        authentication_adapter,
+        localization_adapter,
         Some(auth_secret.clone()),
         client_address,
     );
@@ -873,20 +865,22 @@ async fn no_respond_keep_alive() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::new(None, 0, 0, 0));
+    let status_adapter = Arc::new(FixedStatusAdapter::default());
     let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
     let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
-    let mojang = Arc::new(MojangMock::default());
-    let localization = Arc::new(Localization::default());
+    let filter_adapter = Arc::new(FixedFilterAdapter::new());
+    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
+    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
 
     // build connection
     let mut server = Connection::new(
         server_stream,
         status_adapter,
         discovery_adapter,
+        filter_adapter,
         strategy_adapter,
-        mojang,
-        localization,
+        authentication_adapter,
+        localization_adapter,
         Some(auth_secret.clone()),
         client_address,
     );

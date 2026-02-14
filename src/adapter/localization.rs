@@ -22,15 +22,12 @@ impl LocalizationAdapter for DynLocalizationAdapter {
 
 impl DynLocalizationAdapter {
     pub async fn from_config(
-        config: &config::TargetStrategy,
+        config: config::LocalizationAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        match config.adapter.as_str() {
-            "fixed" => {
-                let Some(config) = config.fixed.clone() else {
-                    return Err("fixed strategy adapter requires a configuration".into());
-                };
-                // TODO get profile from config
-                let adapter = FixedLocalizationAdapter::new();
+        #[allow(unreachable_patterns)]
+        match config {
+            config::LocalizationAdapter::Fixed(config) => {
+                let adapter = FixedLocalizationAdapter::new(config.default_locale, config.messages);
                 Ok(DynLocalizationAdapter::Fixed(adapter))
             }
             _ => Err("unknown localization adapter configured".into()),

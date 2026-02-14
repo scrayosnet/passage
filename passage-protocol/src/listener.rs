@@ -7,7 +7,7 @@ use passage_adapters::filter::FilterAdapter;
 use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::status::StatusAdapter;
 use passage_adapters::strategy::StrategyAdapter;
-use proxy_header::ParseConfig;
+pub use proxy_header::ParseConfig;
 use proxy_header::io::ProxiedStream;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -33,7 +33,7 @@ pub struct Listener<Stat, Disc, Filt, Stra, Auth, Loca> {
     localization_adapter: Arc<Loca>,
     tracker: TaskTracker,
     rate_limiter: Option<RateLimiter<IpAddr>>,
-    use_proxy_protocol: bool,
+    proxy_protocol: Option<ParseConfig>,
     connection_timeout: Duration,
     auth_secret: Option<Vec<u8>>,
 }
@@ -64,19 +64,19 @@ where
             localization_adapter,
             tracker: TaskTracker::new(),
             rate_limiter: None,
-            use_proxy_protocol: false,
+            proxy_protocol: None,
             connection_timeout: DEFAULT_CONNECTION_TIMEOUT,
             auth_secret: None,
         }
     }
 
-    pub fn with_rate_limiter(mut self, rate_limiter: RateLimiter<IpAddr>) -> Self {
-        self.rate_limiter = Some(rate_limiter);
+    pub fn with_rate_limiter(mut self, rate_limiter: Option<RateLimiter<IpAddr>>) -> Self {
+        self.rate_limiter = rate_limiter;
         self
     }
 
-    pub fn with_proxy_protocol(mut self, use_proxy_protocol: bool) -> Self {
-        self.use_proxy_protocol = use_proxy_protocol;
+    pub fn with_proxy_protocol(mut self, proxy_protocol: Option<ParseConfig>) -> Self {
+        self.proxy_protocol = proxy_protocol;
         self
     }
 
@@ -85,12 +85,7 @@ where
         self
     }
 
-    pub fn with_auth_secret(mut self, auth_secret: Vec<u8>) -> Self {
-        self.auth_secret = Some(auth_secret);
-        self
-    }
-
-    pub fn with_auth_secret_opt(mut self, auth_secret: Option<Vec<u8>>) -> Self {
+    pub fn with_auth_secret(mut self, auth_secret: Option<Vec<u8>>) -> Self {
         self.auth_secret = auth_secret;
         self
     }
@@ -101,7 +96,7 @@ where
         address: A,
         stop: CancellationToken,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        info!(proxy = self.use_proxy_protocol, "starting listener");
+        info!(proxy = self.proxy_protocol.is_some(), "starting listener");
         let listener = TcpListener::bind(address).await?;
         loop {
             // accept the next incoming connection
@@ -130,15 +125,7 @@ where
     async fn handle(&mut self, stream: TcpStream, addr: SocketAddr, trace_id: Uuid) {
         let connection_start = Instant::now();
 
-        // handle proxy protocol
-        let proxy_config = ParseConfig {
-            // not required for our use case
-            include_tlvs: false,
-            allow_v1: true,
-            allow_v2: true,
-        };
-
-        let (mut stream, client_addr) = if self.use_proxy_protocol {
+        let (mut stream, client_addr) = if let Some(proxy_config) = self.proxy_protocol {
             match ProxiedStream::create_from_tokio(stream, proxy_config).await {
                 Ok(stream) => {
                     let client_addr = stream

@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use tracing::trace;
 use uuid::Uuid;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct FixedAuthenticationAdapter {
     profile: Profile,
 }
