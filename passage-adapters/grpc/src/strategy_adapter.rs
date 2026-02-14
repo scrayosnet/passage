@@ -42,8 +42,7 @@ impl StrategyAdapter for GrpcStrategyAdapter {
         client_addr: &SocketAddr,
         server_addr: (&str, u16),
         protocol: Protocol,
-        username: &str,
-        user_id: &Uuid,
+        user: (&str, &Uuid),
         targets: Vec<Target>,
     ) -> Result<Option<Target>, Error> {
         let request = tonic::Request::new(SelectRequest {
@@ -56,8 +55,8 @@ impl StrategyAdapter for GrpcStrategyAdapter {
                 port: u32::from(server_addr.1),
             }),
             protocol: protocol as u64,
-            username: username.to_string(),
-            user_id: user_id.to_string(),
+            username: user.0.to_string(),
+            user_id: user.1.to_string(),
             targets: targets.iter().map(Into::into).collect(),
         });
         let response = self

@@ -1,12 +1,13 @@
 use crate::connection::{Connection, Error};
-use crate::localization::Localization;
 use crate::metrics;
-use crate::mojang::Mojang;
 use crate::rate_limiter::RateLimiter;
+use passage_adapters::authentication::AuthenticationAdapter;
 use passage_adapters::discovery::DiscoveryAdapter;
+use passage_adapters::filter::FilterAdapter;
+use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::status::StatusAdapter;
 use passage_adapters::strategy::StrategyAdapter;
-use proxy_header::ParseConfig;
+pub use proxy_header::ParseConfig;
 use proxy_header::io::ProxiedStream;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -23,54 +24,59 @@ use uuid::Uuid;
 const DEFAULT_CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
 // the server listener
-pub struct Listener<Disc, Stat, Stra, Api> {
+pub struct Listener<Stat, Disc, Filt, Stra, Auth, Loca> {
     status_adapter: Arc<Stat>,
     discovery_adapter: Arc<Disc>,
+    filter_adapter: Arc<Filt>,
     strategy_adapter: Arc<Stra>,
-    mojang: Arc<Api>,
-    localization: Arc<Localization>,
+    authentication_adapter: Arc<Auth>,
+    localization_adapter: Arc<Loca>,
     tracker: TaskTracker,
     rate_limiter: Option<RateLimiter<IpAddr>>,
-    use_proxy_protocol: bool,
+    proxy_protocol: Option<ParseConfig>,
     connection_timeout: Duration,
     auth_secret: Option<Vec<u8>>,
 }
 
-impl<Disc, Stat, Stra, Api> Listener<Disc, Stat, Stra, Api>
+impl<Stat, Disc, Filt, Stra, Auth, Loca> Listener<Stat, Disc, Filt, Stra, Auth, Loca>
 where
-    Disc: DiscoveryAdapter + 'static,
     Stat: StatusAdapter + 'static,
+    Disc: DiscoveryAdapter + 'static,
+    Filt: FilterAdapter + 'static,
     Stra: StrategyAdapter + 'static,
-    Api: Mojang + 'static,
+    Auth: AuthenticationAdapter + 'static,
+    Loca: LocalizationAdapter + 'static,
 {
     pub fn new(
         status_adapter: Arc<Stat>,
         discovery_adapter: Arc<Disc>,
+        filter_adapter: Arc<Filt>,
         strategy_adapter: Arc<Stra>,
-        mojang: Arc<Api>,
-        localization: Arc<Localization>,
+        authentication_adapter: Arc<Auth>,
+        localization_adapter: Arc<Loca>,
     ) -> Self {
         Self {
-            discovery_adapter,
             status_adapter,
+            discovery_adapter,
+            filter_adapter,
             strategy_adapter,
-            mojang,
-            localization,
+            authentication_adapter,
+            localization_adapter,
             tracker: TaskTracker::new(),
             rate_limiter: None,
-            use_proxy_protocol: false,
+            proxy_protocol: None,
             connection_timeout: DEFAULT_CONNECTION_TIMEOUT,
             auth_secret: None,
         }
     }
 
-    pub fn with_rate_limiter(mut self, rate_limiter: RateLimiter<IpAddr>) -> Self {
-        self.rate_limiter = Some(rate_limiter);
+    pub fn with_rate_limiter(mut self, rate_limiter: Option<RateLimiter<IpAddr>>) -> Self {
+        self.rate_limiter = rate_limiter;
         self
     }
 
-    pub fn with_proxy_protocol(mut self, use_proxy_protocol: bool) -> Self {
-        self.use_proxy_protocol = use_proxy_protocol;
+    pub fn with_proxy_protocol(mut self, proxy_protocol: Option<ParseConfig>) -> Self {
+        self.proxy_protocol = proxy_protocol;
         self
     }
 
@@ -79,12 +85,7 @@ where
         self
     }
 
-    pub fn with_auth_secret(mut self, auth_secret: Vec<u8>) -> Self {
-        self.auth_secret = Some(auth_secret);
-        self
-    }
-
-    pub fn with_auth_secret_opt(mut self, auth_secret: Option<Vec<u8>>) -> Self {
+    pub fn with_auth_secret(mut self, auth_secret: Option<Vec<u8>>) -> Self {
         self.auth_secret = auth_secret;
         self
     }
@@ -95,7 +96,7 @@ where
         address: A,
         stop: CancellationToken,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        info!(proxy = self.use_proxy_protocol, "starting listener");
+        info!(proxy = self.proxy_protocol.is_some(), "starting listener");
         let listener = TcpListener::bind(address).await?;
         loop {
             // accept the next incoming connection
@@ -124,15 +125,7 @@ where
     async fn handle(&mut self, stream: TcpStream, addr: SocketAddr, trace_id: Uuid) {
         let connection_start = Instant::now();
 
-        // handle proxy protocol
-        let proxy_config = ParseConfig {
-            // not required for our use case
-            include_tlvs: false,
-            allow_v1: true,
-            allow_v2: true,
-        };
-
-        let (mut stream, client_addr) = if self.use_proxy_protocol {
+        let (mut stream, client_addr) = if let Some(proxy_config) = self.proxy_protocol {
             match ProxiedStream::create_from_tokio(stream, proxy_config).await {
                 Ok(stream) => {
                     let client_addr = stream
@@ -172,9 +165,10 @@ where
         let connection_timeout = self.connection_timeout;
         let status_adapter = self.status_adapter.clone();
         let discovery_adapter = self.discovery_adapter.clone();
+        let filter_adapter = self.filter_adapter.clone();
         let strategy_adapter = self.strategy_adapter.clone();
-        let mojang = self.mojang.clone();
-        let localization = self.localization.clone();
+        let authentication_adapter = self.authentication_adapter.clone();
+        let localization_adapter = self.localization_adapter.clone();
         let auth_secret = self.auth_secret.clone();
 
         // create a new connection and run protocol
@@ -184,12 +178,13 @@ where
                 &mut stream,
                 status_adapter,
                 discovery_adapter,
+                filter_adapter,
                 strategy_adapter,
-                mojang,
-                localization,
-                auth_secret,
-                client_addr,
-            );
+                authentication_adapter,
+                localization_adapter,
+            )
+            .with_client_address(client_addr)
+            .with_auth_secret(auth_secret);
 
             // handle the client connection (ignore connection closed by the client)
             let timeout = timeout(connection_timeout, connection.listen()).await;

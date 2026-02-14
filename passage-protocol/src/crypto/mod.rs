@@ -2,15 +2,12 @@ pub mod error;
 pub mod stream;
 
 pub(crate) use crate::crypto::error::Error;
-use num_bigint::BigInt;
 use passage_packets::VerifyToken;
 use rand::TryRng;
 use rand::rand_core::UnwrapErr;
 use rand::rngs::SysRng;
 use rsa::pkcs8::EncodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
-use sha1::Sha1;
-use sha2::Digest;
 use std::sync::LazyLock;
 use tokio::time::Instant;
 
@@ -80,26 +77,10 @@ pub fn verify_token(expected: VerifyToken, actual: &[u8]) -> bool {
     expected == actual
 }
 
-/// Creates hash for the Minecraft protocol.
-#[must_use]
-pub fn minecraft_hash(server_id: &str, shared_secret: &[u8], encoded_public: &[u8]) -> String {
-    // create a new hasher instance
-    let mut hasher = Sha1::new();
-
-    // server id
-    hasher.update(server_id);
-    // shared secret
-    hasher.update(shared_secret);
-    // encoded public key
-    hasher.update(encoded_public);
-
-    // take the digest and convert it to Minecraft's format
-    BigInt::from_signed_bytes_be(&hasher.finalize()).to_str_radix(16)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use passage_adapters::authentication::minecraft_hash;
     use std::time::Duration;
 
     #[test]

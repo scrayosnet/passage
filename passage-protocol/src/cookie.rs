@@ -1,5 +1,5 @@
-use crate::mojang::ProfileProperty;
 use hmac::{Hmac, Mac};
+use passage_adapters::authentication::ProfileProperty;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::HashMap;

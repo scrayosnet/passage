@@ -24,4 +24,5 @@ tokio = { workspace = true, features = ["sync", "macros"] }
 tokio-util = { workspace = true, features = ["rt"] }
 
 reqwest = { workspace = true, features = ["json"] }
+uuid = { workspace = true, features = ["v4"] }
 

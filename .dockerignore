@@ -3,7 +3,6 @@
 !Cargo.lock
 !build.rs
 !src
-!config/default.toml
 !passage-adapters/
 !passage-adapters/agones
 !passage-adapters/grpc

@@ -1,18 +1,19 @@
 #![deny(clippy::all)]
 #![forbid(unsafe_code)]
 
+pub mod adapter;
 pub mod config;
-pub mod discovery_adapter;
-pub mod status_adapter;
-pub mod strategy_adapter;
 
+use crate::adapter::authentication::DynAuthenticationAdapter;
+use crate::adapter::discovery::DynDiscoveryAdapter;
+use crate::adapter::filter::DynFilterAdapter;
+use crate::adapter::localization::DynLocalizationAdapter;
+use crate::adapter::status::DynStatusAdapter;
+use crate::adapter::strategy::DynStrategyAdapter;
 use crate::config::Config;
-use crate::discovery_adapter::DynDiscoveryAdapter;
-use crate::status_adapter::DynStatusAdapter;
-use crate::strategy_adapter::DynStrategyAdapter;
-use passage_protocol::listener::Listener;
-use passage_protocol::localization::Localization;
-use passage_protocol::mojang::Api;
+use passage_protocol::listener::{Listener, ParseConfig};
+use passage_protocol::rate_limiter::RateLimiter;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -31,15 +32,17 @@ use tracing::debug;
 pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // initialize the adapters
     debug!("building adapters");
-    let status_adapter = Arc::new(DynStatusAdapter::from_config(&config.status).await?);
-    let discovery_adapter =
-        Arc::new(DynDiscoveryAdapter::from_config(&config.target_discovery).await?);
-    let strategy_adapter =
-        Arc::new(DynStrategyAdapter::from_config(&config.target_strategy).await?);
-    let mojang = Arc::new(Api::default());
-    let localization = Arc::new(Localization {
-        default_locale: config.localization.default_locale,
-        messages: config.localization.messages,
+    let status = DynStatusAdapter::from_config(config.adapters.status).await?;
+    let discovery = DynDiscoveryAdapter::from_config(config.adapters.discovery).await?;
+    let filter = DynFilterAdapter::from_configs(config.adapters.filter).await?;
+    let strategy = DynStrategyAdapter::from_config(config.adapters.strategy).await?;
+    let authentication =
+        DynAuthenticationAdapter::from_config(config.adapters.authentication).await?;
+    let localization = DynLocalizationAdapter::from_config(config.adapters.localization).await?;
+
+    // initialize the rate limiter
+    let rate_limiter = config.rate_limiter.map(|config| {
+        RateLimiter::<IpAddr>::new(Duration::from_secs(config.duration), config.limit)
     });
 
     // build stop signal
@@ -60,15 +63,21 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // build and start the listener
     debug!("building listener");
     let mut listener = Listener::new(
-        status_adapter,
-        discovery_adapter,
-        strategy_adapter,
-        mojang,
-        localization,
+        Arc::new(status),
+        Arc::new(discovery),
+        Arc::new(filter),
+        Arc::new(strategy),
+        Arc::new(authentication),
+        Arc::new(localization),
     )
-    .with_auth_secret_opt(auth_secret)
+    .with_rate_limiter(rate_limiter)
+    .with_auth_secret(auth_secret)
     .with_connection_timeout(timeout_duration)
-    .with_proxy_protocol(config.proxy_protocol.enabled);
+    .with_proxy_protocol(config.proxy_protocol.map(|config| ParseConfig {
+        include_tlvs: false,
+        allow_v1: config.allow_v1,
+        allow_v2: config.allow_v2,
+    }));
 
     debug!("starting listener");
     listener.listen(config.address, stop_token.clone()).await?;

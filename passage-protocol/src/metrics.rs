@@ -155,7 +155,7 @@ pub(crate) mod client_view_distance {
     }
 }
 
-pub(crate) mod mojang_request_duration {
+pub(crate) mod authentication_request_duration {
     use crate::metrics::{METER, exponential_buckets};
     use opentelemetry::KeyValue;
     use opentelemetry::metrics::Histogram;
@@ -164,8 +164,8 @@ pub(crate) mod mojang_request_duration {
 
     static INSTRUMENT: LazyLock<Histogram<u64>> = LazyLock::new(|| {
         METER
-            .u64_histogram("mojang_request_duration")
-            .with_description("The time a mojang request took to complete")
+            .u64_histogram("authentication_request_duration")
+            .with_description("The time a authentication request took to complete")
             .with_unit("seconds")
             .with_boundaries(exponential_buckets(0.1, 2.0, 10))
             .build()

@@ -11,7 +11,7 @@ use opentelemetry_semantic_conventions::{
     SCHEMA_URL,
     attribute::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_VERSION},
 };
-use passage::config::{Config, OpenTelemetry};
+use passage::config::Config;
 use std::borrow::Cow::Owned;
 use std::collections::HashMap;
 use std::env;
@@ -22,14 +22,14 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
 
 // Create a Resource that captures information about the entity for which telemetry is recorded.
-fn resource(config: &OpenTelemetry) -> Resource {
+fn resource(environment: &str) -> Resource {
     Resource::builder()
         .with_service_name(env!("CARGO_PKG_NAME"))
         .with_schema_url(
             [
                 KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
                 KeyValue::new(SERVICE_NAMESPACE, "scrayosnet"),
-                KeyValue::new(DEPLOYMENT_ENVIRONMENT_NAME, config.environment.to_string()),
+                KeyValue::new(DEPLOYMENT_ENVIRONMENT_NAME, environment.to_string()),
             ],
             SCHEMA_URL,
         )
@@ -42,58 +42,67 @@ fn resource(config: &OpenTelemetry) -> Resource {
 /// thin-wrapper around the passage crate that supplies the necessary settings.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // parse the arguments and configuration
-    let config = Config::new()?;
+    let config = Config::read()?;
 
     // initialize sentry
     #[cfg(feature = "sentry")]
-    let sentry_instance = sentry::init((
-        config
-            .sentry
-            .enabled
-            .then_some(config.sentry.address.clone()),
-        sentry::ClientOptions {
-            debug: config.sentry.debug,
-            release: sentry::release_name!(),
-            environment: Some(Owned(config.sentry.environment.clone())),
-            ..sentry::ClientOptions::default()
-        },
-    ));
+    let sentry_instance = config.sentry.as_ref().map(|config| {
+        sentry::init((
+            config.address.clone(),
+            sentry::ClientOptions {
+                debug: config.debug,
+                release: sentry::release_name!(),
+                environment: Some(Owned(config.environment.to_string())),
+                ..sentry::ClientOptions::default()
+            },
+        ))
+    });
 
     // build future to execute
     let runner = async {
         // initialize opentelemetry meter (metrics)
-        let metrics_headers = HashMap::from_iter([(
-            "authorization".to_string(),
-            format!("Basic {}", config.otel.metrics_token),
-        )]);
-        let meter_exporter = MetricExporter::builder()
-            .with_http()
-            .with_protocol(Protocol::HttpBinary)
-            .with_endpoint(&config.otel.metrics_endpoint)
-            .with_headers(metrics_headers.clone())
-            .build()?;
-        let meter_provider = MeterProviderBuilder::default()
-            .with_periodic_exporter(meter_exporter)
-            .with_resource(resource(&config.otel))
-            .build();
-        global::set_meter_provider(meter_provider.clone());
+        let meter_provider = if let Some(meter_config) = &config.otel.metrics {
+            let meter_headers = HashMap::from_iter([(
+                "authorization".to_string(),
+                format!("Basic {}", meter_config.token),
+            )]);
+            let meter_exporter = MetricExporter::builder()
+                .with_http()
+                .with_protocol(Protocol::HttpBinary)
+                .with_endpoint(&meter_config.address)
+                .with_headers(meter_headers.clone())
+                .build()?;
+            let meter_provider = MeterProviderBuilder::default()
+                .with_periodic_exporter(meter_exporter)
+                .with_resource(resource(&config.otel.environment))
+                .build();
+            global::set_meter_provider(meter_provider.clone());
+            Some(meter_provider)
+        } else {
+            None
+        };
 
         // initialize opentelemetry tracer (spans)
-        let traces_headers = HashMap::from_iter([(
-            "authorization".to_string(),
-            format!("Basic {}", config.otel.traces_token),
-        )]);
-        let tracer_exporter = SpanExporter::builder()
-            .with_http()
-            .with_protocol(Protocol::HttpBinary)
-            .with_endpoint(&config.otel.traces_endpoint)
-            .with_headers(traces_headers.clone())
-            .build()?;
-        let tracer_provider = SdkTracerProvider::builder()
-            .with_batch_exporter(tracer_exporter)
-            .with_resource(resource(&config.otel))
-            .build();
-        global::set_tracer_provider(tracer_provider.clone());
+        let tracer_provider = if let Some(tracer_config) = &config.otel.metrics {
+            let traces_headers = HashMap::from_iter([(
+                "authorization".to_string(),
+                format!("Basic {}", tracer_config.token),
+            )]);
+            let tracer_exporter = SpanExporter::builder()
+                .with_http()
+                .with_protocol(Protocol::HttpBinary)
+                .with_endpoint(&tracer_config.address)
+                .with_headers(traces_headers.clone())
+                .build()?;
+            let tracer_provider = SdkTracerProvider::builder()
+                .with_batch_exporter(tracer_exporter)
+                .with_resource(resource(&config.otel.environment))
+                .build();
+            global::set_tracer_provider(tracer_provider.clone());
+            Some(tracer_provider)
+        } else {
+            None
+        };
 
         // initialize logging
         let subscriber = tracing_subscriber::registry()
@@ -104,8 +113,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .from_env_lossy(),
                 ),
             )
-            .with(MetricsLayer::new(meter_provider.clone()))
-            .with(OpenTelemetryLayer::new(tracer_provider.tracer("passage")));
+            // add optional layers
+            .with(
+                meter_provider
+                    .as_ref()
+                    .map(|provider| MetricsLayer::new(provider.clone())),
+            )
+            .with(
+                tracer_provider
+                    .as_ref()
+                    .map(|provider| OpenTelemetryLayer::new(provider.tracer("passage"))),
+            );
 
         #[cfg(feature = "sentry")]
         let subscriber = subscriber.with(sentry_tracing::layer());
@@ -118,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         #[cfg(feature = "sentry")]
-        if sentry_instance.is_enabled() {
+        if sentry_instance.is_some() {
             info!("sentry is enabled");
         } else {
             info!("sentry is disabled");
@@ -134,10 +152,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let result = passage::start(config).await;
 
         // shutdown opentelemetry
-        if let Err(err) = meter_provider.shutdown() {
+        if let Some(Err(err)) = meter_provider.map(|provider| provider.shutdown()) {
             warn!(err = %err, "Error while closing meter provider");
         }
-        if let Err(err) = tracer_provider.shutdown() {
+        if let Some(Err(err)) = tracer_provider.map(|provider| provider.shutdown()) {
             warn!(err = %err, "Error while closing trace provider");
         }
 

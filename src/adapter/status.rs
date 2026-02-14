@@ -41,12 +41,12 @@ impl StatusAdapter for DynStatusAdapter {
 }
 
 impl DynStatusAdapter {
-    pub async fn from_config(config: &config::Status) -> Result<Self, Box<dyn std::error::Error>> {
-        match config.adapter.as_str() {
-            "fixed" => {
-                let Some(config) = config.fixed.clone() else {
-                    return Err("fixed status adapter requires a configuration".into());
-                };
+    pub async fn from_config(
+        config: config::StatusAdapter,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        #[allow(unreachable_patterns)]
+        match config {
+            config::StatusAdapter::Fixed(config) => {
                 let description = config
                     .description
                     .and_then(|str| RawValue::from_string(str).ok());
@@ -68,18 +68,12 @@ impl DynStatusAdapter {
                 Ok(DynStatusAdapter::Fixed(adapter))
             }
             #[cfg(feature = "adapters-grpc")]
-            "grpc" => {
-                let Some(config) = config.grpc.clone() else {
-                    return Err("grpc status adapter requires a configuration".into());
-                };
+            config::StatusAdapter::Grpc(config) => {
                 let adapter = GrpcStatusAdapter::new(config.address).await?;
                 Ok(DynStatusAdapter::Grpc(adapter))
             }
             #[cfg(feature = "adapters-http")]
-            "http" => {
-                let Some(config) = config.http.clone() else {
-                    return Err("http status adapter requires a configuration".into());
-                };
+            config::StatusAdapter::Http(config) => {
                 let adapter = HttpStatusAdapter::new(config.address, config.cache_duration)?;
                 Ok(DynStatusAdapter::Http(adapter))
             }

@@ -99,5 +99,5 @@ target/
 build/
 
 # local configuration
-config/config.toml
+config/config.*
 config/auth_secret

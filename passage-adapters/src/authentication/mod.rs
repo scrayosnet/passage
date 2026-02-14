@@ -1,15 +1,12 @@
-use crate::crypto::minecraft_hash;
-use serde::{Deserialize, Serialize};
-use std::sync::LazyLock;
-use tracing::instrument;
-use uuid::Uuid;
+pub mod fixed;
 
-/// The shared http client (for mojang requests).
-static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    reqwest::Client::builder()
-        .build()
-        .expect("failed to create http client")
-});
+use crate::{Protocol, error::Result};
+use num_bigint::BigInt;
+use serde::{Deserialize, Serialize};
+use sha1::{Digest, Sha1};
+use std::fmt::Debug;
+use std::net::SocketAddr;
+use uuid::Uuid;
 
 /// Represents a single Minecraft user profile with all current properties.
 ///
@@ -56,41 +53,42 @@ pub struct ProfileProperty {
     pub signature: Option<String>,
 }
 
-pub trait Mojang: Send + Sync {
+pub trait AuthenticationAdapter: Debug + Send + Sync {
     fn authenticate(
         &self,
-        username: &str,
+        client_addr: &SocketAddr,
+        server_addr: (&str, u16),
+        protocol: Protocol,
+        user: (&str, &Uuid),
         shared_secret: &[u8],
-        server_id: &str,
         encoded_public: &[u8],
-    ) -> impl Future<Output = Result<Profile, reqwest::Error>> + Send;
+    ) -> impl Future<Output = Result<Profile>> + Send;
 }
 
-#[derive(Default)]
-pub struct Api {}
+/// Creates hash for the Minecraft protocol.
+pub fn minecraft_hash(server_id: &str, shared_secret: &[u8], encoded_public: &[u8]) -> String {
+    // create a new hasher instance
+    let mut hasher = Sha1::new();
 
-impl Mojang for Api {
-    #[instrument(skip_all)]
-    async fn authenticate(
-        &self,
-        username: &str,
-        shared_secret: &[u8],
-        server_id: &str,
-        encoded_public: &[u8],
-    ) -> Result<Profile, reqwest::Error> {
-        // calculate the minecraft hash for this secret, key and username
-        let hash = minecraft_hash(server_id, shared_secret, encoded_public);
+    // server id
+    hasher.update(server_id);
+    // shared secret
+    hasher.update(shared_secret);
+    // encoded public key
+    hasher.update(encoded_public);
 
-        // issue a request to Mojang's authentication endpoint
-        let url = format!(
-            "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}"
-        );
-        HTTP_CLIENT
-            .get(&url)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await
+    // take the digest and convert it to Minecraft's format
+    BigInt::from_signed_bytes_be(&hasher.finalize()).to_str_radix(16)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn can_hash() {
+        let shared_secret = b"verysecuresecret";
+        let encoded = b"verysecuresecret";
+        let _ = minecraft_hash("justchunks", shared_secret, encoded);
     }
 }

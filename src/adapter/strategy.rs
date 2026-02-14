@@ -20,46 +20,24 @@ impl StrategyAdapter for DynStrategyAdapter {
         client_addr: &SocketAddr,
         server_addr: (&str, u16),
         protocol: Protocol,
-        username: &str,
-        user_id: &Uuid,
+        user: (&str, &Uuid),
         targets: Vec<Target>,
     ) -> passage_adapters::Result<Option<Target>> {
         match self {
             DynStrategyAdapter::Fixed(adapter) => {
                 adapter
-                    .select(
-                        client_addr,
-                        server_addr,
-                        protocol,
-                        username,
-                        user_id,
-                        targets,
-                    )
+                    .select(client_addr, server_addr, protocol, user, targets)
                     .await
             }
             DynStrategyAdapter::PlayerFill(adapter) => {
                 adapter
-                    .select(
-                        client_addr,
-                        server_addr,
-                        protocol,
-                        username,
-                        user_id,
-                        targets,
-                    )
+                    .select(client_addr, server_addr, protocol, user, targets)
                     .await
             }
             #[cfg(feature = "adapters-grpc")]
             DynStrategyAdapter::Grpc(adapter) => {
                 adapter
-                    .select(
-                        client_addr,
-                        server_addr,
-                        protocol,
-                        username,
-                        user_id,
-                        targets,
-                    )
+                    .select(client_addr, server_addr, protocol, user, targets)
                     .await
             }
         }
@@ -68,28 +46,20 @@ impl StrategyAdapter for DynStrategyAdapter {
 
 impl DynStrategyAdapter {
     pub async fn from_config(
-        config: &config::TargetStrategy,
+        config: config::StrategyAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        match config.adapter.as_str() {
-            "fixed" => {
-                let Some(_config) = config.fixed.clone() else {
-                    return Err("fixed strategy adapter requires a configuration".into());
-                };
+        #[allow(unreachable_patterns)]
+        match config {
+            config::StrategyAdapter::Fixed(_config) => {
                 let adapter = FixedStrategyAdapter::new();
                 Ok(DynStrategyAdapter::Fixed(adapter))
             }
-            "player_fill" => {
-                let Some(config) = config.player_fill.clone() else {
-                    return Err("fixed strategy adapter requires a configuration".into());
-                };
+            config::StrategyAdapter::PlayerFill(config) => {
                 let adapter = PlayerFillStrategyAdapter::new(config.field, config.max_players);
                 Ok(DynStrategyAdapter::PlayerFill(adapter))
             }
             #[cfg(feature = "adapters-grpc")]
-            "grpc" => {
-                let Some(config) = config.grpc.clone() else {
-                    return Err("grpc strategy adapter requires a configuration".into());
-                };
+            config::StrategyAdapter::Grpc(config) => {
                 let adapter = GrpcStrategyAdapter::new(config.address).await?;
                 Ok(DynStrategyAdapter::Grpc(adapter))
             }

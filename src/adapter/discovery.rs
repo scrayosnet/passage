@@ -29,21 +29,16 @@ impl DiscoveryAdapter for DynDiscoveryAdapter {
 
 impl DynDiscoveryAdapter {
     pub async fn from_config(
-        config: &config::TargetDiscovery,
+        config: config::DiscoveryAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        match config.adapter.as_str() {
-            "fixed" => {
-                let Some(config) = config.fixed.clone() else {
-                    return Err("fixed discovery adapter requires a configuration".into());
-                };
+        #[allow(unreachable_patterns)]
+        match config {
+            config::DiscoveryAdapter::Fixed(config) => {
                 let adapter = FixedDiscoveryAdapter::new(config.targets);
                 Ok(DynDiscoveryAdapter::Fixed(adapter))
             }
             #[cfg(feature = "adapters-agones")]
-            "agones" => {
-                let Some(config) = config.agones.clone() else {
-                    return Err("agones discovery adapter requires a configuration".into());
-                };
+            config::DiscoveryAdapter::Agones(config) => {
                 let watch = watcher_config::Config {
                     bookmarks: true,
                     label_selector: config.label_selector,
@@ -53,14 +48,11 @@ impl DynDiscoveryAdapter {
                     page_size: Some(500),
                     initial_list_strategy: watcher_config::InitialListStrategy::default(),
                 };
-                let adapter = AgonesDiscoveryAdapter::new(Some(&config.namespace), watch).await?;
+                let adapter = AgonesDiscoveryAdapter::new(config.namespace, watch).await?;
                 Ok(DynDiscoveryAdapter::Agones(adapter))
             }
             #[cfg(feature = "adapters-grpc")]
-            "grpc" => {
-                let Some(config) = config.grpc.clone() else {
-                    return Err("grpc discovery adapter requires a configuration".into());
-                };
+            config::DiscoveryAdapter::Grpc(config) => {
                 let adapter = GrpcDiscoveryAdapter::new(config.address).await?;
                 Ok(DynDiscoveryAdapter::Grpc(adapter))
             }

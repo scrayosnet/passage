@@ -4,9 +4,10 @@ use crate::cookie::{
 };
 use crate::crypto::stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream, create_ciphers};
 pub(crate) use crate::error::Error;
-use crate::localization::Localization;
-use crate::mojang::Mojang;
 use crate::{crypto, metrics};
+use passage_adapters::authentication::AuthenticationAdapter;
+use passage_adapters::filter::FilterAdapter;
+use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::{
     Protocol, discovery::DiscoveryAdapter, status::StatusAdapter, strategy::StrategyAdapter,
 };
@@ -64,16 +65,17 @@ pub const DEFAULT_MAX_PACKET_LENGTH: VarInt = 10_000;
 /// such that at most one keep-alive packet is in transit at any point.
 pub const KEEP_ALIVE_INTERVAL: u64 = 16;
 
-pub struct Connection<S, Disc, Stat, Stra, Api> {
+pub struct Connection<S, Stat, Disc, Filt, Stra, Auth, Loca> {
     stream: CipherStream<S, Aes128Cfb8Enc, Aes128Cfb8Dec>,
     buffer: Vec<u8>,
 
     // adapters
     status_adapter: Arc<Stat>,
     discovery_adapter: Arc<Disc>,
+    filter_adapter: Arc<Filt>,
     strategy_adapter: Arc<Stra>,
-    mojang: Arc<Api>,
-    localization: Arc<Localization>,
+    authentication_adapter: Arc<Auth>,
+    localization_adapter: Arc<Loca>,
 
     // config and internal state
     keep_alive_id: Option<u64>,
@@ -83,26 +85,27 @@ pub struct Connection<S, Disc, Stat, Stra, Api> {
 
     // client information
     client_address: SocketAddr,
-    client_locale: String,
+    client_locale: Option<String>,
 }
 
-impl<S, Disc, Stat, Stra, Api> Connection<S, Disc, Stat, Stra, Api>
+impl<S, Stat, Disc, Filt, Stra, Auth, Loca> Connection<S, Stat, Disc, Filt, Stra, Auth, Loca>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-    Disc: DiscoveryAdapter,
     Stat: StatusAdapter,
+    Disc: DiscoveryAdapter,
+    Filt: FilterAdapter,
     Stra: StrategyAdapter,
-    Api: Mojang,
+    Auth: AuthenticationAdapter,
+    Loca: LocalizationAdapter,
 {
     pub fn new(
         stream: S,
         status_adapter: Arc<Stat>,
         discovery_adapter: Arc<Disc>,
+        filter_adapter: Arc<Filt>,
         strategy_adapter: Arc<Stra>,
-        mojang: Arc<Api>,
-        localization: Arc<Localization>,
-        auth_secret: Option<Vec<u8>>,
-        client_address: SocketAddr,
+        authentication_adapter: Arc<Auth>,
+        localization_adapter: Arc<Loca>,
     ) -> Self {
         // start ticker for keep-alive packets, it has to be sent at least every 20 seconds.
         // Then, the client has 15 seconds to respond with a keep-alive packet. We ensure that only
@@ -110,31 +113,39 @@ where
         let mut interval = tokio::time::interval(Duration::from_secs(KEEP_ALIVE_INTERVAL));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-        // use the default locale as the client locale until the real locale is known
-        let client_locale = localization.default_locale.clone();
-
         Self {
             stream: CipherStream::from_stream(stream),
             buffer: Vec::with_capacity(INITIAL_BUFFER_SIZE),
             // adapters
             status_adapter,
             discovery_adapter,
+            filter_adapter,
             strategy_adapter,
-            mojang,
-            localization,
+            authentication_adapter,
+            localization_adapter,
             // config and internal state
             keep_alive_id: None,
             keep_alive_interval: interval,
-            auth_secret,
+            auth_secret: None,
             max_packet_length: DEFAULT_MAX_PACKET_LENGTH,
             // client information
-            client_address,
-            client_locale,
+            client_address: "127.0.0.1:8080".parse().expect("hardcoded default address"),
+            client_locale: None,
         }
     }
 
     pub fn with_max_packet_length(mut self, max_packet_length: VarInt) -> Self {
         self.max_packet_length = max_packet_length;
+        self
+    }
+
+    pub fn with_auth_secret(mut self, auth_secret: Option<Vec<u8>>) -> Self {
+        self.auth_secret = auth_secret;
+        self
+    }
+
+    pub fn with_client_address(mut self, client_address: SocketAddr) -> Self {
+        self.client_address = client_address;
         self
     }
 
@@ -153,7 +164,11 @@ where
                     if !keep_alive { continue; }
                     debug!("checking that keep-alive packet was received");
                     if self.keep_alive_id.is_some() {
-                        let reason = self.localization.localize(&self.client_locale, "disconnect_timeout", &[]);
+                        let reason = self.localization_adapter.localize(
+                            self.client_locale.as_deref(),
+                            "disconnect_timeout",
+                            &[]
+                        ).await?;
                         self.send_packet(conf_out::DisconnectPacket { reason }).await?;
                         return Err(Error::MissedKeepAlive);
                     }
@@ -440,23 +455,25 @@ where
 
         // handle authentication if not already authenticated by the token
         if should_authenticate {
-            debug!("authenticating with mojang");
+            debug!("authenticating user");
             let request_start = Instant::now();
             let auth_response = self
-                .mojang
+                .authentication_adapter
                 .authenticate(
-                    &login_start.user_name,
+                    &self.client_address,
+                    (&handshake.server_address, handshake.server_port),
+                    handshake.protocol_version as Protocol,
+                    (&login_start.user_name, &login_start.user_id),
                     &shared_secret,
-                    "",
                     &crypto::ENCODED_PUB,
                 )
                 .await
                 .inspect_err(|err| {
                     // track request failed
-                    error!(err = %err, "mojang request failed");
-                    metrics::mojang_request_duration::record(request_start, "failed");
+                    error!(err = %err, "authentication request failed");
+                    metrics::authentication_request_duration::record(request_start, "failed");
                 })?;
-            metrics::mojang_request_duration::record(request_start, "success");
+            metrics::authentication_request_duration::record(request_start, "success");
 
             // update state for actual use info
             login_start.user_name = auth_response.name;
@@ -507,23 +524,35 @@ where
         // technically, this could be done a lot earlier (maybe even in a separate threat), however
         // in the future we might want to consider the client information when selecting a target
         debug!("discovering targets");
+        let client_address = self.client_address;
         let discovery_adapter = self.discovery_adapter.clone();
         let targets = tokio::select! {
             result = self.keep_alive() => result?,
             maybe_targets = discovery_adapter.discover() => maybe_targets?,
         };
 
+        debug!("filtering targets");
+        let filter_adapter = self.filter_adapter.clone();
+        let targets = tokio::select! {
+            result = self.keep_alive() => result?,
+            maybe_targets = filter_adapter.filter(
+                &client_address,
+                (&handshake.server_address, handshake.server_port),
+                handshake.protocol_version as Protocol,
+                (&login_start.user_name, &login_start.user_id),
+                targets,
+            ) => maybe_targets?,
+        };
+
         debug!("selecting target");
         let strategy_adapter = self.strategy_adapter.clone();
-        let client_address = self.client_address;
         let target = tokio::select! {
             result = self.keep_alive() => result?,
             maybe_target = strategy_adapter.select(
                 &client_address,
                 (&handshake.server_address, handshake.server_port),
                 handshake.protocol_version as Protocol,
-                &login_start.user_name,
-                &login_start.user_id,
+                (&login_start.user_name, &login_start.user_id),
                 targets,
             ) => maybe_target?,
         };
@@ -531,9 +560,10 @@ where
         // disconnect if not target found
         let Some(target) = target else {
             debug!("no transfer target found");
-            let reason =
-                self.localization
-                    .localize(&self.client_locale, "disconnect_no_target", &[]);
+            let reason = self
+                .localization_adapter
+                .localize(self.client_locale.as_deref(), "disconnect_no_target", &[])
+                .await?;
             debug!("sending disconnect packet");
             self.send_packet(conf_out::DisconnectPacket { reason })
                 .await?;

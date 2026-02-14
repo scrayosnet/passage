@@ -12,8 +12,7 @@ pub trait StrategyAdapter: Debug + Send + Sync {
         client_addr: &SocketAddr,
         server_addr: (&str, u16),
         protocol: Protocol,
-        username: &str,
-        user_id: &Uuid,
+        user: (&str, &Uuid),
         targets: Vec<Target>,
     ) -> impl Future<Output = Result<Option<Target>>> + Send;
 }
