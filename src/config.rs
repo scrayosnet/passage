@@ -10,7 +10,7 @@
 //!
 //! The environment variables are the top most layer. They can be used to overwrite any previous configuration.
 //! Environment variables have the format `[ENV_PREFIX]_[field]_[sub_field]` where `ENV_PREFIX` is
-//! an environment variable defaulting to `PASSAGE`. That means, the nested config field `cache.redis.enabled`
+//! an environment variable defaulting to `PASSAGE`. That means the nested config field `cache.redis.enabled`
 //! can be overwritten by the environment variable `PASSAGE_CACHE_REDIS_ENABLED`.
 //!
 //! ## Layer 2 (Auth Secret File) \[optional\]
@@ -23,32 +23,39 @@
 //! The next layer is an optional configuration file intended to be used by deployments and local testing. The file
 //! location can be configured using the `CONFIG_FILE` environment variable, defaulting to `config/config`.
 //! It can be of any file type supported by [config] (e.g. `config/config.toml`). The file should not be
-//! published by git as its configuration is context dependent (e.g. local/cluster) and probably contains
+//! published by git as its configuration is context-dependent (e.g. local/cluster) and probably contains
 //! secrets.
 //!
 //! ## Layer 4 (Default configuration)
 //!
-//! The default configuration provides default value for all config fields. It is loaded from
-//! `config/default.toml` at compile time.
+//! The default configuration provides default values for all config fields. It is defined in the struct.
 //!
 //! # Usage
 //!
-//! The application configuration can be created by using [`Config::new`]. This loads/overrides the
+//! The application configuration can be created by using [`Config::read`]. This loads/overrides the
 //! configuration fields layer-by-layer.
 //!
 //! ```rs
 //! let config: Config = Config::new()?;
 //! ```
 
-use config::{
-    ConfigError, Environment, File, FileFormat, FileStoredFormat, Format, Map, Value, ValueKind,
-};
+#![allow(clippy::derivable_impls)]
+
+use config::{ConfigError, Environment, File, FileStoredFormat, Format, Map, Value, ValueKind};
 use passage_adapters::authentication::Profile;
 use passage_adapters::{Protocol, Target};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
+
+macro_rules! hashmap {
+    ($($key:expr => $value:expr),* $(,)?) => {{
+        let mut map = std::collections::HashMap::new();
+        $(map.insert($key.into(), $value.into());)*
+        map
+    }};
+}
 
 /// [`Config`] holds all configuration for the application. I.g. one immutable instance is created
 /// on startup and then shared among the application components.
@@ -57,6 +64,12 @@ use std::net::SocketAddr;
 /// with status ok.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
+    /// The network address that should be used to bind the HTTP server for connection requests.
+    pub address: SocketAddr,
+
+    /// The timeout in seconds that is used for connection timeouts.
+    pub timeout: u64,
+
     /// The sentry configuration (disabled if empty).
     pub sentry: Option<Sentry>,
 
@@ -72,18 +85,27 @@ pub struct Config {
     #[serde(alias = "proxyprotocol")]
     pub proxy_protocol: Option<ProxyProtocol>,
 
-    /// The network address that should be used to bind the HTTP server for connection requests.
-    pub address: SocketAddr,
-
-    /// The timeout in seconds that is used for connection timeouts.
-    pub timeout: u64,
-
     /// The auth cookie secret, disabled if empty.
     #[serde(alias = "authsecret")]
     pub auth_secret: Option<String>,
 
     /// The adapters configuration.
     pub adapters: Adapters,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            address: "0.0.0.0:25565".parse().expect("invalid default address"),
+            timeout: 120,
+            sentry: None,
+            otel: Default::default(),
+            rate_limiter: None,
+            proxy_protocol: None,
+            auth_secret: None,
+            adapters: Default::default(),
+        }
+    }
 }
 
 /// [`Sentry`] hold the sentry configuration. The release is automatically inferred from cargo.
@@ -99,8 +121,18 @@ pub struct Sentry {
     pub address: String,
 }
 
+impl Default for Sentry {
+    fn default() -> Self {
+        Self {
+            debug: false,
+            environment: "staging".to_string(),
+            address: "https://key@sentry.io/42".to_string(),
+        }
+    }
+}
+
 /// [`OpenTelemetry`] hold the OpenTelemetry configuration. The release is automatically inferred from cargo.
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct OpenTelemetry {
     /// The OpenTelemetry environment of the application.
     pub environment: String,
@@ -110,6 +142,16 @@ pub struct OpenTelemetry {
 
     /// The traces configuration (disabled if empty).
     pub metrics: Option<OpenTelemetryEndpoint>,
+}
+
+impl Default for OpenTelemetry {
+    fn default() -> Self {
+        Self {
+            environment: "staging".to_string(),
+            traces: None,
+            metrics: None,
+        }
+    }
 }
 
 /// [`OpenTelemetryEndpoint`] hold the OpenTelemetry configuration for a specific endpoint.
@@ -122,6 +164,15 @@ pub struct OpenTelemetryEndpoint {
     pub token: String,
 }
 
+impl Default for OpenTelemetryEndpoint {
+    fn default() -> Self {
+        Self {
+            address: "http://localhost:3000".to_string(),
+            token: "".to_string(),
+        }
+    }
+}
+
 /// [`RateLimiter`] hold the connection rate limiting configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RateLimiter {
@@ -129,7 +180,16 @@ pub struct RateLimiter {
     pub duration: u64,
 
     /// Maximum amount of connections per duration.
-    pub size: usize,
+    pub limit: usize,
+}
+
+impl Default for RateLimiter {
+    fn default() -> Self {
+        Self {
+            duration: 60,
+            limit: 60,
+        }
+    }
 }
 
 /// [`ProxyProtocol`] hold the PROXY protocol configuration.
@@ -173,6 +233,19 @@ pub struct Adapters {
     pub localization: LocalizationAdapter,
 }
 
+impl Default for Adapters {
+    fn default() -> Self {
+        Self {
+            status: Default::default(),
+            discovery: Default::default(),
+            filter: vec![],
+            strategy: Default::default(),
+            authentication: Default::default(),
+            localization: Default::default(),
+        }
+    }
+}
+
 /// [`StatusAdapter`] hold the status adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -180,6 +253,12 @@ pub enum StatusAdapter {
     Fixed(FixedStatus),
     Grpc(GrpcStatus),
     Http(HttpStatus),
+}
+
+impl Default for StatusAdapter {
+    fn default() -> Self {
+        Self::Fixed(Default::default())
+    }
 }
 
 /// [`FixedStatus`] hold the fixed status (ping) configuration.
@@ -211,11 +290,33 @@ pub struct FixedStatus {
     pub max_version: Protocol,
 }
 
+impl Default for FixedStatus {
+    fn default() -> Self {
+        Self {
+            name: "Passage".to_string(),
+            description: Some("\"Minecraft Server Transfer Router\"".to_string()),
+            favicon: Some("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABABAMAAABYR2ztAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAeUExURdJDACIiIshABV4oHnQtHKI3FEElILs9DDAjIZMzF3zpuzQAAAIISURBVEjH5ZU7T8MwEMettCUwhpQ0bOG9JoW2jIQWWAMUEBsJr7IV1ErtRkQlxIaQQOLb4sfZPidCfABuiWL/cne++/tCnD+M/FfgbrvXaw9+BXZOAsJsqz/AgJuKt5cTom0NAeFGxB4PQ4It0kBAKOEdcO/W+ELsW6kCfPo6/ubr1mlaBz81HcJTXu224xyVc6jLfWuXJpzAy7EGliRwzmiIYEcaaMD+Oo/3gVMQwCIEEN/MhIsFBDzjrCSBgSsBxLLes6AQ4goHZXbLkkw1EHJgE/VsXznkwJ4ZgXUvMOrAATvHbW9KjwDQvKuGLuryGADQRk1M5byDS0iyP7RiE8iwHkLyeDDNTcCFLKEOK+5hQZz+kKwoICNzZb2HpIKaVSkDmTgX6KFWBmARFGWlJcAllgJcOJJhnvhKyn5S3O7SRQ0kpSzfxvGQu4WbVUpin4wSBDRkc1GZ7IQLQADLoGjcTNphDXiBlDTYq5IQzIdEa9oxNUbUAu63F6j7D8A9U3WKysxN10GsrOdmBAws84VRrjXNLC8CkmjCXXUKIejSFy8COLAR0IEBMGJHkBOk5hh14HZKq9yU46SK5qR0GjteRw2sOQ0sqQjXfJTal5/0rs1rIAMHZ0/8uUHvQCtAsof7L23KS9oKonIOYpRCua7xtPdvLgSz2o9++1/4dzu9bjv9p//NH77UnP1UgYF9AAAAAElFTkSuQmCC".to_string()),
+            enforces_secure_chat: Some(true),
+            preferred_version: 769,
+            min_version: 0,
+            max_version: 1_000,
+        }
+    }
+}
+
 /// [`GrpcStatus`] hold the gRPC status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GrpcStatus {
     /// The address of the gRPC adapter server.
     pub address: String,
+}
+
+impl Default for GrpcStatus {
+    fn default() -> Self {
+        Self {
+            address: "localhost:50051".to_string(),
+        }
+    }
 }
 
 /// [`HttpStatus`] hold the http status (ping) configuration.
@@ -229,6 +330,15 @@ pub struct HttpStatus {
     pub cache_duration: u64,
 }
 
+impl Default for HttpStatus {
+    fn default() -> Self {
+        Self {
+            address: "http://localhost:5000".to_string(),
+            cache_duration: 60,
+        }
+    }
+}
+
 /// [`DiscoveryAdapter`] hold the discovery adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -238,11 +348,23 @@ pub enum DiscoveryAdapter {
     Grpc(GrpcDiscovery),
 }
 
+impl Default for DiscoveryAdapter {
+    fn default() -> Self {
+        Self::Fixed(Default::default())
+    }
+}
+
 /// [`FixedDiscovery`] hold the fixed discovery configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixedDiscovery {
     /// The targets that should be served by the discovery adapter.
     pub targets: Vec<Target>,
+}
+
+impl Default for FixedDiscovery {
+    fn default() -> Self {
+        Self { targets: vec![] }
+    }
 }
 
 /// [`AgonesDiscovery`] hold the agones discovery configuration.
@@ -258,11 +380,29 @@ pub struct AgonesDiscovery {
     pub field_selector: Option<String>,
 }
 
+impl Default for AgonesDiscovery {
+    fn default() -> Self {
+        Self {
+            namespace: None,
+            label_selector: None,
+            field_selector: None,
+        }
+    }
+}
+
 /// [`GrpcDiscovery`] hold the gRPC discovery configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GrpcDiscovery {
     /// The address of the gRPC adapter server.
     pub address: String,
+}
+
+impl Default for GrpcDiscovery {
+    fn default() -> Self {
+        Self {
+            address: "localhost:50052".to_string(),
+        }
+    }
 }
 
 /// [`FilterAdapter`] hold the filter adapter configuration.
@@ -272,10 +412,22 @@ pub enum FilterAdapter {
     Fixed(FixedFilter),
 }
 
+impl Default for FilterAdapter {
+    fn default() -> Self {
+        Self::Fixed(Default::default())
+    }
+}
+
 /// [`FixedFilter`] hold the fixed filter configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixedFilter {
     // TODO add some logic here!
+}
+
+impl Default for FixedFilter {
+    fn default() -> Self {
+        Self {}
+    }
 }
 
 /// [`StrategyAdapter`] hold the strategy adapter configuration.
@@ -287,10 +439,22 @@ pub enum StrategyAdapter {
     Grpc(GrpcStrategy),
 }
 
+impl Default for StrategyAdapter {
+    fn default() -> Self {
+        Self::Fixed(Default::default())
+    }
+}
+
 /// [`FixedStrategy`] hold the fixed strategy configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixedStrategy {
     // TODO add some logic here!
+}
+
+impl Default for FixedStrategy {
+    fn default() -> Self {
+        Self {}
+    }
 }
 
 /// [`FixedStrategy`] hold the fixed strategy configuration.
@@ -304,11 +468,28 @@ pub struct PlayerFillStrategy {
     pub max_players: u32,
 }
 
+impl Default for PlayerFillStrategy {
+    fn default() -> Self {
+        Self {
+            field: "players".to_string(),
+            max_players: 50,
+        }
+    }
+}
+
 /// [`GrpcStrategy`] hold the gRPC strategy configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GrpcStrategy {
     /// The address of the gRPC adapter server.
     pub address: String,
+}
+
+impl Default for GrpcStrategy {
+    fn default() -> Self {
+        Self {
+            address: "localhost:50053".to_string(),
+        }
+    }
 }
 
 /// [`AuthenticationAdapter`] hold the authentication adapter configuration.
@@ -319,11 +500,25 @@ pub enum AuthenticationAdapter {
     Mojang(MojangAuthentication),
 }
 
+impl Default for AuthenticationAdapter {
+    fn default() -> Self {
+        Self::Fixed(Default::default())
+    }
+}
+
 /// [`FixedAuthentication`] hold the fixed authentication configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixedAuthentication {
     /// The fixed profile that should be used for authentication.
     pub profile: Profile,
+}
+
+impl Default for FixedAuthentication {
+    fn default() -> Self {
+        Self {
+            profile: Default::default(),
+        }
+    }
 }
 
 /// [`MojangAuthentication`] hold the mojang authentication configuration.
@@ -334,11 +529,25 @@ pub struct MojangAuthentication {
     pub server_id: String,
 }
 
+impl Default for MojangAuthentication {
+    fn default() -> Self {
+        Self {
+            server_id: "".to_string(),
+        }
+    }
+}
+
 /// [`LocalizationAdapter`] hold the localization adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LocalizationAdapter {
     Fixed(FixedLocalization),
+}
+
+impl Default for LocalizationAdapter {
+    fn default() -> Self {
+        Self::Fixed(Default::default())
+    }
 }
 
 /// [`FixedLocalization`] hold the fixed localization configuration.
@@ -352,9 +561,49 @@ pub struct FixedLocalization {
     pub messages: HashMap<String, HashMap<String, String>>,
 }
 
+impl Default for FixedLocalization {
+    fn default() -> Self {
+        Self {
+            default_locale: "en_US".to_string(),
+            messages: hashmap! {
+                "en" => hashmap! {
+                    "locale" => "English",
+                    "disconnect_timeout" => "{\"text\":\"Disconnected: No response from client (keep-alive timeout)\"}",
+                    "disconnect_no_target" => "{\"text\":\"Disconnected: No available server to handle your connection\"}",
+                },
+                "es" => hashmap! {
+                    "locale" => "Español",
+                    "disconnect_timeout" => "{\"text\":\"Desconectado: No hubo respuesta del cliente (tiempo de espera agotado)\"}",
+                    "disconnect_no_target" => "{\"text\":\"Desconectado: No hay un servidor disponible para manejar tu conexión\"}",
+                },
+                "fr" => hashmap! {
+                    "locale" => "Français",
+                    "disconnect_timeout" => "{\"text\":\"Déconnecté : aucune réponse du client (délai de keep-alive dépassé)\"}",
+                    "disconnect_no_target" => "{\"text\":\"Déconnecté : aucun serveur disponible pour traiter votre connexion\"}",
+                },
+                "de" => hashmap! {
+                    "locale" => "Deutsch",
+                    "disconnect_timeout" => "{\"text\":\"Verbindung getrennt: Keine Antwort vom Client (Keep-Alive-Timeout)\"}",
+                    "disconnect_no_target" => "{\"text\":\"Verbindung getrennt: Kein verfügbarer Server für diese Verbindung\"}",
+                },
+                "zh-CN" => hashmap! {
+                    "locale" => "简体中文",
+                    "disconnect_timeout" => "{\"text\":\"已断开连接：客户端无响应（保持连接超时）\"}",
+                    "disconnect_no_target" => "{\"text\":\"已断开连接：没有可用的服务器来处理你的连接\"}",
+                },
+                "ru" => hashmap! {
+                    "locale" => "English",
+                    "disconnect_timeout" => "{\"text\":\"Отключено: нет ответа от клиента (тайм-аут keep-alive)\"}",
+                    "disconnect_no_target" => "{\"text\":\"Отключено: нет доступного сервера для обработки подключения\"}",
+                },
+            },
+        }
+    }
+}
+
 impl Config {
     /// Creates a new application configuration as described in the [module documentation](crate::config).
-    pub fn new() -> Result<Self, ConfigError> {
+    pub fn read() -> Result<Self, ConfigError> {
         // the environment prefix for all `Config` fields
         let env_prefix = env::var("ENV_PREFIX").unwrap_or("passage".into());
         // the path of the custom configuration file
@@ -362,11 +611,6 @@ impl Config {
         let auth_secret_file = env::var("AUTH_SECRET_FILE").unwrap_or("config/auth_secret".into());
 
         let s = config::Config::builder()
-            // load default configuration (embedded at compile time)
-            .add_source(File::from_str(
-                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/config/default.toml")),
-                FileFormat::Toml,
-            ))
             // load custom configuration from file (at runtime)
             .add_source(File::with_name(&config_file).required(false))
             .add_source(File::new(&auth_secret_file, AuthSecretFile).required(false))
@@ -378,23 +622,6 @@ impl Config {
 
         // you can deserialize (and thus freeze) the entire configuration as
         s.try_deserialize()
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        let s = config::Config::builder()
-            // load default configuration (embedded at compile time)
-            .add_source(File::from_str(
-                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/config/default.toml")),
-                FileFormat::Toml,
-            ))
-            .build()
-            .expect("expected default configuration to be available");
-
-        // you can deserialize (and thus freeze) the entire configuration as
-        s.try_deserialize()
-            .expect("expected default configuration to be deserializable")
     }
 }
 

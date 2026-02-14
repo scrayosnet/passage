@@ -42,7 +42,7 @@ fn resource(environment: &str) -> Resource {
 /// thin-wrapper around the passage crate that supplies the necessary settings.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // parse the arguments and configuration
-    let config = Config::new()?;
+    let config = Config::read()?;
 
     // initialize sentry
     #[cfg(feature = "sentry")]

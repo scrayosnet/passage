@@ -42,7 +42,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
 
     // initialize the rate limiter
     let rate_limiter = config.rate_limiter.map(|config| {
-        RateLimiter::<IpAddr>::new(Duration::from_secs(config.duration), config.size)
+        RateLimiter::<IpAddr>::new(Duration::from_secs(config.duration), config.limit)
     });
 
     // build stop signal

@@ -1,0 +1,38 @@
+# Server rund on minecraft default port
+address: "0.0.0.0:25565"
+
+# Each request may take up to 120 seconds
+timeout: 120
+
+# Rate limiter configuration allowing 60 requests per minute
+rate_limiter:
+  duration: 60
+  limit: 60
+
+adapters:
+  # HTTP status adapter caching for 30 seconds
+  status:
+    http:
+      address: "https://example.com/status"
+      cache_duration: 30
+
+  # Agones discovery adapter selecting nameservers in "minecraft" namespace
+  discovery:
+    agones:
+      namespace: "minecraft"
+      label_selector: null
+      field_selector: null
+
+  # Fixed filter adapter (empty config struct)
+  filter:
+  - fixed: {}
+
+  # gRPC strategy adapter
+  strategy:
+    grpc:
+      address: "strategy-adapter.default.svc.cluster.local:50053"
+
+  # Mojang authentication adapter
+  authentication:
+    mojang:
+      server_id: ""
