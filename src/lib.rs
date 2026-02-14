@@ -1,20 +1,16 @@
 #![deny(clippy::all)]
 #![forbid(unsafe_code)]
 
-pub mod authentication_adapter;
+pub mod adapter;
 pub mod config;
-pub mod discovery_adapter;
-pub mod filter_adapter;
-pub mod localization_adapter;
-pub mod status_adapter;
-pub mod strategy_adapter;
 
-use crate::authentication_adapter::DynAuthenticationAdapter;
+use crate::adapter::authentication::DynAuthenticationAdapter;
+use crate::adapter::discovery::DynDiscoveryAdapter;
+use crate::adapter::filter::DynFilterAdapter;
+use crate::adapter::localization::DynLocalizationAdapter;
+use crate::adapter::status::DynStatusAdapter;
+use crate::adapter::strategy::DynStrategyAdapter;
 use crate::config::Config;
-use crate::discovery_adapter::DynDiscoveryAdapter;
-use crate::localization_adapter::DynLocalizationAdapter;
-use crate::status_adapter::DynStatusAdapter;
-use crate::strategy_adapter::DynStrategyAdapter;
 use passage_protocol::listener::Listener;
 use passage_protocol::localization::Localization;
 use std::sync::Arc;
@@ -35,16 +31,12 @@ use tracing::debug;
 pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // initialize the adapters
     debug!("building adapters");
-    let status_adapter = Arc::new(DynStatusAdapter::from_config(&config.status).await?);
-    let discovery_adapter =
-        Arc::new(DynDiscoveryAdapter::from_config(&config.target_discovery).await?);
-    let strategy_adapter =
-        Arc::new(DynStrategyAdapter::from_config(&config.target_strategy).await?);
-    let authentication_adapter = Arc::new(DynAuthenticationAdapter::from_config(
-        &config.target_strategy,
-    ));
-    let localization_adapter =
-        Arc::new(DynLocalizationAdapter::from_config(&config.target_strategy));
+    let status = DynStatusAdapter::from_config(&config.status).await?;
+    let discovery = DynDiscoveryAdapter::from_config(&config.target_discovery).await?;
+    let filter = DynFilterAdapter::from_config(&config.target_strategy).await?;
+    let strategy = DynStrategyAdapter::from_config(&config.target_strategy).await?;
+    let authentication = DynAuthenticationAdapter::from_config(&config.target_strategy);
+    let localization = DynLocalizationAdapter::from_config(&config.target_strategy);
 
     // build stop signal
     let stop_token = CancellationToken::new();
@@ -64,11 +56,12 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // build and start the listener
     debug!("building listener");
     let mut listener = Listener::new(
-        status_adapter,
-        discovery_adapter,
-        strategy_adapter,
-        authentication_adapter,
-        localization_adapter,
+        Arc::new(status),
+        Arc::new(discovery),
+        Arc::new(filter),
+        Arc::new(strategy),
+        Arc::new(authentication),
+        Arc::new(localization),
     )
     .with_auth_secret_opt(auth_secret)
     .with_connection_timeout(timeout_duration)
