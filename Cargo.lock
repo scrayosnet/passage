@@ -2422,6 +2422,7 @@ name = "passage-adapters"
 version = "0.2.0"
 dependencies = [
  "num-bigint",
+ "regex",
  "serde",
  "serde_json",
  "sha1",

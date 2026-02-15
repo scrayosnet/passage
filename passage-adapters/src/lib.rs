@@ -21,6 +21,7 @@ pub use error::*;
 pub use authentication::fixed::FixedAuthenticationAdapter;
 pub use discovery::fixed::FixedDiscoveryAdapter;
 pub use filter::fixed::FixedFilterAdapter;
+pub use filter::option::OptionFilterAdapter;
 pub use localization::fixed::FixedLocalizationAdapter;
 pub use status::fixed::FixedStatusAdapter;
 pub use strategy::fixed::FixedStrategyAdapter;

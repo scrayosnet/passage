@@ -59,16 +59,13 @@ impl FilterRule {
 
 #[derive(Debug, Default)]
 pub struct FixedFilterAdapter {
-    /// The hostname to filter on. If set, only targets with this hostname will be filtered. If unset, all targets will be filtered.
-    hostname: Option<String>,
-
     /// List of filter rules. All rules must match (AND logic).
     rules: Vec<FilterRule>,
 }
 
 impl FixedFilterAdapter {
-    pub fn new(hostname: Option<String>, rules: Vec<FilterRule>) -> Self {
-        Self { hostname, rules }
+    pub fn new(rules: Vec<FilterRule>) -> Self {
+        Self { rules }
     }
 
     /// Add a filter rule to this adapter.
@@ -94,7 +91,7 @@ impl FilterAdapter for FixedFilterAdapter {
     async fn filter(
         &self,
         _client_addr: &SocketAddr,
-        (server_hostname, _): (&str, u16),
+        _server_addr: (&str, u16),
         _protocol: Protocol,
         _user: (&str, &Uuid),
         targets: Vec<Target>,
@@ -104,18 +101,6 @@ impl FilterAdapter for FixedFilterAdapter {
             rules = self.rules.len(),
             "filtering targets"
         );
-
-        // skip the filter if the hostname doesn't match
-        if let Some(hostname) = &self.hostname
-            && hostname != server_hostname
-        {
-            trace!(
-                len = targets.len(),
-                rules = self.rules.len(),
-                "skipping for hostname"
-            );
-            return Ok(targets);
-        }
 
         // apply filters
         let filtered: Vec<Target> = targets

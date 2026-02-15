@@ -1,4 +1,5 @@
 pub mod fixed;
+pub mod option;
 
 use crate::{Protocol, Target, error::Result};
 use std::fmt::Debug;

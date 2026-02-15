@@ -24,3 +24,4 @@ serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 num-bigint = { workspace = true }
 sha1 = { workspace = true }
+regex = { workspace = true }

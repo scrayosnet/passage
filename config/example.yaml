@@ -25,8 +25,8 @@ adapters:
 
   # Single fixed filter adapter that, for the 'mc.example.net' hostname, returns only servers with 'online' status
   filter:
-  - fixed:
-      hostname: "mc.example.net"
+  - hostname: "mc.example.net"
+    fixed:
       rules:
       - op: "equals"
         field: "status"

@@ -199,8 +199,8 @@ pub struct Adapters {
     /// The discovery adapter configuration.
     pub discovery: DiscoveryAdapter,
 
-    /// The filter adapter configuration.
-    pub filter: Vec<FilterAdapter>,
+    /// The (option) filter adapter configuration.
+    pub filter: Vec<OptionFilterAdapter>,
 
     /// The strategy adapter configuration.
     pub strategy: StrategyAdapter,
@@ -346,6 +346,18 @@ pub struct GrpcDiscovery {
     pub address: String,
 }
 
+/// [`OptionFilterAdapter`] holds a filter adapter configuration that may be applied conditionally.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OptionFilterAdapter {
+    /// The hostname to apply the filter on. If empty, the filter will be applied to all targets.
+    #[serde(default)]
+    pub hostname: Option<String>,
+
+    /// The actual filter to apply if the above conditions are met.
+    #[serde(flatten)]
+    pub filter: FilterAdapter,
+}
+
 /// [`FilterAdapter`] hold the filter adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -363,9 +375,6 @@ impl Default for FilterAdapter {
 #[derive(Default, Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct FixedFilter {
-    /// The hostname to filter on. If set, only targets with this hostname will be filtered. If unset, all targets will be filtered.
-    pub hostname: Option<String>,
-
     /// List of filter rules. All rules must match (AND logic).
     pub rules: Vec<FilterRule>,
 }
