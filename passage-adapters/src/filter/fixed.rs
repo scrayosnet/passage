@@ -71,6 +71,12 @@ impl FixedFilterAdapter {
         Self { hostname, rules }
     }
 
+    /// Add a filter rule to this adapter.
+    pub fn add_rule(mut self, key: String, operation: FilterOperation) -> Self {
+        self.rules.push(FilterRule { key, operation });
+        self
+    }
+
     /// Check if a target matches all filter rules.
     pub fn matches_filters(&self, target: &Target) -> bool {
         // Empty rules means accept all targets
@@ -120,5 +126,126 @@ impl FilterAdapter for FixedFilterAdapter {
         trace!(filtered_len = filtered.len(), "filtering complete");
 
         Ok(filtered)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_target(id: &str, meta: Vec<(&str, &str)>) -> Target {
+        Target {
+            identifier: id.to_string(),
+            address: "127.0.0.1:8080".parse().unwrap(),
+            meta: meta
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn test_equals_filter() {
+        let filter = FixedFilterAdapter::default().add_rule(
+            "region".to_string(),
+            FilterOperation::Equals("us-west".to_string()),
+        );
+
+        let target1 = create_target("t1", vec![("region", "us-west")]);
+        let target2 = create_target("t2", vec![("region", "us-east")]);
+
+        assert!(filter.matches_filters(&target1));
+        assert!(!filter.matches_filters(&target2));
+    }
+
+    #[test]
+    fn test_not_equals_filter() {
+        let filter = FixedFilterAdapter::default().add_rule(
+            "region".to_string(),
+            FilterOperation::NotEquals("us-west".to_string()),
+        );
+
+        let target1 = create_target("t1", vec![("region", "us-west")]);
+        let target2 = create_target("t2", vec![("region", "us-east")]);
+
+        assert!(!filter.matches_filters(&target1));
+        assert!(filter.matches_filters(&target2));
+    }
+
+    #[test]
+    fn test_exists_filter() {
+        let filter =
+            FixedFilterAdapter::default().add_rule("region".to_string(), FilterOperation::Exists);
+
+        let target1 = create_target("t1", vec![("region", "us-west")]);
+        let target2 = create_target("t2", vec![]);
+
+        assert!(filter.matches_filters(&target1));
+        assert!(!filter.matches_filters(&target2));
+    }
+
+    #[test]
+    fn test_not_exists_filter() {
+        let filter = FixedFilterAdapter::default()
+            .add_rule("region".to_string(), FilterOperation::NotExists);
+
+        let target1 = create_target("t1", vec![("region", "us-west")]);
+        let target2 = create_target("t2", vec![]);
+
+        assert!(!filter.matches_filters(&target1));
+        assert!(filter.matches_filters(&target2));
+    }
+
+    #[test]
+    fn test_in_filter() {
+        let filter = FixedFilterAdapter::default().add_rule(
+            "region".to_string(),
+            FilterOperation::In(vec!["us-west".to_string(), "us-east".to_string()]),
+        );
+
+        let target1 = create_target("t1", vec![("region", "us-west")]);
+        let target2 = create_target("t2", vec![("region", "eu-west")]);
+
+        assert!(filter.matches_filters(&target1));
+        assert!(!filter.matches_filters(&target2));
+    }
+
+    #[test]
+    fn test_multiple_rules() {
+        let filter = FixedFilterAdapter::default()
+            .add_rule(
+                "region".to_string(),
+                FilterOperation::Equals("us-west".to_string()),
+            )
+            .add_rule(
+                "environment".to_string(),
+                FilterOperation::Equals("production".to_string()),
+            );
+
+        let target1 = create_target(
+            "t1",
+            vec![("region", "us-west"), ("environment", "production")],
+        );
+        let target2 = create_target(
+            "t2",
+            vec![("region", "us-west"), ("environment", "staging")],
+        );
+        let target3 = create_target(
+            "t3",
+            vec![("region", "us-east"), ("environment", "production")],
+        );
+
+        assert!(filter.matches_filters(&target1));
+        assert!(!filter.matches_filters(&target2));
+        assert!(!filter.matches_filters(&target3));
+    }
+
+    #[test]
+    fn test_empty_rules_accepts_all() {
+        let filter = FixedFilterAdapter::default();
+
+        let target = create_target("t1", vec![("region", "us-west")]);
+
+        assert!(filter.matches_filters(&target));
     }
 }

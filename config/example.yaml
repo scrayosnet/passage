@@ -23,7 +23,7 @@ adapters:
       label_selector: null
       field_selector: null
 
-  # Fixed filter adapter
+  # Single fixed filter adapter that, for the 'mc.example.net' hostname, returns only servers with 'online' status
   filter:
   - fixed:
       hostname: "mc.example.net"
