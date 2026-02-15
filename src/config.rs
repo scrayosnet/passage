@@ -383,6 +383,7 @@ pub struct FixedFilter {
 #[derive(Debug, Clone, Deserialize)]
 pub struct FilterRule {
     /// The metadata key to filter on.
+    #[serde(alias = "field")]
     pub key: String,
     /// The operation to perform.
     #[serde(flatten)]
