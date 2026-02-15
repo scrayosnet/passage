@@ -363,7 +363,45 @@ impl Default for FilterAdapter {
 #[derive(Default, Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct FixedFilter {
-    // TODO add some logic here!
+    /// The hostname to filter on. If set, only targets with this hostname will be filtered. If unset, all targets will be filtered.
+    pub hostname: Option<String>,
+
+    /// List of filter rules. All rules must match (AND logic).
+    pub rules: Vec<FilterRule>,
+}
+
+/// A single filter rule.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FilterRule {
+    /// The metadata key to filter on.
+    pub key: String,
+    /// The operation to perform.
+    #[serde(flatten)]
+    pub operation: FilterOperation,
+}
+
+/// Filter operation to apply to a target field.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(tag = "op", content = "value")]
+pub enum FilterOperation {
+    /// Field must equal the specified value.
+    #[serde(rename = "equals")]
+    Equals(String),
+    /// Field must not equal the specified value.
+    #[serde(rename = "notEquals")]
+    NotEquals(String),
+    /// Field must exist (have any value).
+    #[serde(rename = "exists")]
+    Exists,
+    /// Field must not exist.
+    #[serde(rename = "notExists")]
+    NotExists,
+    /// Field must be one of the specified values.
+    #[serde(rename = "in")]
+    In(Vec<String>),
+    /// Field must not be any of the specified values.
+    #[serde(rename = "notIn")]
+    NotIn(Vec<String>),
 }
 
 /// [`StrategyAdapter`] hold the strategy adapter configuration.

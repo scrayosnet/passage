@@ -23,9 +23,14 @@ adapters:
       label_selector: null
       field_selector: null
 
-  # Fixed filter adapter (empty config struct)
+  # Fixed filter adapter
   filter:
-  - fixed: {}
+  - fixed:
+      hostname: "mc.example.net"
+      rules:
+      - op: "equals"
+        field: "status"
+        value: "online"
 
   # gRPC strategy adapter
   strategy:

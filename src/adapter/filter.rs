@@ -1,5 +1,6 @@
 use crate::config;
 use passage_adapters::filter::FilterAdapter;
+use passage_adapters::filter::fixed::{FilterOperation, FilterRule};
 use passage_adapters::{FixedFilterAdapter, Protocol, Target};
 use sentry::protocol::Uuid;
 use std::net::SocketAddr;
@@ -34,8 +35,11 @@ impl DynFilterAdapter {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         #[allow(unreachable_patterns)]
         match config {
-            config::FilterAdapter::Fixed(_config) => {
-                let adapter = FixedFilterAdapter::new();
+            config::FilterAdapter::Fixed(config) => {
+                let adapter = FixedFilterAdapter::new(
+                    config.hostname,
+                    config.rules.into_iter().map(Into::into).collect(),
+                );
                 Ok(DynFilterAdapter::Fixed(adapter))
             }
             _ => Err("unknown filter adapter configured".into()),
@@ -50,5 +54,27 @@ impl DynFilterAdapter {
             filters.push(Self::from_config(config).await?);
         }
         Ok(filters)
+    }
+}
+
+impl From<config::FilterRule> for FilterRule {
+    fn from(value: config::FilterRule) -> Self {
+        Self {
+            key: value.key,
+            operation: value.operation.into(),
+        }
+    }
+}
+
+impl From<config::FilterOperation> for FilterOperation {
+    fn from(value: config::FilterOperation) -> Self {
+        match value {
+            config::FilterOperation::Equals(value) => FilterOperation::Equals(value),
+            config::FilterOperation::NotEquals(value) => FilterOperation::NotEquals(value),
+            config::FilterOperation::Exists => FilterOperation::Exists,
+            config::FilterOperation::NotExists => FilterOperation::NotExists,
+            config::FilterOperation::In(values) => FilterOperation::In(values),
+            config::FilterOperation::NotIn(values) => FilterOperation::NotIn(values),
+        }
     }
 }
