@@ -23,9 +23,14 @@ adapters:
       label_selector: null
       field_selector: null
 
-  # Fixed filter adapter (empty config struct)
+  # Single fixed filter adapter that, for the 'mc.example.net' hostname, returns only servers with 'online' status
   filter:
-  - fixed: {}
+  - hostname: "mc.example.net"
+    fixed:
+      rules:
+      - op: "equals"
+        field: "status"
+        value: "online"
 
   # gRPC strategy adapter
   strategy:
