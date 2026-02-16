@@ -4,6 +4,7 @@ use passage_adapters::authentication::{AuthenticationAdapter, Profile};
 use passage_adapters::{DisabledAuthenticationAdapter, Protocol};
 use passage_adapters_http::MojangAdapter;
 use sentry::protocol::Uuid;
+use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 
 #[derive(Debug)]
@@ -12,6 +13,17 @@ pub enum DynAuthenticationAdapter {
     Fixed(FixedAuthenticationAdapter),
     #[cfg(feature = "adapters-http")]
     Mojang(MojangAdapter),
+}
+
+impl Display for DynAuthenticationAdapter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Disabled(_) => write!(f, "disabled"),
+            Self::Fixed(_) => write!(f, "fixed"),
+            #[cfg(feature = "adapters-http")]
+            Self::Mojang(_) => write!(f, "mojang"),
+        }
+    }
 }
 
 impl AuthenticationAdapter for DynAuthenticationAdapter {

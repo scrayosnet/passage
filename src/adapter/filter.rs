@@ -1,13 +1,22 @@
 use crate::config;
-use passage_adapters::filter::FilterAdapter;
 use passage_adapters::filter::meta::{FilterOperation, FilterRule};
+use passage_adapters::filter::FilterAdapter;
 use passage_adapters::{MetaFilterAdapter, OptionFilterAdapter, Protocol, Target};
 use sentry::protocol::Uuid;
+use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 
 #[derive(Debug)]
 pub enum DynFilterAdapter {
     Meta(OptionFilterAdapter<MetaFilterAdapter>),
+}
+
+impl Display for DynFilterAdapter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Meta(_) => write!(f, "meta"),
+        }
+    }
 }
 
 impl FilterAdapter for DynFilterAdapter {
@@ -45,16 +54,6 @@ impl DynFilterAdapter {
             _ => Err("unknown filter adapter configured".into()),
         }
     }
-
-    pub async fn from_configs(
-        configs: Vec<config::OptionFilterAdapter>,
-    ) -> Result<Vec<Self>, Box<dyn std::error::Error>> {
-        let mut filters = Vec::with_capacity(configs.len());
-        for config in configs {
-            filters.push(Self::from_config(config).await?);
-        }
-        Ok(filters)
-    }
 }
 
 impl From<config::FilterRule> for FilterRule {
@@ -76,5 +75,54 @@ impl From<config::FilterOperation> for FilterOperation {
             config::FilterOperation::In(values) => FilterOperation::In(values),
             config::FilterOperation::NotIn(values) => FilterOperation::NotIn(values),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct DynFilterAdapters {
+    filters: Vec<DynFilterAdapter>,
+}
+
+impl Display for DynFilterAdapters {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        for (i, adapter) in self.filters.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}", adapter)?;
+        }
+        write!(f, "]")
+    }
+}
+
+impl FilterAdapter for DynFilterAdapters {
+    async fn filter(
+        &self,
+        client_addr: &SocketAddr,
+        server_addr: (&str, u16),
+        protocol: Protocol,
+        user: (&str, &Uuid),
+        targets: Vec<Target>,
+    ) -> passage_adapters::Result<Vec<Target>> {
+        let mut filtered_targets = targets;
+        for filter in &self.filters {
+            filtered_targets = filter
+                .filter(client_addr, server_addr, protocol, user, filtered_targets)
+                .await?;
+        }
+        Ok(filtered_targets)
+    }
+}
+
+impl DynFilterAdapters {
+    pub async fn from_config(
+        configs: Vec<config::OptionFilterAdapter>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut filters = Vec::with_capacity(configs.len());
+        for config in configs {
+            filters.push(DynFilterAdapter::from_config(config).await?);
+        }
+        Ok(DynFilterAdapters { filters })
     }
 }

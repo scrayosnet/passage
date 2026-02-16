@@ -1,10 +1,19 @@
 use crate::config;
 use passage_adapters::FixedLocalizationAdapter;
 use passage_adapters::localization::LocalizationAdapter;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub enum DynLocalizationAdapter {
     Fixed(FixedLocalizationAdapter),
+}
+
+impl Display for DynLocalizationAdapter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Fixed(_) => write!(f, "fixed"),
+        }
+    }
 }
 
 impl LocalizationAdapter for DynLocalizationAdapter {

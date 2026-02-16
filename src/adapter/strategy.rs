@@ -4,6 +4,7 @@ use passage_adapters::{AnyStrategyAdapter, PlayerFillStrategyAdapter, Protocol, 
 #[cfg(feature = "adapters-grpc")]
 use passage_adapters_grpc::GrpcStrategyAdapter;
 use sentry::protocol::Uuid;
+use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 
 #[derive(Debug)]
@@ -12,6 +13,17 @@ pub enum DynStrategyAdapter {
     PlayerFill(PlayerFillStrategyAdapter),
     #[cfg(feature = "adapters-grpc")]
     Grpc(GrpcStrategyAdapter),
+}
+
+impl Display for DynStrategyAdapter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Any(_) => write!(f, "any"),
+            Self::PlayerFill(_) => write!(f, "player_fill"),
+            #[cfg(feature = "adapters-grpc")]
+            Self::Grpc(_) => write!(f, "grpc"),
+        }
+    }
 }
 
 impl StrategyAdapter for DynStrategyAdapter {
