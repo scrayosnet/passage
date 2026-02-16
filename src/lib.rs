@@ -6,7 +6,7 @@ pub mod config;
 
 use crate::adapter::authentication::DynAuthenticationAdapter;
 use crate::adapter::discovery::DynDiscoveryAdapter;
-use crate::adapter::filter::DynFilterAdapter;
+use crate::adapter::filter::DynFilterAdapters;
 use crate::adapter::localization::DynLocalizationAdapter;
 use crate::adapter::status::DynStatusAdapter;
 use crate::adapter::strategy::DynStrategyAdapter;
@@ -17,7 +17,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, info};
 
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
 ///
@@ -34,11 +34,21 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     debug!("building adapters");
     let status = DynStatusAdapter::from_config(config.adapters.status).await?;
     let discovery = DynDiscoveryAdapter::from_config(config.adapters.discovery).await?;
-    let filter = DynFilterAdapter::from_configs(config.adapters.filter).await?;
+    let filters = DynFilterAdapters::from_config(config.adapters.filter).await?;
     let strategy = DynStrategyAdapter::from_config(config.adapters.strategy).await?;
     let authentication =
         DynAuthenticationAdapter::from_config(config.adapters.authentication).await?;
     let localization = DynLocalizationAdapter::from_config(config.adapters.localization).await?;
+
+    info!(
+        status = %status,
+        discovery = %discovery,
+        filters = %filters,
+        strategy = %strategy,
+        authentication = %authentication,
+        localization = %localization,
+        "build adapters",
+    );
 
     // initialize the rate limiter
     let rate_limiter = config.rate_limiter.map(|config| {
@@ -65,7 +75,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let mut listener = Listener::new(
         Arc::new(status),
         Arc::new(discovery),
-        Arc::new(filter),
+        Arc::new(filters),
         Arc::new(strategy),
         Arc::new(authentication),
         Arc::new(localization),

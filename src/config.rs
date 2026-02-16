@@ -362,19 +362,22 @@ pub struct OptionFilterAdapter {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FilterAdapter {
-    Fixed(FixedFilter),
+    #[serde(alias = "fixed")]
+    Meta(MetaFilter),
+    PlayerAllow(PlayerAllowFilter),
+    PlayerBlock(PlayerBlockFilter),
 }
 
 impl Default for FilterAdapter {
     fn default() -> Self {
-        Self::Fixed(FixedFilter::default())
+        Self::Meta(MetaFilter::default())
     }
 }
 
-/// [`FixedFilter`] hold the fixed filter configuration.
+/// [`MetaFilter`] hold the metadata filter configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
 #[serde(default)]
-pub struct FixedFilter {
+pub struct MetaFilter {
     /// List of filter rules. All rules must match (AND logic).
     pub rules: Vec<FilterRule>,
 }
@@ -414,29 +417,51 @@ pub enum FilterOperation {
     NotIn(Vec<String>),
 }
 
+/// [`PlayerAllowFilter`] hold the player filter configuration (blocks all if empty).
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct PlayerAllowFilter {
+    /// List of player usernames to allow (disabled if empty).
+    pub usernames: Option<Vec<String>>,
+
+    /// Regex of player usernames to allow (disabled if empty).
+    pub username: Option<String>,
+
+    /// List of player IDs to allow (disabled if empty).
+    pub ids: Option<Vec<String>>,
+}
+
+/// [`PlayerBlockFilter`] hold the player filter configuration (allows all if empty).
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct PlayerBlockFilter {
+    /// List of player usernames to block (disabled if empty).
+    pub usernames: Option<Vec<String>>,
+
+    /// Regex of player usernames to block (disabled if empty).
+    pub username: Option<String>,
+
+    /// List of player IDs to block (disabled if empty).
+    pub ids: Option<Vec<String>>,
+}
+
 /// [`StrategyAdapter`] hold the strategy adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StrategyAdapter {
-    Fixed(FixedStrategy),
+    #[serde(alias = "fixed")]
+    Any,
     PlayerFill(PlayerFillStrategy),
     Grpc(GrpcStrategy),
 }
 
 impl Default for StrategyAdapter {
     fn default() -> Self {
-        Self::Fixed(FixedStrategy::default())
+        Self::Any
     }
 }
 
-/// [`FixedStrategy`] hold the fixed strategy configuration.
-#[derive(Default, Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct FixedStrategy {
-    // TODO add some logic here!
-}
-
-/// [`FixedStrategy`] hold the fixed strategy configuration.
+/// [`PlayerFillStrategy`] hold the player fill strategy configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct PlayerFillStrategy {
@@ -459,6 +484,7 @@ pub struct GrpcStrategy {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthenticationAdapter {
+    Disabled,
     Fixed(FixedAuthentication),
     Mojang(MojangAuthentication),
 }

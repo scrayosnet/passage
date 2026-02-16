@@ -1,17 +1,29 @@
 use crate::config;
 use passage_adapters::strategy::StrategyAdapter;
-use passage_adapters::{FixedStrategyAdapter, PlayerFillStrategyAdapter, Protocol, Target};
+use passage_adapters::{AnyStrategyAdapter, PlayerFillStrategyAdapter, Protocol, Target};
 #[cfg(feature = "adapters-grpc")]
 use passage_adapters_grpc::GrpcStrategyAdapter;
 use sentry::protocol::Uuid;
+use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 
 #[derive(Debug)]
 pub enum DynStrategyAdapter {
-    Fixed(FixedStrategyAdapter),
+    Any(AnyStrategyAdapter),
     PlayerFill(PlayerFillStrategyAdapter),
     #[cfg(feature = "adapters-grpc")]
     Grpc(GrpcStrategyAdapter),
+}
+
+impl Display for DynStrategyAdapter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Any(_) => write!(f, "any"),
+            Self::PlayerFill(_) => write!(f, "player_fill"),
+            #[cfg(feature = "adapters-grpc")]
+            Self::Grpc(_) => write!(f, "grpc"),
+        }
+    }
 }
 
 impl StrategyAdapter for DynStrategyAdapter {
@@ -24,7 +36,7 @@ impl StrategyAdapter for DynStrategyAdapter {
         targets: Vec<Target>,
     ) -> passage_adapters::Result<Option<Target>> {
         match self {
-            DynStrategyAdapter::Fixed(adapter) => {
+            DynStrategyAdapter::Any(adapter) => {
                 adapter
                     .select(client_addr, server_addr, protocol, user, targets)
                     .await
@@ -50,9 +62,9 @@ impl DynStrategyAdapter {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         #[allow(unreachable_patterns)]
         match config {
-            config::StrategyAdapter::Fixed(_config) => {
-                let adapter = FixedStrategyAdapter::new();
-                Ok(DynStrategyAdapter::Fixed(adapter))
+            config::StrategyAdapter::Any => {
+                let adapter = AnyStrategyAdapter::new();
+                Ok(DynStrategyAdapter::Any(adapter))
             }
             config::StrategyAdapter::PlayerFill(config) => {
                 let adapter = PlayerFillStrategyAdapter::new(config.field, config.max_players);

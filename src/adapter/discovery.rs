@@ -5,6 +5,7 @@ use passage_adapters::{FixedDiscoveryAdapter, Target};
 use passage_adapters_agones::{AgonesDiscoveryAdapter, watcher_config};
 #[cfg(feature = "adapters-grpc")]
 use passage_adapters_grpc::GrpcDiscoveryAdapter;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub enum DynDiscoveryAdapter {
@@ -13,6 +14,18 @@ pub enum DynDiscoveryAdapter {
     Agones(AgonesDiscoveryAdapter),
     #[cfg(feature = "adapters-grpc")]
     Grpc(GrpcDiscoveryAdapter),
+}
+
+impl Display for DynDiscoveryAdapter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Fixed(_) => write!(f, "fixed"),
+            #[cfg(feature = "adapters-agones")]
+            Self::Agones(_) => write!(f, "agones"),
+            #[cfg(feature = "adapters-grpc")]
+            Self::Grpc(_) => write!(f, "grpc"),
+        }
+    }
 }
 
 impl DiscoveryAdapter for DynDiscoveryAdapter {

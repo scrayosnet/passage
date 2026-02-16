@@ -58,12 +58,12 @@ impl FilterRule {
 }
 
 #[derive(Debug, Default)]
-pub struct FixedFilterAdapter {
+pub struct MetaFilterAdapter {
     /// List of filter rules. All rules must match (AND logic).
     rules: Vec<FilterRule>,
 }
 
-impl FixedFilterAdapter {
+impl MetaFilterAdapter {
     pub fn new(rules: Vec<FilterRule>) -> Self {
         Self { rules }
     }
@@ -86,7 +86,7 @@ impl FixedFilterAdapter {
     }
 }
 
-impl FilterAdapter for FixedFilterAdapter {
+impl FilterAdapter for MetaFilterAdapter {
     #[tracing::instrument(skip_all)]
     async fn filter(
         &self,
@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn test_equals_filter() {
-        let filter = FixedFilterAdapter::default().add_rule(
+        let filter = MetaFilterAdapter::default().add_rule(
             "region".to_string(),
             FilterOperation::Equals("us-west".to_string()),
         );
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_not_equals_filter() {
-        let filter = FixedFilterAdapter::default().add_rule(
+        let filter = MetaFilterAdapter::default().add_rule(
             "region".to_string(),
             FilterOperation::NotEquals("us-west".to_string()),
         );
@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn test_exists_filter() {
         let filter =
-            FixedFilterAdapter::default().add_rule("region".to_string(), FilterOperation::Exists);
+            MetaFilterAdapter::default().add_rule("region".to_string(), FilterOperation::Exists);
 
         let target1 = create_target("t1", vec![("region", "us-west")]);
         let target2 = create_target("t2", vec![]);
@@ -171,8 +171,8 @@ mod tests {
 
     #[test]
     fn test_not_exists_filter() {
-        let filter = FixedFilterAdapter::default()
-            .add_rule("region".to_string(), FilterOperation::NotExists);
+        let filter =
+            MetaFilterAdapter::default().add_rule("region".to_string(), FilterOperation::NotExists);
 
         let target1 = create_target("t1", vec![("region", "us-west")]);
         let target2 = create_target("t2", vec![]);
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn test_in_filter() {
-        let filter = FixedFilterAdapter::default().add_rule(
+        let filter = MetaFilterAdapter::default().add_rule(
             "region".to_string(),
             FilterOperation::In(vec!["us-west".to_string(), "us-east".to_string()]),
         );
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_multiple_rules() {
-        let filter = FixedFilterAdapter::default()
+        let filter = MetaFilterAdapter::default()
             .add_rule(
                 "region".to_string(),
                 FilterOperation::Equals("us-west".to_string()),
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn test_empty_rules_accepts_all() {
-        let filter = FixedFilterAdapter::default();
+        let filter = MetaFilterAdapter::default();
 
         let target = create_target("t1", vec![("region", "us-west")]);
 

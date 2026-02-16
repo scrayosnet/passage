@@ -6,6 +6,7 @@ use passage_adapters_grpc::GrpcStatusAdapter;
 #[cfg(feature = "adapters-http")]
 use passage_adapters_http::HttpStatusAdapter;
 use serde_json::value::RawValue;
+use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 
 #[derive(Debug)]
@@ -15,6 +16,18 @@ pub enum DynStatusAdapter {
     Grpc(GrpcStatusAdapter),
     #[cfg(feature = "adapters-http")]
     Http(HttpStatusAdapter),
+}
+
+impl Display for DynStatusAdapter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Fixed(_) => write!(f, "fixed"),
+            #[cfg(feature = "adapters-grpc")]
+            Self::Grpc(_) => write!(f, "grpc"),
+            #[cfg(feature = "adapters-http")]
+            Self::Http(_) => write!(f, "http"),
+        }
+    }
 }
 
 impl StatusAdapter for DynStatusAdapter {

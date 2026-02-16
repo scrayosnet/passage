@@ -18,13 +18,16 @@ pub mod strategy;
 pub use error::*;
 
 // reexport adapters
+pub use authentication::disabled::DisabledAuthenticationAdapter;
 pub use authentication::fixed::FixedAuthenticationAdapter;
 pub use discovery::fixed::FixedDiscoveryAdapter;
-pub use filter::fixed::FixedFilterAdapter;
+pub use filter::meta::MetaFilterAdapter;
 pub use filter::option::OptionFilterAdapter;
+pub use filter::player_allow::PlayerAllowFilterAdapter;
+pub use filter::player_block::PlayerBlockFilterAdapter;
 pub use localization::fixed::FixedLocalizationAdapter;
 pub use status::fixed::FixedStatusAdapter;
-pub use strategy::fixed::FixedStrategyAdapter;
+pub use strategy::any::AnyStrategyAdapter;
 pub use strategy::player_fill::PlayerFillStrategyAdapter;
 
 /// The Minecraft protocol version type.
