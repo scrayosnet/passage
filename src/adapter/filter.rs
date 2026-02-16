@@ -3,7 +3,8 @@ use crate::config;
 use passage_adapters::filter::FilterAdapter;
 use passage_adapters::filter::meta::{FilterOperation, FilterRule};
 use passage_adapters::{
-    MetaFilterAdapter, OptionFilterAdapter, PlayerFilterAdapter, Protocol, Target,
+    MetaFilterAdapter, OptionFilterAdapter, PlayerAllowFilterAdapter, PlayerBlockFilterAdapter,
+    Protocol, Target,
 };
 use sentry::protocol::Uuid;
 use std::fmt::{Display, Formatter};
@@ -12,14 +13,16 @@ use std::net::SocketAddr;
 #[derive(Debug)]
 pub enum DynFilterAdapter {
     Meta(OptionFilterAdapter<MetaFilterAdapter>),
-    Player(OptionFilterAdapter<PlayerFilterAdapter>),
+    PlayerAllow(OptionFilterAdapter<PlayerAllowFilterAdapter>),
+    PlayerBlock(OptionFilterAdapter<PlayerBlockFilterAdapter>),
 }
 
 impl Display for DynFilterAdapter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Meta(_) => write!(f, "meta"),
-            Self::Player(_) => write!(f, "player"),
+            Self::PlayerAllow(_) => write!(f, "player_allow"),
+            Self::PlayerBlock(_) => write!(f, "player_block"),
         }
     }
 }
@@ -39,7 +42,12 @@ impl FilterAdapter for DynFilterAdapter {
                     .filter(client_addr, server_addr, protocol, user, targets)
                     .await
             }
-            DynFilterAdapter::Player(adapter) => {
+            DynFilterAdapter::PlayerAllow(adapter) => {
+                adapter
+                    .filter(client_addr, server_addr, protocol, user, targets)
+                    .await
+            }
+            DynFilterAdapter::PlayerBlock(adapter) => {
                 adapter
                     .filter(client_addr, server_addr, protocol, user, targets)
                     .await
@@ -61,17 +69,23 @@ impl DynFilterAdapter {
                 let option_adapter = OptionFilterAdapter::new(hostname, adapter)?;
                 Ok(DynFilterAdapter::Meta(option_adapter))
             }
-            config::FilterAdapter::Player(config) => {
-                let adapter = PlayerFilterAdapter::new(
-                    config.allow_usernames,
-                    opt_to_regex(config.allow_username)?,
-                    opt_vec_to_uuid(config.allow_ids)?,
-                    config.block_usernames,
-                    opt_to_regex(config.block_username)?,
-                    opt_vec_to_uuid(config.block_ids)?,
+            config::FilterAdapter::PlayerAllow(config) => {
+                let adapter = PlayerAllowFilterAdapter::new(
+                    config.usernames,
+                    opt_to_regex(config.username)?,
+                    opt_vec_to_uuid(config.ids)?,
                 );
                 let option_adapter = OptionFilterAdapter::new(hostname, adapter)?;
-                Ok(DynFilterAdapter::Player(option_adapter))
+                Ok(DynFilterAdapter::PlayerAllow(option_adapter))
+            }
+            config::FilterAdapter::PlayerBlock(config) => {
+                let adapter = PlayerBlockFilterAdapter::new(
+                    config.usernames,
+                    opt_to_regex(config.username)?,
+                    opt_vec_to_uuid(config.ids)?,
+                );
+                let option_adapter = OptionFilterAdapter::new(hostname, adapter)?;
+                Ok(DynFilterAdapter::PlayerBlock(option_adapter))
             }
             _ => Err("unknown filter adapter configured".into()),
         }
