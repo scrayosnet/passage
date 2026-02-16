@@ -2406,6 +2406,7 @@ dependencies = [
  "passage-adapters-grpc",
  "passage-adapters-http",
  "passage-protocol",
+ "regex",
  "sentry",
  "sentry-tracing",
  "serde",
@@ -2415,6 +2416,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

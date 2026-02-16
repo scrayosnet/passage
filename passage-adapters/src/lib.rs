@@ -23,6 +23,7 @@ pub use authentication::fixed::FixedAuthenticationAdapter;
 pub use discovery::fixed::FixedDiscoveryAdapter;
 pub use filter::meta::MetaFilterAdapter;
 pub use filter::option::OptionFilterAdapter;
+pub use filter::player::PlayerFilterAdapter;
 pub use localization::fixed::FixedLocalizationAdapter;
 pub use status::fixed::FixedStatusAdapter;
 pub use strategy::any::AnyStrategyAdapter;

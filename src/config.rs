@@ -364,6 +364,7 @@ pub struct OptionFilterAdapter {
 pub enum FilterAdapter {
     #[serde(alias = "fixed")]
     Meta(MetaFilter),
+    Player(PlayerFilter),
 }
 
 impl Default for FilterAdapter {
@@ -413,6 +414,35 @@ pub enum FilterOperation {
     /// Field must not be any of the specified values.
     #[serde(rename = "notIn")]
     NotIn(Vec<String>),
+}
+
+/// [`PlayerFilter`] hold the player filter configuration.
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct PlayerFilter {
+    /// List of player usernames to allow (disabled if empty).
+    #[serde(alias = "allowusernames")]
+    pub allow_usernames: Option<Vec<String>>,
+
+    /// Regex of player usernames to allow (disabled if empty).
+    #[serde(alias = "allowusername")]
+    pub allow_username: Option<String>,
+
+    /// List of player IDs to allow (disabled if empty).
+    #[serde(alias = "allowids")]
+    pub allow_ids: Option<Vec<String>>,
+
+    /// List of player usernames to block (disabled if empty).
+    #[serde(alias = "blockusernames")]
+    pub block_usernames: Option<Vec<String>>,
+
+    /// Regex of player usernames to block (disabled if empty).
+    #[serde(alias = "blockusername")]
+    pub block_username: Option<String>,
+
+    /// List of player IDs to block (disabled if empty).
+    #[serde(alias = "blockids")]
+    pub block_ids: Option<Vec<String>>,
 }
 
 /// [`StrategyAdapter`] hold the strategy adapter configuration.

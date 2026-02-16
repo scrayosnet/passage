@@ -1,7 +1,10 @@
+use crate::adapter::{opt_to_regex, opt_vec_to_uuid};
 use crate::config;
-use passage_adapters::filter::meta::{FilterOperation, FilterRule};
 use passage_adapters::filter::FilterAdapter;
-use passage_adapters::{MetaFilterAdapter, OptionFilterAdapter, Protocol, Target};
+use passage_adapters::filter::meta::{FilterOperation, FilterRule};
+use passage_adapters::{
+    MetaFilterAdapter, OptionFilterAdapter, PlayerFilterAdapter, Protocol, Target,
+};
 use sentry::protocol::Uuid;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
@@ -9,12 +12,14 @@ use std::net::SocketAddr;
 #[derive(Debug)]
 pub enum DynFilterAdapter {
     Meta(OptionFilterAdapter<MetaFilterAdapter>),
+    Player(OptionFilterAdapter<PlayerFilterAdapter>),
 }
 
 impl Display for DynFilterAdapter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Meta(_) => write!(f, "meta"),
+            Self::Player(_) => write!(f, "player"),
         }
     }
 }
@@ -30,6 +35,11 @@ impl FilterAdapter for DynFilterAdapter {
     ) -> passage_adapters::Result<Vec<Target>> {
         match self {
             DynFilterAdapter::Meta(adapter) => {
+                adapter
+                    .filter(client_addr, server_addr, protocol, user, targets)
+                    .await
+            }
+            DynFilterAdapter::Player(adapter) => {
                 adapter
                     .filter(client_addr, server_addr, protocol, user, targets)
                     .await
@@ -50,6 +60,18 @@ impl DynFilterAdapter {
                     MetaFilterAdapter::new(config.rules.into_iter().map(Into::into).collect());
                 let option_adapter = OptionFilterAdapter::new(hostname, adapter)?;
                 Ok(DynFilterAdapter::Meta(option_adapter))
+            }
+            config::FilterAdapter::Player(config) => {
+                let adapter = PlayerFilterAdapter::new(
+                    config.allow_usernames,
+                    opt_to_regex(config.allow_username)?,
+                    opt_vec_to_uuid(config.allow_ids)?,
+                    config.block_usernames,
+                    opt_to_regex(config.block_username)?,
+                    opt_vec_to_uuid(config.block_ids)?,
+                );
+                let option_adapter = OptionFilterAdapter::new(hostname, adapter)?;
+                Ok(DynFilterAdapter::Player(option_adapter))
             }
             _ => Err("unknown filter adapter configured".into()),
         }

@@ -1,5 +1,6 @@
 pub mod meta;
 pub mod option;
+pub mod player;
 
 use crate::{Protocol, Target, error::Result};
 use std::fmt::Debug;

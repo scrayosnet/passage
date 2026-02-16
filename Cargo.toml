@@ -92,6 +92,8 @@ tracing-subscriber = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["raw_value"] }
 config = { workspace = true }
+regex = { workspace = true }
+uuid = { workspace = true }
 
 tracing-opentelemetry = { workspace = true }
 opentelemetry = { workspace = true, features = ["trace", "metrics"] }
