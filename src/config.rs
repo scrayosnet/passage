@@ -459,6 +459,7 @@ pub struct GrpcStrategy {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthenticationAdapter {
+    Disabled,
     Fixed(FixedAuthentication),
     Mojang(MojangAuthentication),
 }

@@ -18,6 +18,7 @@ pub mod strategy;
 pub use error::*;
 
 // reexport adapters
+pub use authentication::disabled::DisabledAuthenticationAdapter;
 pub use authentication::fixed::FixedAuthenticationAdapter;
 pub use discovery::fixed::FixedDiscoveryAdapter;
 pub use filter::fixed::FixedFilterAdapter;

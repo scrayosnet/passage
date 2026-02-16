@@ -1,13 +1,14 @@
 use crate::config;
-use passage_adapters::Protocol;
 use passage_adapters::authentication::fixed::FixedAuthenticationAdapter;
 use passage_adapters::authentication::{AuthenticationAdapter, Profile};
+use passage_adapters::{DisabledAuthenticationAdapter, Protocol};
 use passage_adapters_http::MojangAdapter;
 use sentry::protocol::Uuid;
 use std::net::SocketAddr;
 
 #[derive(Debug)]
 pub enum DynAuthenticationAdapter {
+    Disabled(DisabledAuthenticationAdapter),
     Fixed(FixedAuthenticationAdapter),
     #[cfg(feature = "adapters-http")]
     Mojang(MojangAdapter),
@@ -24,6 +25,18 @@ impl AuthenticationAdapter for DynAuthenticationAdapter {
         encoded_public: &[u8],
     ) -> passage_adapters::Result<Profile> {
         match self {
+            DynAuthenticationAdapter::Disabled(adapter) => {
+                adapter
+                    .authenticate(
+                        client_addr,
+                        server_addr,
+                        protocol,
+                        user,
+                        shared_secret,
+                        encoded_public,
+                    )
+                    .await
+            }
             DynAuthenticationAdapter::Fixed(adapter) => {
                 adapter
                     .authenticate(
@@ -59,6 +72,10 @@ impl DynAuthenticationAdapter {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         #[allow(unreachable_patterns)]
         match config {
+            config::AuthenticationAdapter::Disabled => {
+                let adapter = DisabledAuthenticationAdapter::new();
+                Ok(DynAuthenticationAdapter::Disabled(adapter))
+            }
             config::AuthenticationAdapter::Fixed(config) => {
                 let adapter = FixedAuthenticationAdapter::new(config.profile);
                 Ok(DynAuthenticationAdapter::Fixed(adapter))
