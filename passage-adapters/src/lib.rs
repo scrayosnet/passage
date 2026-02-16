@@ -25,7 +25,7 @@ pub use filter::meta::MetaFilterAdapter;
 pub use filter::option::OptionFilterAdapter;
 pub use localization::fixed::FixedLocalizationAdapter;
 pub use status::fixed::FixedStatusAdapter;
-pub use strategy::fixed::FixedStrategyAdapter;
+pub use strategy::any::AnyStrategyAdapter;
 pub use strategy::player_fill::PlayerFillStrategyAdapter;
 
 /// The Minecraft protocol version type.

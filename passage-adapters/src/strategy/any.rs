@@ -5,15 +5,15 @@ use tracing::trace;
 use uuid::Uuid;
 
 #[derive(Debug, Default)]
-pub struct FixedStrategyAdapter {}
+pub struct AnyStrategyAdapter {}
 
-impl FixedStrategyAdapter {
+impl AnyStrategyAdapter {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl StrategyAdapter for FixedStrategyAdapter {
+impl StrategyAdapter for AnyStrategyAdapter {
     #[tracing::instrument(skip_all)]
     async fn select(
         &self,
@@ -23,7 +23,7 @@ impl StrategyAdapter for FixedStrategyAdapter {
         _user: (&str, &Uuid),
         targets: Vec<Target>,
     ) -> Result<Option<Target>> {
-        trace!(len = targets.len(), "selecting first target");
+        trace!(len = targets.len(), "selecting any target");
         Ok(targets.first().cloned())
     }
 }

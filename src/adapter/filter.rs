@@ -1,6 +1,6 @@
 use crate::config;
-use passage_adapters::filter::meta::{FilterOperation, FilterRule};
 use passage_adapters::filter::FilterAdapter;
+use passage_adapters::filter::meta::{FilterOperation, FilterRule};
 use passage_adapters::{MetaFilterAdapter, OptionFilterAdapter, Protocol, Target};
 use sentry::protocol::Uuid;
 use std::net::SocketAddr;

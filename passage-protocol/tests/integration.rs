@@ -1,8 +1,8 @@
 use passage_adapters::authentication::Profile;
 use passage_adapters::discovery::DiscoveryAdapter;
 use passage_adapters::{
-    FixedAuthenticationAdapter, FixedDiscoveryAdapter, FixedLocalizationAdapter,
-    FixedStatusAdapter, FixedStrategyAdapter, MetaFilterAdapter, Target,
+    AnyStrategyAdapter, FixedAuthenticationAdapter, FixedDiscoveryAdapter,
+    FixedLocalizationAdapter, FixedStatusAdapter, MetaFilterAdapter, Target,
 };
 use passage_packets::configuration::clientbound as conf_out;
 use passage_packets::configuration::serverbound as conf_in;
@@ -67,7 +67,7 @@ async fn simulate_handshake() {
 
     // build supplier
     let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
+    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
     let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
     let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
     let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
@@ -120,7 +120,7 @@ async fn simulate_status() {
 
     // build supplier
     let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
+    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
     let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
     let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
     let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
@@ -192,7 +192,7 @@ async fn simulate_transfer_no_configuration() {
 
     // build supplier
     let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
+    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
     let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
     let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
     let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
@@ -360,7 +360,7 @@ async fn simulate_slow_transfer_no_configuration() {
 
     // build supplier
     let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
+    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
     let discovery_adapter = Arc::new(SlowDiscoveryAdapter::new(2 * KEEP_ALIVE_INTERVAL + 1));
     let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
     let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
@@ -550,7 +550,7 @@ async fn simulate_login_no_configuration() {
 
     // build supplier
     let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
+    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
     let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
     let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
     let authentication_adapter = Arc::new(FixedAuthenticationAdapter::new(profile));
@@ -688,7 +688,7 @@ async fn sends_keep_alive() {
 
     // build supplier
     let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
+    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
     let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
     let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
     let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
@@ -862,7 +862,7 @@ async fn no_respond_keep_alive() {
 
     // build supplier
     let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(FixedStrategyAdapter::new());
+    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
     let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
     let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
     let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());

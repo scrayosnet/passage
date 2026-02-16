@@ -419,25 +419,19 @@ pub enum FilterOperation {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StrategyAdapter {
-    Fixed(FixedStrategy),
+    #[serde(alias = "fixed")]
+    Any,
     PlayerFill(PlayerFillStrategy),
     Grpc(GrpcStrategy),
 }
 
 impl Default for StrategyAdapter {
     fn default() -> Self {
-        Self::Fixed(FixedStrategy::default())
+        Self::Any
     }
 }
 
-/// [`FixedStrategy`] hold the fixed strategy configuration.
-#[derive(Default, Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct FixedStrategy {
-    // TODO add some logic here!
-}
-
-/// [`FixedStrategy`] hold the fixed strategy configuration.
+/// [`PlayerFillStrategy`] hold the player fill strategy configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct PlayerFillStrategy {
