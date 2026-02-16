@@ -2,7 +2,7 @@
 members = ["passage-adapters", "passage-protocol", "passage-packets", "passage-adapters/grpc", "passage-adapters/agones", "passage-adapters/http"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 repository = "https://github.com/scrayosnet/passage"
 documentation = "https://passage.scrayos.net/docs"
 homepage = "https://passage.scrayos.net"

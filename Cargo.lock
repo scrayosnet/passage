@@ -2394,7 +2394,7 @@ dependencies = [
 
 [[package]]
 name = "passage"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "config",
  "opentelemetry",
@@ -2421,7 +2421,7 @@ dependencies = [
 
 [[package]]
 name = "passage-adapters"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "num-bigint",
  "regex",
@@ -2435,7 +2435,7 @@ dependencies = [
 
 [[package]]
 name = "passage-adapters-agones"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "futures-util",
  "k8s-openapi",
@@ -2452,7 +2452,7 @@ dependencies = [
 
 [[package]]
 name = "passage-adapters-grpc"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "passage-adapters",
  "prost",
@@ -2470,7 +2470,7 @@ dependencies = [
 
 [[package]]
 name = "passage-adapters-http"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "passage-adapters",
  "reqwest 0.13.2",
@@ -2482,7 +2482,7 @@ dependencies = [
 
 [[package]]
 name = "passage-packets"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "criterion",
  "fake",
@@ -2497,7 +2497,7 @@ dependencies = [
 
 [[package]]
 name = "passage-protocol"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aes",
  "cfb8",
