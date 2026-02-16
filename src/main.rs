@@ -83,7 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         // initialize opentelemetry tracer (spans)
-        let tracer_provider = if let Some(tracer_config) = &config.otel.metrics {
+        let tracer_provider = if let Some(tracer_config) = &config.otel.traces {
             let traces_headers = HashMap::from_iter([(
                 "authorization".to_string(),
                 format!("Basic {}", tracer_config.token),
