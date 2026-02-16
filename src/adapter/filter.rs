@@ -1,13 +1,13 @@
 use crate::config;
+use passage_adapters::filter::meta::{FilterOperation, FilterRule};
 use passage_adapters::filter::FilterAdapter;
-use passage_adapters::filter::fixed::{FilterOperation, FilterRule};
-use passage_adapters::{FixedFilterAdapter, OptionFilterAdapter, Protocol, Target};
+use passage_adapters::{MetaFilterAdapter, OptionFilterAdapter, Protocol, Target};
 use sentry::protocol::Uuid;
 use std::net::SocketAddr;
 
 #[derive(Debug)]
 pub enum DynFilterAdapter {
-    Fixed(OptionFilterAdapter<FixedFilterAdapter>),
+    Meta(OptionFilterAdapter<MetaFilterAdapter>),
 }
 
 impl FilterAdapter for DynFilterAdapter {
@@ -20,7 +20,7 @@ impl FilterAdapter for DynFilterAdapter {
         targets: Vec<Target>,
     ) -> passage_adapters::Result<Vec<Target>> {
         match self {
-            DynFilterAdapter::Fixed(adapter) => {
+            DynFilterAdapter::Meta(adapter) => {
                 adapter
                     .filter(client_addr, server_addr, protocol, user, targets)
                     .await
@@ -36,11 +36,11 @@ impl DynFilterAdapter {
         let hostname = config.hostname;
         #[allow(unreachable_patterns)]
         match config.filter {
-            config::FilterAdapter::Fixed(config) => {
+            config::FilterAdapter::Meta(config) => {
                 let adapter =
-                    FixedFilterAdapter::new(config.rules.into_iter().map(Into::into).collect());
+                    MetaFilterAdapter::new(config.rules.into_iter().map(Into::into).collect());
                 let option_adapter = OptionFilterAdapter::new(hostname, adapter)?;
-                Ok(DynFilterAdapter::Fixed(option_adapter))
+                Ok(DynFilterAdapter::Meta(option_adapter))
             }
             _ => Err("unknown filter adapter configured".into()),
         }

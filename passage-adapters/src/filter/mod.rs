@@ -1,7 +1,7 @@
-pub mod fixed;
+pub mod meta;
 pub mod option;
 
-use crate::{Protocol, Target, error::Result};
+use crate::{error::Result, Protocol, Target};
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use uuid::Uuid;

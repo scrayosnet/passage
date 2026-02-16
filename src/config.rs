@@ -362,19 +362,20 @@ pub struct OptionFilterAdapter {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FilterAdapter {
-    Fixed(FixedFilter),
+    #[serde(alias = "fixed")]
+    Meta(MetaFilter),
 }
 
 impl Default for FilterAdapter {
     fn default() -> Self {
-        Self::Fixed(FixedFilter::default())
+        Self::Meta(MetaFilter::default())
     }
 }
 
-/// [`FixedFilter`] hold the fixed filter configuration.
+/// [`MetaFilter`] hold the metadata filter configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
 #[serde(default)]
-pub struct FixedFilter {
+pub struct MetaFilter {
     /// List of filter rules. All rules must match (AND logic).
     pub rules: Vec<FilterRule>,
 }
