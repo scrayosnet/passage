@@ -134,6 +134,9 @@ pub struct OpenTelemetry {
 
     /// The traces configuration (disabled if empty).
     pub metrics: Option<OpenTelemetryEndpoint>,
+
+    /// The logs configuration (disabled if empty).
+    pub logs: Option<OpenTelemetryEndpoint>,
 }
 
 /// [`OpenTelemetryEndpoint`] hold the OpenTelemetry configuration for a specific endpoint.

@@ -19,7 +19,6 @@ use tokio::time::{Instant, timeout};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{debug, info, instrument, warn};
-use uuid::Uuid;
 
 const DEFAULT_CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -107,10 +106,7 @@ where
                     break;
                 },
             };
-
-            // handle the connection
-            let trace_id = Uuid::new_v4();
-            self.handle(stream, addr, trace_id).await;
+            self.handle(stream, addr).await;
         }
 
         // wait for all connections to finish
@@ -122,7 +118,7 @@ where
     }
 
     #[instrument(skip(self, stream))]
-    async fn handle(&mut self, stream: TcpStream, addr: SocketAddr, trace_id: Uuid) {
+    async fn handle(&mut self, stream: TcpStream, addr: SocketAddr) {
         let connection_start = Instant::now();
 
         let (mut stream, client_addr) = if let Some(proxy_config) = self.proxy_protocol {

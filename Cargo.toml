@@ -40,7 +40,8 @@ reqwest = { version = "0.13", features = ["json"] }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-opentelemetry = { version = "0.32", features = ["metrics"] }
-opentelemetry = { version = "0.31", features = ["trace", "metrics"] }
+opentelemetry-appender-tracing = { version = "0.31.1" }
+opentelemetry = { version = "0.31", features = ["trace", "metrics", "logs"] }
 opentelemetry_sdk = { version = "0.31" }
 opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
 opentelemetry-otlp = { version = "0.31", features = ["http-proto", "metrics", "trace"] }
@@ -96,6 +97,7 @@ regex = { workspace = true }
 uuid = { workspace = true }
 
 tracing-opentelemetry = { workspace = true }
+opentelemetry-appender-tracing = { workspace = true }
 opentelemetry = { workspace = true, features = ["trace", "metrics"] }
 opentelemetry_sdk = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
