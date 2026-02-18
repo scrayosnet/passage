@@ -5,6 +5,7 @@ use crate::cookie::{
 use crate::crypto::stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream, create_ciphers};
 pub(crate) use crate::error::Error;
 use crate::{crypto, metrics};
+use opentelemetry::trace::TraceContextExt;
 use passage_adapters::authentication::AuthenticationAdapter;
 use passage_adapters::filter::FilterAdapter;
 use passage_adapters::localization::LocalizationAdapter;
@@ -30,7 +31,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{Instant, Interval};
-use tracing::{Instrument, debug, error, field, info, instrument};
+use tracing::{Instrument, Span, debug, error, field, info, instrument};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
 #[macro_export]
@@ -606,12 +608,19 @@ where
         // set session id if not exist (does not override the session fields)
         if session_cookie.is_none() {
             debug!("sending session cookie packet");
+            let trace_id = Span::current()
+                .context()
+                .span()
+                .span_context()
+                .trace_id()
+                .to_string();
             self.send_packet(conf_out::StoreCookiePacket {
                 key: SESSION_COOKIE_KEY.to_string(),
                 payload: serde_json::to_vec(&SessionCookie {
                     id: Uuid::new_v4(),
                     server_address: handshake.server_address.clone(),
                     server_port: handshake.server_port,
+                    trace_id: Some(trace_id),
                 })?,
             })
             .await?;

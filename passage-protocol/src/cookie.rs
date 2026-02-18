@@ -1,9 +1,12 @@
 use hmac::{Hmac, Mac};
+use opentelemetry::trace::SpanContext;
+use opentelemetry::{SpanId, TraceFlags, TraceId};
 use passage_adapters::authentication::ProfileProperty;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use tracing::trace;
 use uuid::Uuid;
 
 /// The auth cookie key.
@@ -36,6 +39,32 @@ pub struct SessionCookie {
     pub id: Uuid,
     pub server_address: String,
     pub server_port: u16,
+    #[serde(default)]
+    pub trace_id: Option<String>,
+}
+
+impl SessionCookie {
+    pub fn span_cx(&self) -> Option<SpanContext> {
+        // get trace id and parse
+        let Some(trace_id) = &self.trace_id else {
+            trace!("no trace id set in session cookie");
+            return None;
+        };
+
+        let Ok(trace_id) = TraceId::from_hex(trace_id) else {
+            trace!("failed to parse trace id from session cookie");
+            return None;
+        };
+
+        // create span context from trace id
+        Some(SpanContext::new(
+            trace_id,
+            SpanId::INVALID,
+            TraceFlags::SAMPLED,
+            true,
+            Default::default(),
+        ))
+    }
 }
 
 /// Signs a message with a secret. Returns the signed message. Use [`verify`] to verify and destruct
