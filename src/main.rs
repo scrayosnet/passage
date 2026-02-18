@@ -1,4 +1,3 @@
-use opentelemetry::logs::LoggerProvider;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
