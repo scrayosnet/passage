@@ -1,10 +1,12 @@
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::{KeyValue, global};
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::{
-    MetricExporter, Protocol, SpanExporter, WithExportConfig, WithHttpConfig,
+    LogExporter, MetricExporter, Protocol, SpanExporter, WithExportConfig, WithHttpConfig,
 };
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::metrics::MeterProviderBuilder;
+use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE;
 use opentelemetry_semantic_conventions::{
@@ -72,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .with_endpoint(&meter_config.address)
                 .with_headers(meter_headers.clone())
                 .build()?;
-            let meter_provider = MeterProviderBuilder::default()
+            let meter_provider = SdkMeterProvider::builder()
                 .with_periodic_exporter(meter_exporter)
                 .with_resource(resource(&config.otel.environment))
                 .build();
@@ -104,6 +106,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             None
         };
 
+        // initialize opentelemetry logs
+        let logger_provider = if let Some(logs_config) = &config.otel.logs {
+            let logs_headers = HashMap::from_iter([(
+                "authorization".to_string(),
+                format!("Basic {}", logs_config.token),
+            )]);
+            let log_exporter = LogExporter::builder()
+                .with_http()
+                .with_protocol(Protocol::HttpBinary)
+                .with_endpoint(&logs_config.address)
+                .with_headers(logs_headers)
+                .build()?;
+            let logger_provider = SdkLoggerProvider::builder()
+                .with_batch_exporter(log_exporter)
+                .with_resource(resource(&config.otel.environment))
+                .build();
+            Some(logger_provider)
+        } else {
+            None
+        };
+
         // initialize logging
         let subscriber = tracing_subscriber::registry()
             .with(
@@ -123,6 +146,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tracer_provider
                     .as_ref()
                     .map(|provider| OpenTelemetryLayer::new(provider.tracer("passage"))),
+            )
+            .with(
+                logger_provider
+                    .as_ref()
+                    .map(OpenTelemetryTracingBridge::new),
             );
 
         #[cfg(feature = "sentry")]
@@ -157,6 +185,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if let Some(Err(err)) = tracer_provider.map(|provider| provider.shutdown()) {
             warn!(err = %err, "Error while closing trace provider");
+        }
+        if let Some(Err(err)) = logger_provider.map(|provider| provider.shutdown()) {
+            warn!(err = %err, "Error while closing logger provider");
         }
 
         result
