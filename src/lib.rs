@@ -87,7 +87,9 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         include_tlvs: false,
         allow_v1: config.allow_v1,
         allow_v2: config.allow_v2,
-    }));
+    }))
+    .with_max_packet_length(config.max_packet_length as i32)
+    .with_auth_cookie_expiry(config.auth_cookie_expiry);
 
     debug!("starting listener");
     listener.listen(config.address, stop_token.clone()).await?;

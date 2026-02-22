@@ -44,6 +44,7 @@
 use config::{ConfigError, Environment, File, FileStoredFormat, Format, Map, Value, ValueKind};
 use passage_adapters::authentication::Profile;
 use passage_adapters::{Protocol, Target};
+use passage_protocol::connection::{DEFAULT_AUTH_COOKIE_EXPIRY, DEFAULT_MAX_PACKET_LENGTH};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -69,6 +70,12 @@ pub struct Config {
 
     /// The timeout in seconds that is used for connection timeouts.
     pub timeout: u64,
+
+    /// The max packet size in bytes accepted by the server.
+    pub max_packet_length: u64,
+
+    /// The number of seconds until an auth cookie expires.
+    pub auth_cookie_expiry: u64,
 
     /// The sentry configuration (disabled if empty).
     pub sentry: Option<Sentry>,
@@ -104,6 +111,8 @@ impl Default for Config {
             proxy_protocol: None,
             auth_secret: None,
             adapters: Adapters::default(),
+            max_packet_length: DEFAULT_MAX_PACKET_LENGTH as u64,
+            auth_cookie_expiry: DEFAULT_AUTH_COOKIE_EXPIRY,
         }
     }
 }
