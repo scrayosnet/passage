@@ -15,9 +15,6 @@ pub const AUTH_COOKIE_KEY: &str = "passage:authentication";
 /// The session cookie key.
 pub const SESSION_COOKIE_KEY: &str = "passage:session";
 
-/// The default expiry of the auth cookie (6 hours).
-pub const AUTH_COOKIE_EXPIRY_SECS: u64 = 6 * 60 * 60;
-
 /// Hmac type, expects 32 Byte hash
 pub type HmacSha256 = Hmac<Sha256>;
 

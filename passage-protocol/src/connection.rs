@@ -1,7 +1,4 @@
-use crate::cookie::{
-    AUTH_COOKIE_EXPIRY_SECS, AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign,
-    verify,
-};
+use crate::cookie::{AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign, verify};
 use crate::crypto::stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream, create_ciphers};
 pub(crate) use crate::error::Error;
 use crate::{crypto, metrics};
@@ -31,7 +28,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{Instant, Interval};
-use tracing::{Instrument, Span, debug, error, field, info, instrument};
+use tracing::{Instrument, debug, error, field, info, instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
@@ -63,6 +60,9 @@ macro_rules! match_packet {
 /// The max packet length in bytes. Larger packets are rejected.
 pub const DEFAULT_MAX_PACKET_LENGTH: VarInt = 10_000;
 
+/// The default auth cookie expiry time in seconds.
+pub const DEFAULT_AUTH_COOKIE_EXPIRY: u64 = 6 * 60 * 60;
+
 /// The interval in seconds at which keep-alive packets are sent. Has to be between 15 and 20 seconds,
 /// such that at most one keep-alive packet is in transit at any point.
 pub const KEEP_ALIVE_INTERVAL: u64 = 16;
@@ -84,6 +84,7 @@ pub struct Connection<S, Stat, Disc, Filt, Stra, Auth, Loca> {
     keep_alive_interval: Interval,
     auth_secret: Option<Vec<u8>>,
     max_packet_length: VarInt,
+    auth_cookie_expiry: u64,
 
     // client information
     client_address: SocketAddr,
@@ -130,6 +131,7 @@ where
             keep_alive_interval: interval,
             auth_secret: None,
             max_packet_length: DEFAULT_MAX_PACKET_LENGTH,
+            auth_cookie_expiry: DEFAULT_AUTH_COOKIE_EXPIRY,
             // client information
             client_address: "127.0.0.1:8080".parse().expect("hardcoded default address"),
             client_locale: None,
@@ -138,6 +140,11 @@ where
 
     pub fn with_max_packet_length(mut self, max_packet_length: VarInt) -> Self {
         self.max_packet_length = max_packet_length;
+        self
+    }
+
+    pub fn with_auth_cookie_expiry(mut self, auth_cookie_expiry: u64) -> Self {
+        self.auth_cookie_expiry = auth_cookie_expiry;
         self
     }
 
@@ -408,7 +415,7 @@ where
                 }
 
                 let cookie = serde_json::from_slice::<AuthCookie>(message)?;
-                let expires_at = cookie.timestamp + AUTH_COOKIE_EXPIRY_SECS;
+                let expires_at = cookie.timestamp + self.auth_cookie_expiry;
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("time error")
@@ -608,7 +615,7 @@ where
         // set session id if not exist (does not override the session fields)
         if session_cookie.is_none() {
             debug!("sending session cookie packet");
-            let trace_id = Span::current()
+            let trace_id = tracing::Span::current()
                 .context()
                 .span()
                 .span_context()

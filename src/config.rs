@@ -44,6 +44,7 @@
 use config::{ConfigError, Environment, File, FileStoredFormat, Format, Map, Value, ValueKind};
 use passage_adapters::authentication::Profile;
 use passage_adapters::{Protocol, Target};
+use passage_protocol::connection::{DEFAULT_AUTH_COOKIE_EXPIRY, DEFAULT_MAX_PACKET_LENGTH};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -69,6 +70,12 @@ pub struct Config {
 
     /// The timeout in seconds that is used for connection timeouts.
     pub timeout: u64,
+
+    /// The max packet size in bytes accepted by the server.
+    pub max_packet_length: u64,
+
+    /// The number of seconds until an auth cookie expires.
+    pub auth_cookie_expiry: u64,
 
     /// The sentry configuration (disabled if empty).
     pub sentry: Option<Sentry>,
@@ -104,6 +111,8 @@ impl Default for Config {
             proxy_protocol: None,
             auth_secret: None,
             adapters: Adapters::default(),
+            max_packet_length: DEFAULT_MAX_PACKET_LENGTH as u64,
+            auth_cookie_expiry: DEFAULT_AUTH_COOKIE_EXPIRY,
         }
     }
 }
@@ -217,7 +226,7 @@ pub struct Adapters {
 
 /// [`StatusAdapter`] hold the status adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum StatusAdapter {
     Fixed(FixedStatus),
     Grpc(GrpcStatus),
@@ -306,7 +315,7 @@ impl Default for HttpStatus {
 
 /// [`DiscoveryAdapter`] hold the discovery adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum DiscoveryAdapter {
     Fixed(FixedDiscovery),
     Agones(AgonesDiscovery),
@@ -363,11 +372,13 @@ pub struct OptionFilterAdapter {
 
 /// [`FilterAdapter`] hold the filter adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum FilterAdapter {
     #[serde(alias = "fixed")]
     Meta(MetaFilter),
+    #[serde(alias = "playerallow")]
     PlayerAllow(PlayerAllowFilter),
+    #[serde(alias = "playerblock")]
     PlayerBlock(PlayerBlockFilter),
 }
 
@@ -398,25 +409,22 @@ pub struct FilterRule {
 
 /// Filter operation to apply to a target field.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(tag = "op", content = "value")]
+#[serde(tag = "op", content = "value", rename_all = "snake_case")]
 pub enum FilterOperation {
     /// Field must equal the specified value.
-    #[serde(rename = "equals")]
     Equals(String),
     /// Field must not equal the specified value.
-    #[serde(rename = "notEquals")]
+    #[serde(alias = "notequals")]
     NotEquals(String),
     /// Field must exist (have any value).
-    #[serde(rename = "exists")]
     Exists,
     /// Field must not exist.
-    #[serde(rename = "notExists")]
+    #[serde(alias = "notexists")]
     NotExists,
     /// Field must be one of the specified values.
-    #[serde(rename = "in")]
     In(Vec<String>),
     /// Field must not be any of the specified values.
-    #[serde(rename = "notIn")]
+    #[serde(alias = "notin")]
     NotIn(Vec<String>),
 }
 
@@ -450,10 +458,11 @@ pub struct PlayerBlockFilter {
 
 /// [`StrategyAdapter`] hold the strategy adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum StrategyAdapter {
     #[serde(alias = "fixed")]
     Any,
+    #[serde(alias = "playerfill")]
     PlayerFill(PlayerFillStrategy),
     Grpc(GrpcStrategy),
 }
@@ -485,7 +494,7 @@ pub struct GrpcStrategy {
 
 /// [`AuthenticationAdapter`] hold the authentication adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum AuthenticationAdapter {
     Disabled,
     Fixed(FixedAuthentication),
@@ -517,7 +526,7 @@ pub struct MojangAuthentication {
 
 /// [`LocalizationAdapter`] hold the localization adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum LocalizationAdapter {
     Fixed(FixedLocalization),
 }

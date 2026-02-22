@@ -1,4 +1,4 @@
-use crate::connection::{Connection, Error};
+use crate::connection::{Connection, DEFAULT_AUTH_COOKIE_EXPIRY, DEFAULT_MAX_PACKET_LENGTH, Error};
 use crate::metrics;
 use crate::rate_limiter::RateLimiter;
 use passage_adapters::authentication::AuthenticationAdapter;
@@ -35,6 +35,8 @@ pub struct Listener<Stat, Disc, Filt, Stra, Auth, Loca> {
     proxy_protocol: Option<ParseConfig>,
     connection_timeout: Duration,
     auth_secret: Option<Vec<u8>>,
+    max_packet_length: i32,
+    auth_cookie_expiry: u64,
 }
 
 impl<Stat, Disc, Filt, Stra, Auth, Loca> Listener<Stat, Disc, Filt, Stra, Auth, Loca>
@@ -66,6 +68,8 @@ where
             proxy_protocol: None,
             connection_timeout: DEFAULT_CONNECTION_TIMEOUT,
             auth_secret: None,
+            max_packet_length: DEFAULT_MAX_PACKET_LENGTH,
+            auth_cookie_expiry: DEFAULT_AUTH_COOKIE_EXPIRY,
         }
     }
 
@@ -86,6 +90,16 @@ where
 
     pub fn with_auth_secret(mut self, auth_secret: Option<Vec<u8>>) -> Self {
         self.auth_secret = auth_secret;
+        self
+    }
+
+    pub fn with_max_packet_length(mut self, max_packet_length: i32) -> Self {
+        self.max_packet_length = max_packet_length;
+        self
+    }
+
+    pub fn with_auth_cookie_expiry(mut self, auth_cookie_expiry: u64) -> Self {
+        self.auth_cookie_expiry = auth_cookie_expiry;
         self
     }
 
