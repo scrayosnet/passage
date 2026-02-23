@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::localization::LocalizationAdapter;
 use std::collections::HashMap;
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 #[derive(Debug)]
 pub struct FixedLocalizationAdapter {
@@ -15,6 +15,25 @@ impl FixedLocalizationAdapter {
             default_locale,
             messages,
         }
+    }
+
+    /// Splits a locale string into its language and country parts (splitting by `_`) with decreasing
+    /// precision.
+    ///
+    /// For example, the locale `en_US` is converted into the vector `["en_US", "en"]`.
+    fn split_locale<'a>(&self, locale: &'a str) -> Vec<&'a str> {
+        // get all occurrences of '_' in the locale string
+        let indices = locale
+            .match_indices('_')
+            .map(|x| x.0)
+            .collect::<Vec<usize>>();
+
+        // build decreasing slices
+        let mut slices = vec![locale];
+        for i in indices.iter().rev() {
+            slices.push(&locale[..*i]);
+        }
+        slices
     }
 }
 
@@ -36,13 +55,12 @@ impl LocalizationAdapter for FixedLocalizationAdapter {
         params: &[(&'static str, String)],
     ) -> Result<String> {
         trace!("localizing fixed");
+        // get locales to check in order (e.g., 'de_DE' -> 'de', -> 'en_US' -> 'en')
         let locale = locale.unwrap_or(&self.default_locale);
-        let locales = [
-            locale,
-            &locale[..2],
-            &self.default_locale,
-            &self.default_locale[..2],
-        ];
+        let mut locales = vec![];
+        locales.append(&mut self.split_locale(locale));
+        locales.append(&mut self.split_locale(&self.default_locale));
+        debug!(locales = ?locales, "build locales");
 
         let mut locale_messages = None;
         for locale in &locales {
