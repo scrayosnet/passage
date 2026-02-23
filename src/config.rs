@@ -320,6 +320,7 @@ pub enum DiscoveryAdapter {
     Fixed(FixedDiscovery),
     Agones(AgonesDiscovery),
     Grpc(GrpcDiscovery),
+    Dns(DnsDiscovery),
 }
 
 impl Default for DiscoveryAdapter {
@@ -356,6 +357,35 @@ pub struct AgonesDiscovery {
 pub struct GrpcDiscovery {
     /// The address of the gRPC adapter server.
     pub address: String,
+}
+
+/// [`DnsDiscovery`] hold the DNS discovery configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DnsDiscovery {
+    /// The DNS domain to query (e.g., "_minecraft._tcp.example.com" for SRV or "mc.example.com" for A).
+    pub domain: String,
+
+    /// The type of DNS record to query ("srv" or "a").
+    pub record_type: String,
+
+    /// The default port to use for A/AAAA records (required if record_type is "a").
+    pub port: Option<u16>,
+
+    /// How often to re-query DNS in seconds.
+    #[serde(alias = "refreshinterval")]
+    pub refresh_interval: u64,
+}
+
+impl Default for DnsDiscovery {
+    fn default() -> Self {
+        Self {
+            domain: String::new(),
+            record_type: "srv".to_string(),
+            port: None,
+            refresh_interval: 30,
+        }
+    }
 }
 
 /// [`OptionFilterAdapter`] holds a filter adapter configuration that may be applied conditionally.

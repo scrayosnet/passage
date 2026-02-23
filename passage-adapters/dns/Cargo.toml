@@ -1,0 +1,26 @@
+[package]
+name = "passage-adapters-dns"
+description = "Minecraft Server Passage DNS Adapters"
+authors = [
+    "Joshua Dean Küpper <admin@joshua-kuepper.de>",
+    "Paul Wagner <contact@paulwagner.dev>",
+]
+license = "MIT"
+readme = "README.md"
+keywords = ["minecraft", "discovery", "dns"]
+categories = ["emulators", "network-programming"]
+version.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+passage-adapters = { workspace = true }
+
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+trust-dns-resolver = { version = "0.23" }
