@@ -18,10 +18,10 @@ impl FixedLocalizationAdapter {
     }
 
     /// Splits a locale string into its language and country parts (splitting by `_`) with decreasing
-    /// precision.
+    /// precision and adds them to the given vector.
     ///
-    /// For example, the locale `en_US` is converted into the vector `["en_US", "en"]`.
-    fn split_locale<'a>(&self, locale: &'a str) -> Vec<&'a str> {
+    /// For example, the locale `en_US` is converted into the vector elements `["en_US", "en"]`.
+    fn append_locale<'a>(&self, locale: &'a str, locales: &mut Vec<&'a str>) {
         // get all occurrences of '_' in the locale string
         let indices = locale
             .match_indices('_')
@@ -29,11 +29,10 @@ impl FixedLocalizationAdapter {
             .collect::<Vec<usize>>();
 
         // build decreasing slices
-        let mut slices = vec![locale];
+        locales.push(locale);
         for i in indices.iter().rev() {
-            slices.push(&locale[..*i]);
+            locales.push(&locale[..*i]);
         }
-        slices
     }
 }
 
@@ -58,8 +57,8 @@ impl LocalizationAdapter for FixedLocalizationAdapter {
         // get locales to check in order (e.g., 'de_DE' -> 'de', -> 'en_US' -> 'en')
         let locale = locale.unwrap_or(&self.default_locale);
         let mut locales = vec![];
-        locales.append(&mut self.split_locale(locale));
-        locales.append(&mut self.split_locale(&self.default_locale));
+        self.append_locale(locale, &mut locales);
+        self.append_locale(&self.default_locale, &mut locales);
         debug!(locales = ?locales, "build locales");
 
         let mut locale_messages = None;
