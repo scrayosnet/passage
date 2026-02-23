@@ -3,10 +3,10 @@ use passage_adapters::discovery::DiscoveryAdapter;
 use passage_adapters::{FixedDiscoveryAdapter, Target};
 #[cfg(feature = "adapters-agones")]
 use passage_adapters_agones::{AgonesDiscoveryAdapter, watcher_config};
-#[cfg(feature = "adapters-grpc")]
-use passage_adapters_grpc::GrpcDiscoveryAdapter;
 #[cfg(feature = "adapters-dns")]
 use passage_adapters_dns::{DnsDiscoveryAdapter, RecordType};
+#[cfg(feature = "adapters-grpc")]
+use passage_adapters_grpc::GrpcDiscoveryAdapter;
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]

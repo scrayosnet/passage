@@ -1,6 +1,8 @@
-use crate::error::{dns_error, dns_init_error};
+use crate::DnsError;
+use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::config::{ResolverConfig, ResolverOpts};
+use passage_adapters::Target;
 use passage_adapters::discovery::DiscoveryAdapter;
-use passage_adapters::{Error, Target};
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::net::SocketAddr;
@@ -9,8 +11,6 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
-use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
-use trust_dns_resolver::TokioAsyncResolver;
 
 /// The type of DNS record to query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,31 +46,29 @@ impl DnsDiscoveryAdapter {
         domain: String,
         record_type: RecordType,
         default_port: Option<u16>,
-        refresh_interval: u64,
-    ) -> Result<Self, Error> {
-        // Validate configuration
+        refresh_duration: u64,
+    ) -> Result<Self, DnsError> {
+        // validate configuration
         if record_type == RecordType::A && default_port.is_none() {
-            return Err(dns_init_error(
-                "default_port is required when using A/AAAA records",
-            ));
+            return Err(DnsError::MissingPort);
         }
 
+        let refresh_interval = Duration::from_secs(refresh_duration);
         let inner: Arc<RwLock<Vec<Target>>> = Arc::new(RwLock::new(Vec::new()));
         let token = CancellationToken::new();
 
-        // Create DNS resolver
-        let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
+        // create DNS resolver
+        let resolver =
+            TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
 
-        // Start background refresh task
+        // start background refresh task
         let _inner = Arc::clone(&inner);
         let _token = token.clone();
         let _domain = domain.clone();
+        let mut interval = tokio::time::interval(refresh_interval);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         tokio::spawn(async move {
-            info!(domain = %_domain, interval = refresh_interval, "starting DNS discovery watcher");
-
-            let mut interval = tokio::time::interval(Duration::from_secs(refresh_interval));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
+            info!("starting DNS discovery watcher");
             loop {
                 tokio::select! {
                     biased;
@@ -78,11 +76,9 @@ impl DnsDiscoveryAdapter {
                     _ = interval.tick() => {},
                 }
 
-                // Query DNS based on record type
+                // query DNS based on record type
                 let targets = match record_type {
-                    RecordType::Srv => {
-                        Self::query_srv(&resolver, &_domain).await
-                    }
+                    RecordType::Srv => Self::query_srv(&resolver, &_domain).await,
                     RecordType::A => {
                         Self::query_a(&resolver, &_domain, default_port.unwrap()).await
                     }
@@ -99,7 +95,6 @@ impl DnsDiscoveryAdapter {
                     }
                 }
             }
-
             info!("stopping DNS discovery watcher");
         });
 
@@ -107,11 +102,16 @@ impl DnsDiscoveryAdapter {
     }
 
     /// Queries SRV records and returns targets.
-    async fn query_srv(resolver: &TokioAsyncResolver, domain: &str) -> Result<Vec<Target>, Error> {
+    async fn query_srv(
+        resolver: &TokioAsyncResolver,
+        domain: &str,
+    ) -> Result<Vec<Target>, DnsError> {
         let response = resolver
             .srv_lookup(domain)
             .await
-            .map_err(dns_error)?;
+            .map_err(|err| DnsError::LookupFailed {
+                cause: Box::new(err),
+            })?;
 
         let mut targets = Vec::new();
 
@@ -123,7 +123,9 @@ impl DnsDiscoveryAdapter {
             let lookup = resolver
                 .lookup_ip(target_name.as_str())
                 .await
-                .map_err(dns_error)?;
+                .map_err(|err| DnsError::LookupFailed {
+                    cause: Box::new(err),
+                })?;
 
             for ip in lookup.iter() {
                 let address = SocketAddr::new(ip, port);
@@ -133,8 +135,6 @@ impl DnsDiscoveryAdapter {
                     identifier: identifier.clone(),
                     address,
                     meta: HashMap::from([
-                        ("source".to_string(), "dns".to_string()),
-                        ("hostname".to_string(), target_name.clone()),
                         ("priority".to_string(), srv.priority().to_string()),
                         ("weight".to_string(), srv.weight().to_string()),
                     ]),
@@ -150,11 +150,13 @@ impl DnsDiscoveryAdapter {
         resolver: &TokioAsyncResolver,
         domain: &str,
         port: u16,
-    ) -> Result<Vec<Target>, Error> {
+    ) -> Result<Vec<Target>, DnsError> {
         let lookup = resolver
             .lookup_ip(domain)
             .await
-            .map_err(dns_error)?;
+            .map_err(|err| DnsError::LookupFailed {
+                cause: Box::new(err),
+            })?;
 
         let mut targets = Vec::new();
 
@@ -165,10 +167,7 @@ impl DnsDiscoveryAdapter {
             targets.push(Target {
                 identifier: identifier.clone(),
                 address,
-                meta: HashMap::from([
-                    ("source".to_string(), "dns".to_string()),
-                    ("hostname".to_string(), domain.to_string()),
-                ]),
+                meta: HashMap::from([]),
             });
         }
 

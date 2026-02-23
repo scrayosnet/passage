@@ -61,6 +61,7 @@ futures-util = { version = "0.3", default-features = false }
 fake = { version = "4.4" }
 fastnbt = { version = "2.6.0" }
 regex = { version = "1.12.3" }
+hickory-resolver = { version = "0.24" }
 
 [package]
 name = "passage"

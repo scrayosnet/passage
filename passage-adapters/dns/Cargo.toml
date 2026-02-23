@@ -23,4 +23,4 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sy
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
-trust-dns-resolver = { version = "0.23" }
+hickory-resolver = { workspace = true }

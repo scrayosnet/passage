@@ -1,17 +1,14 @@
-use passage_adapters::Error as AdapterError;
+use hickory_resolver::error::ResolveError;
 
-/// Converts DNS errors to adapter errors.
-pub fn dns_error(err: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> AdapterError {
-    AdapterError::FailedFetch {
-        adapter_type: "dns_discovery",
-        cause: err.into(),
-    }
-}
+#[derive(thiserror::Error, Debug)]
+pub enum DnsError {
+    #[error("default_port is required when using A/AAAA records")]
+    MissingPort,
 
-/// Converts DNS initialization errors to adapter errors.
-pub fn dns_init_error(err: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> AdapterError {
-    AdapterError::FailedInitialization {
-        adapter_type: "dns_discovery",
-        cause: err.into(),
-    }
+    #[error("DNS discovery lookup could not be performed: {cause}")]
+    LookupFailed {
+        /// The cause of the error.
+        #[source]
+        cause: Box<ResolveError>,
+    },
 }
