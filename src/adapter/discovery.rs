@@ -1,4 +1,5 @@
 use crate::config;
+use crate::config::DnsDiscoveryRecordType;
 use passage_adapters::discovery::DiscoveryAdapter;
 use passage_adapters::{FixedDiscoveryAdapter, Target};
 #[cfg(feature = "adapters-agones")]
@@ -79,18 +80,13 @@ impl DynDiscoveryAdapter {
             }
             #[cfg(feature = "adapters-dns")]
             config::DiscoveryAdapter::Dns(config) => {
-                let record_type = match config.record_type.to_lowercase().as_str() {
-                    "srv" => RecordType::Srv,
-                    "a" => RecordType::A,
-                    _ => return Err("invalid DNS record type, expected 'srv' or 'a'".into()),
+                let record_type = match config.record_type {
+                    DnsDiscoveryRecordType::Srv => RecordType::Srv,
+                    DnsDiscoveryRecordType::A(conf) => RecordType::A { port: conf.port },
                 };
-                let adapter = DnsDiscoveryAdapter::new(
-                    config.domain,
-                    record_type,
-                    config.port,
-                    config.refresh_interval,
-                )
-                .await?;
+                let adapter =
+                    DnsDiscoveryAdapter::new(config.domain, config.refresh_interval, record_type)
+                        .await?;
                 Ok(DynDiscoveryAdapter::Dns(adapter))
             }
             _ => Err("unknown discovery adapter configured".into()),

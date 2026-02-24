@@ -18,7 +18,10 @@ pub enum RecordType {
     /// SRV records for service discovery (includes port in DNS response).
     Srv,
     /// A/AAAA records (requires default port to be specified).
-    A,
+    A {
+        /// The port to use for A/AAAA records.
+        port: u16,
+    },
 }
 
 /// DNS-based discovery adapter that resolves targets from DNS records.
@@ -38,21 +41,14 @@ impl DnsDiscoveryAdapter {
     ///
     /// # Arguments
     ///
-    /// * `domain` - The DNS domain to query (e.g., "_minecraft._tcp.example.com" for SRV or "mc.example.com" for A)
+    /// * `domain` - The DNS domain to query
+    /// * `refresh_duration` - How often to re-query DNS in seconds
     /// * `record_type` - The type of DNS record to query
-    /// * `default_port` - Optional default port for A/AAAA records (required if record_type is A)
-    /// * `refresh_interval` - How often to re-query DNS in seconds
     pub async fn new(
         domain: String,
-        record_type: RecordType,
-        default_port: Option<u16>,
         refresh_duration: u64,
+        record_type: RecordType,
     ) -> Result<Self, DnsError> {
-        // validate configuration
-        if record_type == RecordType::A && default_port.is_none() {
-            return Err(DnsError::MissingPort);
-        }
-
         let refresh_interval = Duration::from_secs(refresh_duration);
         let inner: Arc<RwLock<Vec<Target>>> = Arc::new(RwLock::new(Vec::new()));
         let token = CancellationToken::new();
@@ -79,9 +75,7 @@ impl DnsDiscoveryAdapter {
                 // query DNS based on record type
                 let targets = match record_type {
                     RecordType::Srv => Self::query_srv(&resolver, &_domain).await,
-                    RecordType::A => {
-                        Self::query_a(&resolver, &_domain, default_port.unwrap()).await
-                    }
+                    RecordType::A { port } => Self::query_a(&resolver, &_domain, port).await,
                 };
 
                 match targets {

@@ -13,21 +13,25 @@ DNS-based discovery adapter for Passage that resolves backend targets from DNS r
 
 Configure the DNS adapter in your `config.toml`:
 
-```toml
-[adapters.discovery.dns]
-domain = "_minecraft._tcp.example.com"
-record_type = "srv"
-refresh_interval = 30
+```yaml
+adapters:
+    discovery:
+        dns:
+            srv:
+                domain: "_minecraft._tcp.headless.svc.cluster.local"
+                refresh_interval: 30
 ```
 
 Or for A/AAAA records:
 
-```toml
-[adapters.discovery.dns]
-domain = "mc-servers.example.com"
-record_type = "a"
-port = 25565
-refresh_interval = 30
+```yaml
+adapters:
+    discovery:
+        dns:
+            a:
+                domain: "headless.svc.cluster.local"
+                port: 25565
+                refresh_interval: 30
 ```
 
 ## Configuration
