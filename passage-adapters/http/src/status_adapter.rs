@@ -30,6 +30,7 @@ impl HttpStatusAdapter {
         let _inner = inner.clone();
         let _token = token.clone();
         let mut interval = tokio::time::interval(refresh_interval);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         tokio::spawn(async move {
             debug!("Starting refresh task");
             loop {

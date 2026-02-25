@@ -1,8 +1,11 @@
 use crate::config;
+use crate::config::DnsDiscoveryRecordType;
 use passage_adapters::discovery::DiscoveryAdapter;
 use passage_adapters::{FixedDiscoveryAdapter, Target};
 #[cfg(feature = "adapters-agones")]
 use passage_adapters_agones::{AgonesDiscoveryAdapter, watcher_config};
+#[cfg(feature = "adapters-dns")]
+use passage_adapters_dns::{DnsDiscoveryAdapter, RecordType};
 #[cfg(feature = "adapters-grpc")]
 use passage_adapters_grpc::GrpcDiscoveryAdapter;
 use std::fmt::{Display, Formatter};
@@ -14,6 +17,8 @@ pub enum DynDiscoveryAdapter {
     Agones(AgonesDiscoveryAdapter),
     #[cfg(feature = "adapters-grpc")]
     Grpc(GrpcDiscoveryAdapter),
+    #[cfg(feature = "adapters-dns")]
+    Dns(DnsDiscoveryAdapter),
 }
 
 impl Display for DynDiscoveryAdapter {
@@ -24,6 +29,8 @@ impl Display for DynDiscoveryAdapter {
             Self::Agones(_) => write!(f, "agones"),
             #[cfg(feature = "adapters-grpc")]
             Self::Grpc(_) => write!(f, "grpc"),
+            #[cfg(feature = "adapters-dns")]
+            Self::Dns(_) => write!(f, "dns"),
         }
     }
 }
@@ -36,6 +43,8 @@ impl DiscoveryAdapter for DynDiscoveryAdapter {
             DynDiscoveryAdapter::Agones(adapter) => adapter.discover().await,
             #[cfg(feature = "adapters-grpc")]
             DynDiscoveryAdapter::Grpc(adapter) => adapter.discover().await,
+            #[cfg(feature = "adapters-dns")]
+            DynDiscoveryAdapter::Dns(adapter) => adapter.discover().await,
         }
     }
 }
@@ -68,6 +77,17 @@ impl DynDiscoveryAdapter {
             config::DiscoveryAdapter::Grpc(config) => {
                 let adapter = GrpcDiscoveryAdapter::new(config.address).await?;
                 Ok(DynDiscoveryAdapter::Grpc(adapter))
+            }
+            #[cfg(feature = "adapters-dns")]
+            config::DiscoveryAdapter::Dns(config) => {
+                let record_type = match config.record_type {
+                    DnsDiscoveryRecordType::Srv => RecordType::Srv,
+                    DnsDiscoveryRecordType::A(conf) => RecordType::A { port: conf.port },
+                };
+                let adapter =
+                    DnsDiscoveryAdapter::new(config.domain, config.refresh_interval, record_type)
+                        .await?;
+                Ok(DynDiscoveryAdapter::Dns(adapter))
             }
             _ => Err("unknown discovery adapter configured".into()),
         }

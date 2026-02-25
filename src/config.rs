@@ -320,6 +320,7 @@ pub enum DiscoveryAdapter {
     Fixed(FixedDiscovery),
     Agones(AgonesDiscovery),
     Grpc(GrpcDiscovery),
+    Dns(DnsDiscovery),
 }
 
 impl Default for DiscoveryAdapter {
@@ -356,6 +357,47 @@ pub struct AgonesDiscovery {
 pub struct GrpcDiscovery {
     /// The address of the gRPC adapter server.
     pub address: String,
+}
+
+/// [`ARecordType`] holds the DNS discovery configuration for A/AAAA records.
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ARecordType {
+    pub port: u16,
+}
+
+/// [`DnsDiscoveryRecordType`] hold the DNS discovery adapter record configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DnsDiscoveryRecordType {
+    Srv,
+    A(ARecordType),
+}
+
+/// [`DnsDiscovery`] hold the DNS discovery configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DnsDiscovery {
+    /// The DNS domain to query (e.g., "_minecraft._tcp.example.com" for SRV or "mc.example.com" for A).
+    pub domain: String,
+
+    /// How often to re-query DNS in seconds.
+    #[serde(alias = "refreshinterval")]
+    pub refresh_interval: u64,
+
+    /// The type of DNS record to query ("srv" or "a").
+    #[serde(alias = "recordtype")]
+    pub record_type: DnsDiscoveryRecordType,
+}
+
+impl Default for DnsDiscovery {
+    fn default() -> Self {
+        Self {
+            domain: String::new(),
+            refresh_interval: 30,
+            record_type: DnsDiscoveryRecordType::Srv,
+        }
+    }
 }
 
 /// [`OptionFilterAdapter`] holds a filter adapter configuration that may be applied conditionally.

@@ -1,5 +1,5 @@
 [workspace]
-members = ["passage-adapters", "passage-protocol", "passage-packets", "passage-adapters/grpc", "passage-adapters/agones", "passage-adapters/http"]
+members = ["passage-adapters", "passage-protocol", "passage-packets", "passage-adapters/grpc", "passage-adapters/agones", "passage-adapters/http", "passage-adapters/dns"]
 
 [workspace.package]
 version = "0.2.1"
@@ -16,6 +16,7 @@ passage-adapters = { path = "passage-adapters" }
 passage-adapters-grpc = { path = "passage-adapters/grpc" }
 passage-adapters-agones = { path = "passage-adapters/agones" }
 passage-adapters-http = { path = "passage-adapters/http" }
+passage-adapters-dns = { path = "passage-adapters/dns" }
 passage-protocol = { path = "passage-protocol" }
 
 # external
@@ -60,6 +61,7 @@ futures-util = { version = "0.3", default-features = false }
 fake = { version = "4.4" }
 fastnbt = { version = "2.6.0" }
 regex = { version = "1.12.3" }
+hickory-resolver = { version = "0.24" }
 
 [package]
 name = "passage"
@@ -84,6 +86,7 @@ passage-adapters = { workspace = true }
 passage-adapters-grpc = { workspace = true, optional = true }
 passage-adapters-agones = { workspace = true, optional = true }
 passage-adapters-http = { workspace = true, optional = true }
+passage-adapters-dns = { workspace = true, optional = true }
 passage-protocol = { workspace = true }
 
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal", "test-util"] }
@@ -107,8 +110,9 @@ sentry = { workspace = true, features = ["backtrace", "contexts", "panic", "debu
 sentry-tracing = { workspace = true, optional = true }
 
 [features]
-default = ["sentry", "adapters-grpc", "adapters-agones", "adapters-http"]
+default = ["sentry", "adapters-grpc", "adapters-agones", "adapters-http", "adapters-dns"]
 sentry = ["dep:sentry", "dep:sentry-tracing"]
 adapters-grpc = ["dep:passage-adapters-grpc"]
 adapters-agones = ["dep:passage-adapters-agones"]
 adapters-http = ["dep:passage-adapters-http"]
+adapters-dns = ["dep:passage-adapters-dns"]
