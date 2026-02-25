@@ -103,9 +103,7 @@ impl DnsDiscoveryAdapter {
         let response = resolver
             .srv_lookup(domain)
             .await
-            .map_err(|err| DnsError::LookupFailed {
-                cause: Box::new(err),
-            })?;
+            .map_err(|err| DnsError::LookupFailed { cause: err })?;
 
         let mut targets = Vec::new();
 
@@ -117,9 +115,7 @@ impl DnsDiscoveryAdapter {
             let lookup = resolver
                 .lookup_ip(target_name.as_str())
                 .await
-                .map_err(|err| DnsError::LookupFailed {
-                    cause: Box::new(err),
-                })?;
+                .map_err(|err| DnsError::LookupFailed { cause: err })?;
 
             for ip in lookup.iter() {
                 let address = SocketAddr::new(ip, port);
@@ -148,9 +144,7 @@ impl DnsDiscoveryAdapter {
         let lookup = resolver
             .lookup_ip(domain)
             .await
-            .map_err(|err| DnsError::LookupFailed {
-                cause: Box::new(err),
-            })?;
+            .map_err(|err| DnsError::LookupFailed { cause: err })?;
 
         let mut targets = Vec::new();
 

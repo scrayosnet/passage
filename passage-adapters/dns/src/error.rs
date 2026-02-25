@@ -6,6 +6,6 @@ pub enum DnsError {
     LookupFailed {
         /// The cause of the error.
         #[source]
-        cause: Box<ResolveError>,
+        cause: ResolveError,
     },
 }
