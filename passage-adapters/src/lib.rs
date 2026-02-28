@@ -6,6 +6,7 @@ use serde_json::value::RawValue;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
+pub mod adapters;
 pub mod authentication;
 pub mod discovery;
 pub mod error;
@@ -17,7 +18,16 @@ pub mod strategy;
 // reexport errors types
 pub use error::*;
 
-// reexport adapters
+// reexport adapter types
+pub use authentication::AuthenticationAdapter;
+pub use discovery::DiscoveryAdapter;
+pub use filter::FilterAdapter;
+pub use localization::LocalizationAdapter;
+pub use status::StatusAdapter;
+pub use strategy::StrategyAdapter;
+
+// reexport adapter implementations
+pub use adapters::Adapters;
 pub use authentication::disabled::DisabledAuthenticationAdapter;
 pub use authentication::fixed::FixedAuthenticationAdapter;
 pub use discovery::fixed::FixedDiscoveryAdapter;

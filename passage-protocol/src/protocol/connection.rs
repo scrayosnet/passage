@@ -1,13 +1,14 @@
-use crate::cookie::{AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign, verify};
-use crate::crypto::stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream, create_ciphers};
-pub(crate) use crate::error::Error;
+use crate::crypto::cookie::{
+    sign, verify, AuthCookie, SessionCookie, AUTH_COOKIE_KEY, SESSION_COOKIE_KEY,
+};
+use crate::crypto::stream::{create_ciphers, Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
+use crate::error::Error;
+use crate::protocol::config::Config;
 use crate::{crypto, metrics};
 use opentelemetry::trace::TraceContextExt;
-use passage_adapters::authentication::AuthenticationAdapter;
-use passage_adapters::filter::FilterAdapter;
-use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::{
-    Protocol, discovery::DiscoveryAdapter, status::StatusAdapter, strategy::StrategyAdapter,
+    Adapters, AuthenticationAdapter, DiscoveryAdapter, FilterAdapter, LocalizationAdapter,
+    Protocol, StatusAdapter, StrategyAdapter,
 };
 use passage_packets::configuration::clientbound as conf_out;
 use passage_packets::configuration::serverbound as conf_in;
@@ -17,51 +18,41 @@ use passage_packets::login::serverbound as login_in;
 use passage_packets::status::clientbound as status_out;
 use passage_packets::status::serverbound as status_in;
 use passage_packets::{
-    AsyncReadPacket, AsyncWritePacket, INITIAL_BUFFER_SIZE, ReadPacket, State, VarInt,
+    AsyncReadPacket, AsyncWritePacket, ReadPacket, State, VarInt, INITIAL_BUFFER_SIZE,
 };
 use passage_packets::{Packet, WritePacket};
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::net::SocketAddr;
+use std::ops::Add;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::time::{Instant, Interval};
-use tracing::{Instrument, debug, error, field, info, instrument};
+use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, instrument, Instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
 #[macro_export]
 macro_rules! match_packet {
-    // macro variant without sending keep-alive packets
-    { $con:expr, $($packet:pat = $packet_type:ty => $handler:expr,)* } => {
-        match_packet! { $con, false, $($packet = $packet_type => $handler,)* }
-    };
-    // macro variant with sending keep-alive packets
-    { $con:expr, keep_alive, $($packet:pat = $packet_type:ty => $handler:expr,)* } => {
-        match_packet! { $con, true, $($packet = $packet_type => $handler,)* }
-    };
-    // general macro implementation with boolean for sending keep-alive packets
-    {$con:expr, $keep_alive:expr, $($packet:pat = $packet_type:ty => $handler:expr,)* } => {{
-        let (id, mut buf) = $con.receive_packet($keep_alive).await?;
+    {
+        $packet:expr;
+        $($packet_bind:pat = $packet_type:ty => $packet_handler:expr,)*
+    } => {{
+        let (id, mut buf) = $packet;
         match id {
             $(
                 <$packet_type>::ID => {
-                    let $packet = <$packet_type>::read_from_buffer(&mut buf).await?;
-                    $handler
+                    let $packet_bind = <$packet_type>::read_from_buffer(&mut buf).await?;
+                    $packet_handler
                 },
             )*
             _ => return Err(Error::UnexpectedPacketId(id)),
         }
     }};
 }
-
-/// The max packet length in bytes. Larger packets are rejected.
-pub const DEFAULT_MAX_PACKET_LENGTH: VarInt = 10_000;
-
-/// The default auth cookie expiry time in seconds.
-pub const DEFAULT_AUTH_COOKIE_EXPIRY: u64 = 6 * 60 * 60;
 
 /// The interval in seconds at which keep-alive packets are sent. Has to be between 15 and 20 seconds,
 /// such that at most one keep-alive packet is in transit at any point.
@@ -71,135 +62,60 @@ pub struct Connection<S, Stat, Disc, Filt, Stra, Auth, Loca> {
     stream: CipherStream<S, Aes128Cfb8Enc, Aes128Cfb8Dec>,
     buffer: Vec<u8>,
 
-    // adapters
-    status_adapter: Arc<Stat>,
-    discovery_adapter: Arc<Disc>,
-    filter_adapter: Arc<Filt>,
-    strategy_adapter: Arc<Stra>,
-    authentication_adapter: Arc<Auth>,
-    localization_adapter: Arc<Loca>,
-
-    // config and internal state
-    keep_alive_id: Option<u64>,
-    keep_alive_interval: Interval,
-    auth_secret: Option<Vec<u8>>,
-    max_packet_length: VarInt,
-    auth_cookie_expiry: u64,
-
-    // client information
+    // configuration
+    adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
+    config: Config,
     client_address: SocketAddr,
+
+    // runtime state
+    keep_alive_id: Option<u64>,
     client_locale: Option<String>,
 }
 
 impl<S, Stat, Disc, Filt, Stra, Auth, Loca> Connection<S, Stat, Disc, Filt, Stra, Auth, Loca>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
-    Stat: StatusAdapter,
-    Disc: DiscoveryAdapter,
-    Filt: FilterAdapter,
-    Stra: StrategyAdapter,
-    Auth: AuthenticationAdapter,
-    Loca: LocalizationAdapter,
+    Stat: StatusAdapter + 'static,
+    Disc: DiscoveryAdapter + 'static,
+    Filt: FilterAdapter + 'static,
+    Stra: StrategyAdapter + 'static,
+    Auth: AuthenticationAdapter + 'static,
+    Loca: LocalizationAdapter + 'static,
 {
     pub fn new(
         stream: S,
-        status_adapter: Arc<Stat>,
-        discovery_adapter: Arc<Disc>,
-        filter_adapter: Arc<Filt>,
-        strategy_adapter: Arc<Stra>,
-        authentication_adapter: Arc<Auth>,
-        localization_adapter: Arc<Loca>,
+        adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
+        config: Config,
+        client_address: SocketAddr,
     ) -> Self {
-        // start ticker for keep-alive packets, it has to be sent at least every 20 seconds.
-        // Then, the client has 15 seconds to respond with a keep-alive packet. We ensure that only
-        // one keep-alive is in transit at any time and has to be answered before the next is sent.
-        let mut interval = tokio::time::interval(Duration::from_secs(KEEP_ALIVE_INTERVAL));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
         Self {
             stream: CipherStream::from_stream(stream),
             buffer: Vec::with_capacity(INITIAL_BUFFER_SIZE),
-            // adapters
-            status_adapter,
-            discovery_adapter,
-            filter_adapter,
-            strategy_adapter,
-            authentication_adapter,
-            localization_adapter,
-            // config and internal state
+            adapters,
+            config,
+            client_address,
             keep_alive_id: None,
-            keep_alive_interval: interval,
-            auth_secret: None,
-            max_packet_length: DEFAULT_MAX_PACKET_LENGTH,
-            auth_cookie_expiry: DEFAULT_AUTH_COOKIE_EXPIRY,
-            // client information
-            client_address: "127.0.0.1:8080".parse().expect("hardcoded default address"),
             client_locale: None,
         }
     }
 
-    pub fn with_max_packet_length(mut self, max_packet_length: VarInt) -> Self {
-        self.max_packet_length = max_packet_length;
-        self
+    #[instrument(skip_all)]
+    async fn next_packet(&mut self) -> Result<VarInt, Error> {
+        let length = self
+            .stream
+            .read_varint()
+            .instrument(tracing::info_span!(
+                "read_packet_length",
+                otel.kind = "server"
+            ))
+            .await?;
+        Ok(length)
     }
 
-    pub fn with_auth_cookie_expiry(mut self, auth_cookie_expiry: u64) -> Self {
-        self.auth_cookie_expiry = auth_cookie_expiry;
-        self
-    }
-
-    pub fn with_auth_secret(mut self, auth_secret: Option<Vec<u8>>) -> Self {
-        self.auth_secret = auth_secret;
-        self
-    }
-
-    pub fn with_client_address(mut self, client_address: SocketAddr) -> Self {
-        self.client_address = client_address;
-        self
-    }
-
-    #[instrument(skip_all, fields(packet_length = field::Empty, packet_id = field::Empty))]
-    async fn receive_packet(
-        &mut self,
-        keep_alive: bool,
-    ) -> Result<(VarInt, Cursor<Vec<u8>>), Error> {
-        // wait for the next packet, send keep-alive packets as necessary
-        let length = loop {
-            tokio::select! {
-                // use biased selection such that branches are checked in order
-                biased;
-                // await the next timer tick for keep-alive
-                _ = self.keep_alive_interval.tick() => {
-                    if !keep_alive { continue; }
-                    debug!("checking that keep-alive packet was received");
-                    if self.keep_alive_id.is_some() {
-                        let reason = self.localization_adapter.localize(
-                            self.client_locale.as_deref(),
-                            "disconnect_timeout",
-                            &[]
-                        ).await?;
-                        self.send_packet(conf_out::DisconnectPacket { reason }).await?;
-                        return Err(Error::MissedKeepAlive);
-                    }
-                    debug!("sending next keep-alive packet");
-                    let id = crypto::generate_keep_alive();
-                    self.keep_alive_id = Some(id);
-                    let packet = conf_out::KeepAlivePacket { id };
-                    self.send_packet(packet).await?;
-                },
-                // await the next packet in, reading the packet size (expect fast execution)
-                maybe_length = self.stream.read_varint().instrument(tracing::info_span!("read_packet_length", otel.kind = "server")) => {
-                    break maybe_length?;
-                },
-            }
-        };
-
+    #[instrument(skip(self))]
+    async fn read_packet(&mut self, length: VarInt) -> Result<(VarInt, Cursor<Vec<u8>>), Error> {
         // check the length of the packet for any following content
-        if length <= 0 || length > self.max_packet_length {
-            debug!(
-                length,
-                "packet length should be between 0 and {}", self.max_packet_length
-            );
+        if length <= 0 || length > self.config.max_packet_length {
             return Err(passage_packets::Error::IllegalPacketLength.into());
         }
 
@@ -229,6 +145,12 @@ where
         let buf = Cursor::new(buffer);
 
         Ok((id, buf))
+    }
+
+    #[instrument(skip(self))]
+    async fn read_next_packet(&mut self) -> Result<(VarInt, Cursor<Vec<u8>>), Error> {
+        let length = self.next_packet().await?;
+        self.read_packet(length).await
     }
 
     #[instrument(skip_all)]
@@ -261,30 +183,32 @@ where
         Ok(())
     }
 
+    #[instrument(skip_all)]
+    async fn send_keep_alive(&mut self) -> Result<(), Error> {
+        debug!("checking that keep-alive packet was received");
+        if self.keep_alive_id.is_some() {
+            let reason = self
+                .adapters
+                .localize(self.client_locale.as_deref(), "disconnect_timeout", &[])
+                .await?;
+            self.send_packet(conf_out::DisconnectPacket { reason })
+                .await?;
+            return Err(Error::MissedKeepAlive);
+        }
+        debug!("sending next keep-alive packet");
+        let id = crypto::generate_keep_alive();
+        self.keep_alive_id = Some(id);
+        let packet = conf_out::KeepAlivePacket { id };
+        self.send_packet(packet).await?;
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
     fn handle_keep_alive(&mut self, id: u64) {
         if self.keep_alive_id == Some(id) {
             self.keep_alive_id = None;
         } else {
             debug!(id = id, "keep alive packet id unknown");
-        }
-    }
-
-    // TODO check whether this may result in partially written packets?
-    /** Endlessly receives and sends keep-alive packets. It should be used with a `tokio::select!` */
-    async fn keep_alive<T>(&mut self) -> Result<T, Error> {
-        loop {
-            match_packet! { self, keep_alive,
-                // handle keep alive packets
-                packet = conf_in::KeepAlivePacket => {
-                    self.handle_keep_alive(packet.id);
-                    continue
-                },
-                // ignore unsupported packets but don't throw an error
-                _ = conf_in::ClientInformationPacket => continue,
-                _ = conf_in::PluginMessagePacket => continue,
-                _ = conf_in::ResourcePackResponsePacket => continue,
-                _ = conf_in::CookieResponsePacket => continue,
-            }
         }
     }
 
@@ -301,30 +225,34 @@ where
 
     #[instrument(skip_all)]
     pub async fn listen(&mut self) -> Result<(), Error> {
-        // handle handshake
+        // The Minecraft (Java) protocol starts with the client sending a handshake packet to the server.
+        // The handshake packet, most notably, contains the `next_state` field which indicates whether
+        // the client intends to ask for the server `status`, want to `login` or `transfer`.
+        // The handshake packet also contains some basic client information, such as the Minecraft
+        // version (by the `protocol_version`), and the server address the client used to connect to
+        // the server.
         debug!("awaiting handshake packet");
-        let handshake = match_packet! { self,
+        let packet = self.read_next_packet().await?;
+        let handshake = match_packet! { packet;
             packet = hand_in::HandshakePacket => packet,
         };
 
-        // track metrics
-        let variant = match handshake.next_state {
-            State::Status => "status",
-            State::Login => "login",
-            State::Transfer => "transfer",
-        };
-        debug!(next_state = variant, "received handshake packet");
-
-        // handle status request
+        // When the client asks for the server status, then it sends the status request packet next.
+        // We then use the status adapter to get the server status based on the client and server
+        // information included in the previous handshake packet.
+        // Lastly, the client and server exchange a ping-pong exchange for the client to determine
+        // the server latency. The latency is displayed as the server ping in the client server list.
+        // The connection is automatically closed after the exchange.
         if handshake.next_state == State::Status {
             debug!("awaiting status request packet");
-            let _ = match_packet! { self,
+            let packet = self.read_next_packet().await?;
+            let _ = match_packet! { packet;
                 packet = status_in::StatusRequestPacket => packet,
             };
 
             debug!("getting status from supplier");
             let status = self
-                .status_adapter
+                .adapters
                 .status(
                     &self.client_address,
                     (&handshake.server_address, handshake.server_port),
@@ -339,7 +267,8 @@ where
             .await?;
 
             debug!("awaiting ping packet");
-            let ping = match_packet! { self,
+            let packet = self.read_next_packet().await?;
+            let ping = match_packet! { packet;
                 packet = status_in::PingPacket => packet,
             };
 
@@ -352,17 +281,19 @@ where
             return Ok(());
         }
 
+        // In case the client wants to `login` or `transfer`, then we transition from the handshake
+        // phase into the login phase. The login phase begins with the client sending the login start
+        // packet. It contains (unverified) information about the Minecraft user (using the client).
+        // We also ask for any Passage session cookie that may be set on the current client session.
+        // The session cookie contains (unverified) session information such as any previous OpenTelemetry
+        // trace id. This cookie is, by design, neither signed nor obfuscated.
+
         // handle login request
         debug!("awaiting login start packet");
-        let mut login_start = match_packet! { self,
+        let packet = self.read_next_packet().await?;
+        let mut login_start = match_packet! { packet;
             packet = login_in::LoginStartPacket => packet,
         };
-
-        info!(
-            user_name = login_start.user_name,
-            user_id = login_start.user_id.to_string(),
-            "handling login"
-        );
 
         // check session
         debug!("sending session cookie request packet");
@@ -372,17 +303,27 @@ where
         .await?;
 
         debug!("awaiting session cookie response packet");
-        let session_packet = match_packet! { self,
+        let packet = self.read_next_packet().await?;
+        let session_packet = match_packet! { packet;
             packet = login_in::CookieResponsePacket => packet,
         };
         let session_cookie = session_packet.decode::<SessionCookie>()?;
 
-        // in case of transfer, use the auth cookie
+        // In case the client asked to be transferred, then we also request the Passage auth cookie.
+        // The auth cookie contains (verified) information about the client session signed using some
+        // shared secret. If the same shared secret is also configured for Passage and the signature
+        // is valid and the cookie has not expired, then Passage uses the included user information
+        // and skips the Mojang authentication.
+        // By design, Passage does not punish clients for presenting mismatching user information
+        // between the login start packet and auth cookie. Passage instead uses auth cookie information.
+        // Generally, Passage tries to prevent states that result in clients getting disconnected.
+
+        // handle transfer request (verifies auth cookie)
         let mut should_authenticate = true;
         let mut profile_properties = vec![];
         'transfer: {
             if handshake.next_state == State::Transfer {
-                if self.auth_secret.is_none() {
+                if self.config.auth_secret.is_none() {
                     debug!("no auth secret configured, skipping auth cookie");
                     break 'transfer;
                 }
@@ -394,7 +335,8 @@ where
                 .await?;
 
                 debug!("awaiting auth cookie response packet");
-                let cookie = match_packet! { self,
+                let packet = self.read_next_packet().await?;
+                let cookie = match_packet! { packet;
                     packet = login_in::CookieResponsePacket => packet,
                 };
 
@@ -403,19 +345,19 @@ where
                     break 'transfer;
                 };
 
-                let Some(secret) = &self.auth_secret else {
+                let Some(secret) = &self.config.auth_secret else {
                     debug!("no auth secret configured, skipping auth cookie");
                     break 'transfer;
                 };
 
-                let (ok, message) = verify(&signed, secret);
+                let (ok, message) = verify(&signed, secret.as_bytes());
                 if !ok {
                     debug!("invalid auth cookie signature received, skipping auth cookie");
                     break 'transfer;
                 }
 
                 let cookie = serde_json::from_slice::<AuthCookie>(message)?;
-                let expires_at = cookie.timestamp + self.auth_cookie_expiry;
+                let expires_at = cookie.timestamp + self.config.auth_cookie_expiry;
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("time error")
@@ -435,6 +377,15 @@ where
             }
         }
 
+        // Next, Passages creates a shared secret between the server and client that will be used
+        // to encrypt the connection.
+        // First, we generate a new cryptographically secure `verify_token`. This token is then exchanged
+        // with the client through the unencrypted connection together with the server public key. The
+        // public key is generated on startup for each Passage instance (i.e., each Passage instance
+        // poses as a separate Minecraft server).
+        // In case the previous transfer step did not succeed, then we tell the client to authenticate
+        // their login request against the Mojang API.
+
         // handle encryption
         let verify_token = crypto::generate_token()?;
 
@@ -448,7 +399,8 @@ where
         .await?;
 
         debug!("awaiting encryption response packet");
-        let encrypt = match_packet! { self,
+        let packet = self.read_next_packet().await?;
+        let encrypt = match_packet! { packet;
             packet = login_in::EncryptionResponsePacket => packet,
         };
 
@@ -462,12 +414,18 @@ where
             return Err(Error::InvalidVerifyToken);
         }
 
+        // If necessary, we now also make an authentication request using the authentication adapter.
+        // By default, this entails making an HTTP request against the Mojang API.
+        // as before, Passage does not punish clients for presenting mismatching user information
+        // between the login start packet and adapter. Passage instead uses adapter information.
+        // Generally, Passage tries to prevent states that result in clients getting disconnected.
+
         // handle authentication if not already authenticated by the token
         if should_authenticate {
             debug!("authenticating user");
             let request_start = Instant::now();
             let auth_response = self
-                .authentication_adapter
+                .adapters
                 .authenticate(
                     &self.client_address,
                     (&handshake.server_address, handshake.server_port),
@@ -500,77 +458,113 @@ where
         })
         .await?;
 
+        // Before completing the login phase, the target selection is initiated using the now verified
+        // client and user information. At the end it will present a single target representing a Minecraft
+        // gameserver the client should transfer to.
+        // The selection runs in a separate thread to not block any client IO.
+        // The target selection uses three adapters, a target discovery, which gives the set of all
+        // targets, a traget filtering which removes all targets the client should not transfer to,
+        // and lastly, a targets strategy that selects a single target.
+
+        // create a cancellation token with a drop guard
+        let target_token = CancellationToken::new();
+        let _target_token_guard = target_token.clone().drop_guard();
+
+        // start the target selection task (stops using a stop token)
+        let adapters = self.adapters.clone();
+        let client_address = self.client_address;
+        let server_address = handshake.server_address.clone();
+        let server_port = handshake.server_port;
+        let protocol = handshake.protocol_version as Protocol;
+        let user_name = login_start.user_name.clone();
+        let user_id = login_start.user_id;
+        let mut target_join = tokio::spawn(async move {
+            tokio::select! {
+                _ = target_token.cancelled() => Ok(None),
+                maybe_target = adapters.select(&client_address, (&server_address, server_port), protocol, (&user_name, &user_id)) => maybe_target
+            }
+        });
+
+        // Next, the login phase completes by receiving the login acknowledged packet. Starting with
+        // the configuration phase, the protocol becomes less strict. We primarily wait for the target
+        // selection to complete such that we can transfer the client to the actual Minecraft server.
+        // However, as this may take a while, we have to exchange periodic keep-alive packets with the
+        // client. The server has to send one keep-alive packet at least ever 20 seconds. The client
+        // then has 15 seconds to send an answer using the keep-alive id.
+        // At the same time we wait for the client information packet of the client. It most notably
+        // contains the client locale which we use to translate the disconnect packets.
+
+        // If the target selection completes successfully but does not provide a target, then we send
+        // a translated disconnect packet to the client and close the connection.
+
         debug!("awaiting login acknowledged packet");
-        let _ = match_packet! { self,
+        let packet = self.read_next_packet().await?;
+        let _ = match_packet! { packet;
             packet = login_in::LoginAcknowledgedPacket => packet,
         };
 
-        // wait for a client information packet
-        debug!("awaiting client information packet");
-        let client_info = loop {
-            match_packet! { self, keep_alive,
-                // handle keep alive packets
-                packet = conf_in::KeepAlivePacket => {
-                    self.handle_keep_alive(packet.id);
+        // await the target from the target task
+        let interval_duration = Duration::from_secs(KEEP_ALIVE_INTERVAL);
+        let mut interval =
+            tokio::time::interval_at(Instant::now().add(interval_duration), interval_duration);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        debug!("selecting target");
+        let target = loop {
+            tokio::select! {
+                biased;
+
+                // Await any client packet. The packet is parsed in the block such that the future
+                // is not canceled, and we gain access to the connection object again.
+                maybe_length = self.next_packet() => {
+                    let packet = self.read_packet(maybe_length?).await?;
+                    match_packet! { packet;
+                        // Ignore allowed packets but do nothing
+                        _ = conf_in::PluginMessagePacket => continue,
+                        _ = conf_in::ResourcePackResponsePacket => continue,
+                        _ = conf_in::CookieResponsePacket => continue,
+
+                        // Update the client locale whenever a client information packet is received
+                        packet = conf_in::ClientInformationPacket => {
+                            self.client_locale = Some(packet.locale.clone());
+                            metrics::client_locale::inc(packet.locale);
+                            metrics::client_view_distance::record(
+                                u64::try_from(packet.view_distance).unwrap_or(0u64),
+                            );
+                            continue;
+                        },
+
+                        // Handle keep alive packets
+                        packet = conf_in::KeepAlivePacket => {
+                            self.handle_keep_alive(packet.id);
+                            continue;
+                        },
+                    }
+                },
+
+                // Send periodic keep alive
+                _ = interval.tick() => {
+                    self.send_keep_alive().await?;
                     continue;
                 },
-                // wait for a client information packet
-                packet = conf_in::ClientInformationPacket => break packet,
-                // ignore unsupported packets but don't throw an error
-                _ = conf_in::PluginMessagePacket => continue,
-                _ = conf_in::ResourcePackResponsePacket => continue,
-                _ = conf_in::CookieResponsePacket => continue,
+
+                // Await target selection to complete. This is only polled after the client
+                // information packet has been received at least once.
+                maybe_target = &mut target_join , if self.client_locale.is_some() => {
+                    let target = maybe_target
+                        .map_err(|err| passage_adapters::Error::FailedFetch {
+                            adapter_type: "adapters",
+                            cause: Box::new(err),
+                        })??;
+                    break target
+                },
             }
-        };
-
-        // track client metrics
-        metrics::client_locale::inc(client_info.locale.clone());
-        metrics::client_view_distance::record(
-            u64::try_from(client_info.view_distance).unwrap_or(0u64),
-        );
-
-        // wait for target task to finish and send keep alive packets
-        // technically, this could be done a lot earlier (maybe even in a separate threat), however
-        // in the future we might want to consider the client information when selecting a target
-        debug!("discovering targets");
-        let client_address = self.client_address;
-        let discovery_adapter = self.discovery_adapter.clone();
-        let targets = tokio::select! {
-            result = self.keep_alive() => result?,
-            maybe_targets = discovery_adapter.discover() => maybe_targets?,
-        };
-
-        debug!("filtering targets");
-        let filter_adapter = self.filter_adapter.clone();
-        let targets = tokio::select! {
-            result = self.keep_alive() => result?,
-            maybe_targets = filter_adapter.filter(
-                &client_address,
-                (&handshake.server_address, handshake.server_port),
-                handshake.protocol_version as Protocol,
-                (&login_start.user_name, &login_start.user_id),
-                targets,
-            ) => maybe_targets?,
-        };
-
-        debug!("selecting target");
-        let strategy_adapter = self.strategy_adapter.clone();
-        let target = tokio::select! {
-            result = self.keep_alive() => result?,
-            maybe_target = strategy_adapter.select(
-                &client_address,
-                (&handshake.server_address, handshake.server_port),
-                handshake.protocol_version as Protocol,
-                (&login_start.user_name, &login_start.user_id),
-                targets,
-            ) => maybe_target?,
         };
 
         // disconnect if not target found
         let Some(target) = target else {
             debug!("no transfer target found");
             let reason = self
-                .localization_adapter
+                .adapters
                 .localize(self.client_locale.as_deref(), "disconnect_no_target", &[])
                 .await?;
             debug!("sending disconnect packet");
@@ -579,12 +573,18 @@ where
             return Err(Error::NoTargetFound);
         };
 
+        // If no auth cookie was set and the shared secret for the auth cookie is set, then we set
+        // the auth cookie using the (verified) user information gained from the Mojang API.
+        // We also set the session cookie if it is not set. It includes the current OpenTelemetry
+        // trace id as well as additional client and user information.
+        // Lastly, we transfer the user to the selected target.
+
         // write auth cookie
         'auth_cookie: {
             if should_authenticate {
                 debug!("writing auth cookie");
 
-                let Some(secret) = &self.auth_secret else {
+                let Some(secret) = &self.config.auth_secret else {
                     debug!("no auth secret configured, skipping writing auth cookie");
                     break 'auth_cookie;
                 };
@@ -606,7 +606,7 @@ where
                 debug!("sending auth cookie packet");
                 self.send_packet(conf_out::StoreCookiePacket {
                     key: AUTH_COOKIE_KEY.to_string(),
-                    payload: sign(&auth_payload, secret),
+                    payload: sign(&auth_payload, secret.as_bytes()),
                 })
                 .await?;
             }

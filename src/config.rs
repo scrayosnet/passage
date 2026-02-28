@@ -44,7 +44,9 @@
 use config::{ConfigError, Environment, File, FileStoredFormat, Format, Map, Value, ValueKind};
 use passage_adapters::authentication::Profile;
 use passage_adapters::{Protocol, Target};
-use passage_protocol::connection::{DEFAULT_AUTH_COOKIE_EXPIRY, DEFAULT_MAX_PACKET_LENGTH};
+use passage_protocol::protocol::config::{
+    DEFAULT_AUTH_COOKIE_EXPIRY, DEFAULT_CONNECTION_TIMEOUT, DEFAULT_MAX_PACKET_LENGTH,
+};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -104,7 +106,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             address: "0.0.0.0:25565".to_string(),
-            timeout: 120,
+            timeout: DEFAULT_CONNECTION_TIMEOUT,
             sentry: None,
             otel: OpenTelemetry::default(),
             rate_limiter: None,
@@ -667,8 +669,8 @@ impl Format for AuthSecretFile {
         let mut result = Map::new();
 
         result.insert(
-            // key has to match config param
-            "auth_secret".to_owned(),
+            // the key has to match the nested config param
+            "protocol.connection.auth_secret".to_owned(),
             Value::new(uri, ValueKind::String(text.into())),
         );
 

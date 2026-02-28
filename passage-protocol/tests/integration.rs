@@ -1,7 +1,7 @@
 use passage_adapters::authentication::Profile;
 use passage_adapters::discovery::DiscoveryAdapter;
 use passage_adapters::{
-    AnyStrategyAdapter, FixedAuthenticationAdapter, FixedDiscoveryAdapter,
+    Adapters, AnyStrategyAdapter, FixedAuthenticationAdapter, FixedDiscoveryAdapter,
     FixedLocalizationAdapter, FixedStatusAdapter, MetaFilterAdapter, Target,
 };
 use passage_packets::configuration::clientbound as conf_out;
@@ -16,11 +16,12 @@ use passage_packets::{
     State,
 };
 use passage_protocol::Error;
-use passage_protocol::connection::{Connection, KEEP_ALIVE_INTERVAL};
-use passage_protocol::cookie::{
+use passage_protocol::crypto::cookie::{
     AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign,
 };
 use passage_protocol::crypto::stream::CipherStream;
+use passage_protocol::protocol::config::Config;
+use passage_protocol::protocol::connection::{Connection, KEEP_ALIVE_INTERVAL};
 use proxy_header::ParseConfig;
 use proxy_header::io::ProxiedStream;
 use rand::rngs::SysRng;
@@ -66,24 +67,17 @@ async fn simulate_handshake() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
-    let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
-    let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
-    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
-    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
+    let adapters = Arc::new(Adapters::new(
+        FixedStatusAdapter::default(),
+        FixedDiscoveryAdapter::new(vec![]),
+        Vec::<MetaFilterAdapter>::new(),
+        AnyStrategyAdapter::new(),
+        FixedAuthenticationAdapter::default(),
+        FixedLocalizationAdapter::default(),
+    ));
 
     // build connection
-    let mut server = Connection::new(
-        server_stream,
-        status_adapter,
-        discovery_adapter,
-        filter_adapter,
-        strategy_adapter,
-        authentication_adapter,
-        localization_adapter,
-    )
-    .with_client_address(client_address);
+    let mut server = Connection::new(server_stream, adapters, Config::default(), client_address);
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
@@ -119,24 +113,18 @@ async fn simulate_status() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
-    let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
-    let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
-    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
-    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
+    let adapters = Arc::new(Adapters::new(
+        FixedStatusAdapter::default(),
+        FixedDiscoveryAdapter::new(vec![]),
+        Vec::<MetaFilterAdapter>::new(),
+        AnyStrategyAdapter::new(),
+        FixedAuthenticationAdapter::default(),
+        FixedLocalizationAdapter::default(),
+    ));
 
     // build connection
-    let mut server = Connection::new(
-        server_stream,
-        status_adapter,
-        discovery_adapter,
-        filter_adapter,
-        strategy_adapter,
-        authentication_adapter,
-        localization_adapter,
-    )
-    .with_client_address(client_address);
+    let mut server = Connection::new(server_stream, adapters, Config::default(), client_address);
+
     // start the server in its own thread
     let server = tokio::spawn(async move {
         server.listen().await.expect("server listen failed");
@@ -186,30 +174,27 @@ async fn simulate_transfer_no_configuration() {
     let user_id = uuid!("09879557-e479-45a9-b434-a56377674627");
 
     // create stream
-    let auth_secret = b"secret".to_vec();
+    let auth_secret = "secret";
     let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
-    let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
-    let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
-    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
-    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
+    let adapters = Arc::new(Adapters::new(
+        FixedStatusAdapter::default(),
+        FixedDiscoveryAdapter::new(vec![]),
+        Vec::<MetaFilterAdapter>::new(),
+        AnyStrategyAdapter::new(),
+        FixedAuthenticationAdapter::default(),
+        FixedLocalizationAdapter::default(),
+    ));
 
     // build connection
     let mut server = Connection::new(
         server_stream,
-        status_adapter,
-        discovery_adapter,
-        filter_adapter,
-        strategy_adapter,
-        authentication_adapter,
-        localization_adapter,
-    )
-    .with_client_address(client_address)
-    .with_auth_secret(Some(auth_secret.clone()));
+        adapters,
+        Config::default().with_auth_secret(Some(auth_secret.to_string())),
+        client_address,
+    );
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
@@ -285,7 +270,7 @@ async fn simulate_transfer_no_configuration() {
     client_stream
         .write_packet(login_in::CookieResponsePacket {
             key: cookie_request_packet.key,
-            payload: Some(sign(&auth_payload, &auth_secret)),
+            payload: Some(sign(&auth_payload, auth_secret.as_bytes())),
         })
         .await
         .expect("send cookie response failed");
@@ -355,30 +340,27 @@ async fn simulate_slow_transfer_no_configuration() {
     let user_id = uuid!("09879557-e479-45a9-b434-a56377674627");
 
     // create stream
-    let auth_secret = b"secret".to_vec();
+    let auth_secret = "secret";
     let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
-    let discovery_adapter = Arc::new(SlowDiscoveryAdapter::new(2 * KEEP_ALIVE_INTERVAL + 1));
-    let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
-    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
-    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
+    let adapters = Arc::new(Adapters::new(
+        FixedStatusAdapter::default(),
+        SlowDiscoveryAdapter::new(2 * KEEP_ALIVE_INTERVAL + 1),
+        Vec::<MetaFilterAdapter>::new(),
+        AnyStrategyAdapter::new(),
+        FixedAuthenticationAdapter::default(),
+        FixedLocalizationAdapter::default(),
+    ));
 
     // build connection
     let mut server = Connection::new(
         server_stream,
-        status_adapter,
-        discovery_adapter,
-        filter_adapter,
-        strategy_adapter,
-        authentication_adapter,
-        localization_adapter,
-    )
-    .with_client_address(client_address)
-    .with_auth_secret(Some(auth_secret.clone()));
+        adapters,
+        Config::default().with_auth_secret(Some(auth_secret.to_string())),
+        client_address,
+    );
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
@@ -454,7 +436,7 @@ async fn simulate_slow_transfer_no_configuration() {
     client_stream
         .write_packet(login_in::CookieResponsePacket {
             key: cookie_request_packet.key,
-            payload: Some(sign(&auth_payload, &auth_secret)),
+            payload: Some(sign(&auth_payload, auth_secret.as_bytes())),
         })
         .await
         .expect("send cookie response failed");
@@ -551,24 +533,17 @@ async fn simulate_login_no_configuration() {
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
-    let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
-    let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
-    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::new(profile));
-    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
+    let adapters = Arc::new(Adapters::new(
+        FixedStatusAdapter::default(),
+        FixedDiscoveryAdapter::new(vec![]),
+        Vec::<MetaFilterAdapter>::new(),
+        AnyStrategyAdapter::new(),
+        FixedAuthenticationAdapter::new(profile),
+        FixedLocalizationAdapter::default(),
+    ));
 
     // build connection
-    let mut server = Connection::new(
-        server_stream,
-        status_adapter,
-        discovery_adapter,
-        filter_adapter,
-        strategy_adapter,
-        authentication_adapter,
-        localization_adapter,
-    )
-    .with_client_address(client_address);
+    let mut server = Connection::new(server_stream, adapters, Config::default(), client_address);
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
@@ -685,30 +660,27 @@ async fn sends_keep_alive() {
     let user_id = uuid!("09879557-e479-45a9-b434-a56377674627");
 
     // create stream
-    let auth_secret = b"secret".to_vec();
+    let auth_secret = "secret";
     let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
-    let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
-    let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
-    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
-    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
+    let adapters = Arc::new(Adapters::new(
+        FixedStatusAdapter::default(),
+        FixedDiscoveryAdapter::new(vec![]),
+        Vec::<MetaFilterAdapter>::new(),
+        AnyStrategyAdapter::new(),
+        FixedAuthenticationAdapter::default(),
+        FixedLocalizationAdapter::default(),
+    ));
 
     // build connection
     let mut server = Connection::new(
         server_stream,
-        status_adapter,
-        discovery_adapter,
-        filter_adapter,
-        strategy_adapter,
-        authentication_adapter,
-        localization_adapter,
-    )
-    .with_client_address(client_address)
-    .with_auth_secret(Some(auth_secret.clone()));
+        adapters,
+        Config::default().with_auth_secret(Some(auth_secret.to_string())),
+        client_address,
+    );
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
@@ -784,7 +756,7 @@ async fn sends_keep_alive() {
     client_stream
         .write_packet(login_in::CookieResponsePacket {
             key: cookie_request_packet.key,
-            payload: Some(sign(&auth_payload, &auth_secret)),
+            payload: Some(sign(&auth_payload, auth_secret.as_bytes())),
         })
         .await
         .expect("send cookie response failed");
@@ -860,30 +832,27 @@ async fn no_respond_keep_alive() {
     let user_id = uuid!("09879557-e479-45a9-b434-a56377674627");
 
     // create stream
-    let auth_secret = b"secret".to_vec();
+    let auth_secret = "secret";
     let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
     let (mut client_stream, server_stream) = tokio::io::duplex(1024);
 
     // build supplier
-    let status_adapter = Arc::new(FixedStatusAdapter::default());
-    let strategy_adapter = Arc::new(AnyStrategyAdapter::new());
-    let discovery_adapter = Arc::new(FixedDiscoveryAdapter::new(vec![]));
-    let filter_adapter = Arc::new(Vec::<MetaFilterAdapter>::new());
-    let authentication_adapter = Arc::new(FixedAuthenticationAdapter::default());
-    let localization_adapter = Arc::new(FixedLocalizationAdapter::default());
+    let adapters = Arc::new(Adapters::new(
+        FixedStatusAdapter::default(),
+        FixedDiscoveryAdapter::new(vec![]),
+        Vec::<MetaFilterAdapter>::new(),
+        AnyStrategyAdapter::new(),
+        FixedAuthenticationAdapter::default(),
+        FixedLocalizationAdapter::default(),
+    ));
 
     // build connection
     let mut server = Connection::new(
         server_stream,
-        status_adapter,
-        discovery_adapter,
-        filter_adapter,
-        strategy_adapter,
-        authentication_adapter,
-        localization_adapter,
-    )
-    .with_client_address(client_address)
-    .with_auth_secret(Some(auth_secret.clone()));
+        adapters,
+        Config::default().with_auth_secret(Some(auth_secret.to_string())),
+        client_address,
+    );
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
@@ -955,7 +924,7 @@ async fn no_respond_keep_alive() {
     client_stream
         .write_packet(login_in::CookieResponsePacket {
             key: cookie_request_packet.key,
-            payload: Some(sign(&auth_payload, &auth_secret)),
+            payload: Some(sign(&auth_payload, auth_secret.as_bytes())),
         })
         .await
         .expect("send cookie response failed");

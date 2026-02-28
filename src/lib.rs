@@ -11,7 +11,10 @@ use crate::adapter::localization::DynLocalizationAdapter;
 use crate::adapter::status::DynStatusAdapter;
 use crate::adapter::strategy::DynStrategyAdapter;
 use crate::config::Config;
-use passage_protocol::listener::{Listener, ParseConfig};
+use passage_adapters::Adapters;
+use passage_protocol::protocol::config::Config as ListenerConfig;
+use passage_protocol::protocol::config::ProxyProtocol;
+use passage_protocol::protocol::listener::Listener;
 use passage_protocol::rate_limiter::RateLimiter;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -39,16 +42,15 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let authentication =
         DynAuthenticationAdapter::from_config(config.adapters.authentication).await?;
     let localization = DynLocalizationAdapter::from_config(config.adapters.localization).await?;
-
-    info!(
-        status = %status,
-        discovery = %discovery,
-        filters = %filters,
-        strategy = %strategy,
-        authentication = %authentication,
-        localization = %localization,
-        "build adapters",
+    let adapters = Adapters::new(
+        status,
+        discovery,
+        filters,
+        strategy,
+        authentication,
+        localization,
     );
+    info!(adapters = %adapters,"build adapters");
 
     // initialize the rate limiter
     let rate_limiter = config.rate_limiter.map(|config| {
@@ -66,32 +68,21 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // retrieve config params
-    let timeout_duration = Duration::from_secs(config.timeout);
-    let auth_secret = config.auth_secret.clone().map(String::into_bytes);
+    // build and start the protocol
+    debug!("building protocol");
+    let listener_config = ListenerConfig {
+        auth_secret: config.auth_secret.clone(),
+        max_packet_length: config.max_packet_length as i32,
+        auth_cookie_expiry: config.auth_cookie_expiry,
+        proxy_protocol: config.proxy_protocol.map(|c| ProxyProtocol {
+            allow_v1: c.allow_v1,
+            allow_v2: c.allow_v2,
+        }),
+        connection_timeout: config.timeout,
+    };
+    let mut listener = Listener::new(Arc::new(adapters), rate_limiter, listener_config);
 
-    // build and start the listener
-    debug!("building listener");
-    let mut listener = Listener::new(
-        Arc::new(status),
-        Arc::new(discovery),
-        Arc::new(filters),
-        Arc::new(strategy),
-        Arc::new(authentication),
-        Arc::new(localization),
-    )
-    .with_rate_limiter(rate_limiter)
-    .with_auth_secret(auth_secret)
-    .with_connection_timeout(timeout_duration)
-    .with_proxy_protocol(config.proxy_protocol.map(|config| ParseConfig {
-        include_tlvs: false,
-        allow_v1: config.allow_v1,
-        allow_v2: config.allow_v2,
-    }))
-    .with_max_packet_length(config.max_packet_length as i32)
-    .with_auth_cookie_expiry(config.auth_cookie_expiry);
-
-    debug!("starting listener");
+    debug!("starting protocol");
     listener.listen(config.address, stop_token.clone()).await?;
     stop_token.cancel();
     Ok(())

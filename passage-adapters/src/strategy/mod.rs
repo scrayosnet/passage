@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use uuid::Uuid;
 
 pub trait StrategyAdapter: Debug + Send + Sync {
-    fn select(
+    fn strategize(
         &self,
         client_addr: &SocketAddr,
         server_addr: (&str, u16),
