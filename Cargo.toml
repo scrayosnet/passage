@@ -62,6 +62,7 @@ fake = { version = "4.4" }
 fastnbt = { version = "2.6.0" }
 regex = { version = "1.12.3" }
 hickory-resolver = { version = "0.24" }
+sysinfo = { version = "0.38.2" }
 
 [package]
 name = "passage"

@@ -1,4 +1,3 @@
-use crate::error::Error;
 use crate::metrics;
 use crate::protocol::config::Config;
 use crate::protocol::connection::Connection;
@@ -119,7 +118,8 @@ where
                 (stream, client_addr)
             }
             Err(e) => {
-                debug!(
+                metrics::requests::reject();
+                info!(
                     cause = e.to_string(),
                     addr = addr.to_string(),
                     "failed to parse proxy protocol header, connection closed"
@@ -133,7 +133,7 @@ where
             && !rate_limiter.enqueue(client_addr.ip())
         {
             info!(addr = client_addr.to_string(), "rate limited client");
-            metrics::request_duration::record(connection_start, "rejected");
+            metrics::requests::reject();
 
             if let Err(e) = stream.shutdown().await {
                 debug!(cause = e.to_string(), "failed to close a client connection");
@@ -144,6 +144,7 @@ where
         let adapters = self.adapters.clone();
         let connection_config = self.config.clone();
         let connection_timeout = Duration::from_secs(self.config.connection_timeout);
+        metrics::requests::accept();
 
         // create a new connection and run protocol
         self.tracker.spawn(async move {
@@ -153,24 +154,18 @@ where
 
             // handle the client connection (ignore connection closed by the client)
             let timeout = timeout(connection_timeout, connection.listen()).await;
-            let connection_result = match timeout {
-                Ok(Err(Error::ConnectionClosed(_))) => "connection-closed",
-                Ok(Err(err)) => {
-                    warn!(cause = err.to_string(), "failed to handle connection");
-                    err.as_label()
-                }
-                Ok(_) => "success",
-                Err(_) => "timeout",
-            };
+            if let Ok(Err(err)) = timeout {
+                info!(cause = err.to_string(), "failed to handle connection");
+            }
 
             // flush connection and shutdown
             if let Err(err) = stream.shutdown().await {
                 warn!(cause = err.to_string(), "failed to shutdown connection");
             }
-            info!("closed connection");
+            debug!("closed connection");
 
             // update metrics
-            metrics::request_duration::record(connection_start, connection_result);
+            metrics::connection_duration::record(connection_start);
             metrics::open_connections::dec();
         });
     }

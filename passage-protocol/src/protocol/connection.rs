@@ -1,7 +1,7 @@
 use crate::crypto::cookie::{
-    sign, verify, AuthCookie, SessionCookie, AUTH_COOKIE_KEY, SESSION_COOKIE_KEY,
+    AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign, verify,
 };
-use crate::crypto::stream::{create_ciphers, Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
+use crate::crypto::stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream, create_ciphers};
 use crate::error::Error;
 use crate::protocol::config::Config;
 use crate::{crypto, metrics};
@@ -18,7 +18,7 @@ use passage_packets::login::serverbound as login_in;
 use passage_packets::status::clientbound as status_out;
 use passage_packets::status::serverbound as status_in;
 use passage_packets::{
-    AsyncReadPacket, AsyncWritePacket, ReadPacket, State, VarInt, INITIAL_BUFFER_SIZE,
+    AsyncReadPacket, AsyncWritePacket, INITIAL_BUFFER_SIZE, ReadPacket, State, VarInt,
 };
 use passage_packets::{Packet, WritePacket};
 use std::fmt::Debug;
@@ -31,7 +31,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, instrument, Instrument};
+use tracing::{Instrument, debug, instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
@@ -244,6 +244,7 @@ where
         // the server latency. The latency is displayed as the server ping in the client server list.
         // The connection is automatically closed after the exchange.
         if handshake.next_state == State::Status {
+            metrics::status_connections::inc();
             debug!("awaiting status request packet");
             let packet = self.read_next_packet().await?;
             let _ = match_packet! { packet;
@@ -251,14 +252,17 @@ where
             };
 
             debug!("getting status from supplier");
-            let status = self
+            let started = Instant::now();
+            let maybe_status = self
                 .adapters
                 .status(
                     &self.client_address,
                     (&handshake.server_address, handshake.server_port),
                     handshake.protocol_version as Protocol,
                 )
-                .await?;
+                .await;
+            metrics::status_duration::record(started);
+            let status = maybe_status?;
 
             debug!("sending status response packet");
             self.send_packet(status_out::StatusResponsePacket {
@@ -289,6 +293,7 @@ where
         // trace id. This cookie is, by design, neither signed nor obfuscated.
 
         // handle login request
+        metrics::transfer_connections::inc();
         debug!("awaiting login start packet");
         let packet = self.read_next_packet().await?;
         let mut login_start = match_packet! { packet;
@@ -423,8 +428,9 @@ where
         // handle authentication if not already authenticated by the token
         if should_authenticate {
             debug!("authenticating user");
-            let request_start = Instant::now();
-            let auth_response = self
+            let started = Instant::now();
+            // TODO handle unauthenticated result and send disconnect packet?
+            let maybe_auth_response = self
                 .adapters
                 .authenticate(
                     &self.client_address,
@@ -434,13 +440,9 @@ where
                     &shared_secret,
                     &crypto::ENCODED_PUB,
                 )
-                .await
-                .inspect_err(|err| {
-                    // track request failed
-                    error!(err = %err, "authentication request failed");
-                    metrics::authentication_request_duration::record(request_start, "failed");
-                })?;
-            metrics::authentication_request_duration::record(request_start, "success");
+                .await;
+            metrics::authentication_duration::record(started);
+            let auth_response = maybe_auth_response?;
 
             // update state for actual use info
             login_start.user_name = auth_response.name;
@@ -479,9 +481,13 @@ where
         let user_name = login_start.user_name.clone();
         let user_id = login_start.user_id;
         let mut target_join = tokio::spawn(async move {
+            let started = Instant::now();
             tokio::select! {
                 _ = target_token.cancelled() => Ok(None),
-                maybe_target = adapters.select(&client_address, (&server_address, server_port), protocol, (&user_name, &user_id)) => maybe_target
+                maybe_target = adapters.select(&client_address, (&server_address, server_port), protocol, (&user_name, &user_id)) => {
+                    metrics::selection_duration::record(started);
+                    maybe_target
+                }
             }
         });
 
@@ -526,8 +532,8 @@ where
                         // Update the client locale whenever a client information packet is received
                         packet = conf_in::ClientInformationPacket => {
                             self.client_locale = Some(packet.locale.clone());
-                            metrics::client_locale::inc(packet.locale);
-                            metrics::client_view_distance::record(
+                            metrics::client_locales::inc(packet.locale);
+                            metrics::client_view_distances::record(
                                 u64::try_from(packet.view_distance).unwrap_or(0u64),
                             );
                             continue;
@@ -573,43 +579,36 @@ where
             return Err(Error::NoTargetFound);
         };
 
-        // If no auth cookie was set and the shared secret for the auth cookie is set, then we set
-        // the auth cookie using the (verified) user information gained from the Mojang API.
+        // If the shared secret for the auth cookie is set, then we set a new auth cookie using the
+        // (verified) user information gained from the Mojang API.
         // We also set the session cookie if it is not set. It includes the current OpenTelemetry
         // trace id as well as additional client and user information.
         // Lastly, we transfer the user to the selected target.
 
         // write auth cookie
-        'auth_cookie: {
-            if should_authenticate {
-                debug!("writing auth cookie");
+        if let Some(secret) = &self.config.auth_secret {
+            debug!("writing auth cookie");
 
-                let Some(secret) = &self.config.auth_secret else {
-                    debug!("no auth secret configured, skipping writing auth cookie");
-                    break 'auth_cookie;
-                };
+            let cookie = AuthCookie {
+                client_addr: self.client_address,
+                timestamp: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("time error")
+                    .as_secs(),
+                user_name: login_start.user_name.clone(),
+                user_id: login_start.user_id,
+                target: Some(target.identifier.clone()),
+                profile_properties,
+                extra: Default::default(),
+            };
 
-                let cookie = AuthCookie {
-                    client_addr: self.client_address,
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .expect("time error")
-                        .as_secs(),
-                    user_name: login_start.user_name.clone(),
-                    user_id: login_start.user_id,
-                    target: Some(target.identifier.clone()),
-                    profile_properties,
-                    extra: Default::default(),
-                };
-
-                let auth_payload = serde_json::to_vec(&cookie)?;
-                debug!("sending auth cookie packet");
-                self.send_packet(conf_out::StoreCookiePacket {
-                    key: AUTH_COOKIE_KEY.to_string(),
-                    payload: sign(&auth_payload, secret.as_bytes()),
-                })
-                .await?;
-            }
+            let auth_payload = serde_json::to_vec(&cookie)?;
+            debug!("sending auth cookie packet");
+            self.send_packet(conf_out::StoreCookiePacket {
+                key: AUTH_COOKIE_KEY.to_string(),
+                payload: sign(&auth_payload, secret.as_bytes()),
+            })
+            .await?;
         }
 
         // set session id if not exist (does not override the session fields)

@@ -97,7 +97,7 @@ where
     Loca: Debug,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Selector")
+        f.debug_struct("Adapters")
             .field("status_adapter", &self.status_adapter)
             .field("discovery_adapter", &self.discovery_adapter)
             .field("filter_adapter", &self.filter_adapter)

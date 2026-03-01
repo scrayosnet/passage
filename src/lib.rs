@@ -12,6 +12,7 @@ use crate::adapter::status::DynStatusAdapter;
 use crate::adapter::strategy::DynStrategyAdapter;
 use crate::config::Config;
 use passage_adapters::Adapters;
+use passage_protocol::metrics;
 use passage_protocol::protocol::config::Config as ListenerConfig;
 use passage_protocol::protocol::config::ProxyProtocol;
 use passage_protocol::protocol::listener::Listener;
@@ -50,7 +51,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         authentication,
         localization,
     );
-    info!(adapters = %adapters,"build adapters");
+    info!(adapters = %adapters, "build adapters");
 
     // initialize the rate limiter
     let rate_limiter = config.rate_limiter.map(|config| {
@@ -67,6 +68,9 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
             _ = stop_token_signal.cancelled() => { },
         }
     });
+
+    // start system observer (observes system resources every 10 seconds)
+    let observer = metrics::system::observe(Duration::from_secs(10), stop_token.clone());
 
     // build and start the protocol
     debug!("building protocol");
@@ -85,5 +89,9 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     debug!("starting protocol");
     listener.listen(config.address, stop_token.clone()).await?;
     stop_token.cancel();
+
+    // wait for system observer to finish
+    observer.await?;
+
     Ok(())
 }
