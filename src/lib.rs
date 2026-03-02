@@ -70,7 +70,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // start system observer (observes system resources every 10 seconds)
-    let observer = metrics::system::observe(Duration::from_secs(10), stop_token.clone());
+    let observer = metrics::system::Observer::new(Duration::from_secs(10));
 
     // build and start the protocol
     debug!("building protocol");
@@ -87,11 +87,11 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let mut listener = Listener::new(Arc::new(adapters), rate_limiter, listener_config);
 
     debug!("starting protocol");
-    listener.listen(config.address, stop_token.clone()).await?;
+    let result = listener.listen(config.address, stop_token.clone()).await;
+
+    // stop services and await
     stop_token.cancel();
+    observer.shutdown().await;
 
-    // wait for system observer to finish
-    observer.await?;
-
-    Ok(())
+    result
 }

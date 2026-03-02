@@ -41,40 +41,62 @@ pub mod system {
     use tokio::task::JoinHandle;
     use tokio::time::MissedTickBehavior;
     use tokio_util::sync::CancellationToken;
-    use tracing::info;
+    use tracing::{info, warn};
 
-    /// Starts a system observer that updates all system metrics periodically. This should only be
-    /// called once by the application (not the library).
-    pub fn observe(duration: Duration, stop: CancellationToken) -> JoinHandle<()> {
-        tokio::spawn(async move {
-            info!(interval = ?duration, "starting system observer");
-            let mut interval = tokio::time::interval(duration);
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-            let system_refresh = RefreshKind::nothing()
-                .with_memory(MemoryRefreshKind::nothing().with_ram())
-                .with_cpu(CpuRefreshKind::nothing().with_cpu_usage());
-            let mut system = System::new_with_specifics(system_refresh);
-            tokio::time::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL).await;
-            loop {
-                tokio::select! {
-                    _ = stop.cancelled() => {
-                        info!("stopped system observer");
-                        return;
-                    },
-                    _ = interval.tick() => {
-                        system.refresh_specifics(system_refresh);
-                        cpu_usage::observe(system.global_cpu_usage());
-                        total_memory::observe(system.total_memory());
-                        free_memory::observe(system.free_memory());
-                        available_memory::observe(system.available_memory());
-                        used_memory::observe(system.used_memory());
-                        total_swap::observe(system.total_swap());
-                        free_swap::observe(system.free_swap());
-                        used_swap::observe(system.used_swap());
+    /// The system observer wraps a periodic task that updates the system metrics.
+    pub struct Observer {
+        cancellation_token: CancellationToken,
+        handle: JoinHandle<()>,
+    }
+
+    impl Observer {
+        /// Starts a system observer that updates all system metrics periodically. This should only be
+        /// called once by the application (not the library).
+        pub fn new(duration: Duration) -> Self {
+            let cancellation_token = CancellationToken::new();
+            let stop = cancellation_token.clone();
+            let handle = tokio::spawn(async move {
+                info!(interval = ?duration, "starting system observer");
+                let mut interval = tokio::time::interval(duration);
+                interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+                let system_refresh = RefreshKind::nothing()
+                    .with_memory(MemoryRefreshKind::nothing().with_ram())
+                    .with_cpu(CpuRefreshKind::nothing().with_cpu_usage());
+                let mut system = System::new_with_specifics(system_refresh);
+                tokio::time::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL).await;
+                loop {
+                    tokio::select! {
+                        _ = stop.cancelled() => {
+                            info!("stopped system observer");
+                            return;
+                        },
+                        _ = interval.tick() => {
+                            system.refresh_specifics(system_refresh);
+                            cpu_usage::observe(system.global_cpu_usage());
+                            total_memory::observe(system.total_memory());
+                            free_memory::observe(system.free_memory());
+                            available_memory::observe(system.available_memory());
+                            used_memory::observe(system.used_memory());
+                            total_swap::observe(system.total_swap());
+                            free_swap::observe(system.free_swap());
+                            used_swap::observe(system.used_swap());
+                        }
                     }
                 }
+            });
+            Self {
+                handle,
+                cancellation_token,
             }
-        })
+        }
+
+        /// Stops the system observer.
+        pub async fn shutdown(self) {
+            self.cancellation_token.cancel();
+            if let Err(err) = self.handle.await {
+                warn!(err = ?err, "Error while shutting down system observer")
+            }
+        }
     }
 
     /// The metric `cpu_usage` tracks the global CPU usage percentage.
