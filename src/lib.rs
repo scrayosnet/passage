@@ -1,3 +1,13 @@
+//! Opinionated Passage router implementation.
+//!
+//! This module provides an opinionated way for starting a Passage router. It uses the `config-rs`
+//! crate as a basis for providing the configuration. The [`Listener`] is initialized anr run until
+//! it errors or [`tokio::signal::ctrl_c`] is received. It also starts the [`metrics::system::Observer`]
+//! observing the Passage resource usage.
+//!
+//! Other Passage router implementations may provide different means for managing the Passage router
+//! while also using the [`passage_protocol`] crate as a basis.
+
 #![deny(clippy::all)]
 #![forbid(unsafe_code)]
 
@@ -36,20 +46,13 @@ use tracing::{debug, info};
 pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // initialize the adapters
     debug!("building adapters");
-    let status = DynStatusAdapter::from_config(config.adapters.status).await?;
-    let discovery = DynDiscoveryAdapter::from_config(config.adapters.discovery).await?;
-    let filters = DynFilterAdapters::from_config(config.adapters.filter).await?;
-    let strategy = DynStrategyAdapter::from_config(config.adapters.strategy).await?;
-    let authentication =
-        DynAuthenticationAdapter::from_config(config.adapters.authentication).await?;
-    let localization = DynLocalizationAdapter::from_config(config.adapters.localization).await?;
     let adapters = Adapters::new(
-        status,
-        discovery,
-        filters,
-        strategy,
-        authentication,
-        localization,
+        DynStatusAdapter::from_config(config.adapters.status).await?,
+        DynDiscoveryAdapter::from_config(config.adapters.discovery).await?,
+        DynFilterAdapters::from_config(config.adapters.filter).await?,
+        DynStrategyAdapter::from_config(config.adapters.strategy).await?,
+        DynAuthenticationAdapter::from_config(config.adapters.authentication).await?,
+        DynLocalizationAdapter::from_config(config.adapters.localization).await?,
     );
     info!(adapters = %adapters, "build adapters");
 

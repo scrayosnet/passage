@@ -10,6 +10,7 @@ use sentry::protocol::Uuid;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 
+/// The dynamic filter adapter.
 #[derive(Debug)]
 pub enum DynFilterAdapter {
     Meta(OptionFilterAdapter<MetaFilterAdapter>),
@@ -57,6 +58,7 @@ impl FilterAdapter for DynFilterAdapter {
 }
 
 impl DynFilterAdapter {
+    /// Creates a new adapter from the provided configuration.
     pub async fn from_config(
         config: config::OptionFilterAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -114,6 +116,7 @@ impl From<config::FilterOperation> for FilterOperation {
     }
 }
 
+/// The dynamic filter list adapter. Allows for heterogeneous filter adapters.
 #[derive(Debug)]
 pub struct DynFilterAdapters {
     filters: Vec<DynFilterAdapter>,
@@ -152,6 +155,7 @@ impl FilterAdapter for DynFilterAdapters {
 }
 
 impl DynFilterAdapters {
+    /// Creates a new adapter from the provided configuration.
     pub async fn from_config(
         configs: Vec<config::OptionFilterAdapter>,
     ) -> Result<Self, Box<dyn std::error::Error>> {

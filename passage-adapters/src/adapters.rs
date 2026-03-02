@@ -238,7 +238,7 @@ where
         user: (&str, &Uuid),
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> Result<Profile> {
+    ) -> Result<Option<Profile>> {
         self.authentication_adapter
             .authenticate(
                 client_addr,

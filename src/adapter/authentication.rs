@@ -7,6 +7,7 @@ use sentry::protocol::Uuid;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 
+/// The dynamic authentication adapter.
 #[derive(Debug)]
 pub enum DynAuthenticationAdapter {
     Disabled(DisabledAuthenticationAdapter),
@@ -35,7 +36,7 @@ impl AuthenticationAdapter for DynAuthenticationAdapter {
         user: (&str, &Uuid),
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> passage_adapters::Result<Profile> {
+    ) -> passage_adapters::Result<Option<Profile>> {
         match self {
             DynAuthenticationAdapter::Disabled(adapter) => {
                 adapter
@@ -79,6 +80,7 @@ impl AuthenticationAdapter for DynAuthenticationAdapter {
 }
 
 impl DynAuthenticationAdapter {
+    /// Creates a new adapter from the provided configuration.
     pub async fn from_config(
         config: config::AuthenticationAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {

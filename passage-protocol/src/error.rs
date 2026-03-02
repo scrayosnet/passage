@@ -16,8 +16,8 @@ pub enum Error {
     #[error("could not encrypt connection: {0}")]
     CryptographyFailed(#[from] crypto::Error),
 
-    #[error("authentication request failed: {0}")]
-    AuthRequestFailed(#[from] reqwest::Error),
+    #[error("no profile found")]
+    Unauthenticated,
 
     /// Keep-alive was not received.
     #[error("Missed keep-alive")]

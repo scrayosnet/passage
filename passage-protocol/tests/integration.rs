@@ -538,7 +538,7 @@ async fn simulate_login_no_configuration() {
         FixedDiscoveryAdapter::new(vec![]),
         Vec::<MetaFilterAdapter>::new(),
         AnyStrategyAdapter::new(),
-        FixedAuthenticationAdapter::new(profile),
+        FixedAuthenticationAdapter::new(Some(profile)),
         FixedLocalizationAdapter::default(),
     ));
 

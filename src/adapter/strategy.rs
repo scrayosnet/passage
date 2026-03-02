@@ -7,6 +7,7 @@ use sentry::protocol::Uuid;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 
+/// The dynamic strategy adapter.
 #[derive(Debug)]
 pub enum DynStrategyAdapter {
     Any(AnyStrategyAdapter),
@@ -57,6 +58,7 @@ impl StrategyAdapter for DynStrategyAdapter {
 }
 
 impl DynStrategyAdapter {
+    /// Creates a new adapter from the provided configuration.
     pub async fn from_config(
         config: config::StrategyAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {

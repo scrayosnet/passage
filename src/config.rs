@@ -10,8 +10,8 @@
 //!
 //! The environment variables are the top most layer. They can be used to overwrite any previous configuration.
 //! Environment variables have the format `[ENV_PREFIX]_[field]_[sub_field]` where `ENV_PREFIX` is
-//! an environment variable defaulting to `PASSAGE`. That means the nested config field `cache.redis.enabled`
-//! can be overwritten by the environment variable `PASSAGE_CACHE_REDIS_ENABLED`.
+//! an environment variable defaulting to `PASSAGE`. That means the nested config field `sentry.debug`
+//! can be overwritten by the environment variable `PASSAGE_SENTRY_DEBUG`.
 //!
 //! ## Layer 2 (Auth Secret File) \[optional\]
 //!
@@ -22,13 +22,14 @@
 //!
 //! The next layer is an optional configuration file intended to be used by deployments and local testing. The file
 //! location can be configured using the `CONFIG_FILE` environment variable, defaulting to `config/config`.
-//! It can be of any file type supported by [config] (e.g. `config/old_config.toml`). The file should not be
+//! It can be of any file type supported by [config] (e.g. `config/config.yaml`). The file should not be
 //! published by git as its configuration is context-dependent (e.g. local/cluster) and probably contains
 //! secrets.
 //!
 //! ## Layer 4 (Default configuration)
 //!
-//! The default configuration provides default values for all config fields. It is defined in the struct.
+//! The default configuration provides default values for all config fields. It is defined in the struct
+//! using serde defaults.
 //!
 //! # Usage
 //!
@@ -556,7 +557,7 @@ impl Default for AuthenticationAdapter {
 #[serde(default)]
 pub struct FixedAuthentication {
     /// The fixed profile that should be used for authentication.
-    pub profile: Profile,
+    pub profile: Option<Profile>,
 }
 
 /// [`MojangAuthentication`] hold the mojang authentication configuration.
@@ -602,31 +603,37 @@ impl Default for FixedLocalization {
                     "locale" => "English",
                     "disconnect_timeout" => "{\"text\":\"Disconnected: No response from client (keep-alive timeout)\"}",
                     "disconnect_no_target" => "{\"text\":\"Disconnected: No available server to handle your connection\"}",
+                    "disconnect_unauthenticated" => "{\"text\":\"Disconnected: Could not authenticate client\"}",
                 },
                 "es" => hashmap! {
                     "locale" => "Español",
                     "disconnect_timeout" => "{\"text\":\"Desconectado: No hubo respuesta del cliente (tiempo de espera agotado)\"}",
                     "disconnect_no_target" => "{\"text\":\"Desconectado: No hay un servidor disponible para manejar tu conexión\"}",
+                    "disconnect_unauthenticated" => "{\"text\":\"Desconectado: No se pudo autenticar el cliente\"}",
                 },
                 "fr" => hashmap! {
                     "locale" => "Français",
                     "disconnect_timeout" => "{\"text\":\"Déconnecté : aucune réponse du client (délai de keep-alive dépassé)\"}",
                     "disconnect_no_target" => "{\"text\":\"Déconnecté : aucun serveur disponible pour traiter votre connexion\"}",
+                    "disconnect_unauthenticated" => "{\"text\":\"DDéconnecté : Impossible d’authentifier le client\"}",
                 },
                 "de" => hashmap! {
                     "locale" => "Deutsch",
                     "disconnect_timeout" => "{\"text\":\"Verbindung getrennt: Keine Antwort vom Client (Keep-Alive-Timeout)\"}",
                     "disconnect_no_target" => "{\"text\":\"Verbindung getrennt: Kein verfügbarer Server für diese Verbindung\"}",
+                    "disconnect_unauthenticated" => "{\"text\":\"Verbindung getrennt: Client konnte nicht authentifiziert werden\"}",
                 },
                 "zh-CN" => hashmap! {
                     "locale" => "简体中文",
                     "disconnect_timeout" => "{\"text\":\"已断开连接：客户端无响应（保持连接超时）\"}",
                     "disconnect_no_target" => "{\"text\":\"已断开连接：没有可用的服务器来处理你的连接\"}",
+                    "disconnect_unauthenticated" => "{\"text\":\"Disconnected: Could not authenticate client\"}",
                 },
                 "ru" => hashmap! {
                     "locale" => "English",
                     "disconnect_timeout" => "{\"text\":\"Отключено: нет ответа от клиента (тайм-аут keep-alive)\"}",
                     "disconnect_no_target" => "{\"text\":\"Отключено: нет доступного сервера для обработки подключения\"}",
+                    "disconnect_unauthenticated" => "{\"text\":\"Отключено: не удалось аутентифицировать клиента\"}",
                 },
             },
         }
@@ -670,7 +677,7 @@ impl Format for AuthSecretFile {
 
         result.insert(
             // the key has to match the nested config param
-            "protocol.connection.auth_secret".to_owned(),
+            "auth_secret".to_owned(),
             Value::new(uri, ValueKind::String(text.into())),
         );
 

@@ -1,7 +1,7 @@
 use crate::crypto::cookie::{
-    AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign, verify,
+    sign, verify, AuthCookie, SessionCookie, AUTH_COOKIE_KEY, SESSION_COOKIE_KEY,
 };
-use crate::crypto::stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream, create_ciphers};
+use crate::crypto::stream::{create_ciphers, Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
 use crate::error::Error;
 use crate::protocol::config::Config;
 use crate::{crypto, metrics};
@@ -18,7 +18,7 @@ use passage_packets::login::serverbound as login_in;
 use passage_packets::status::clientbound as status_out;
 use passage_packets::status::serverbound as status_in;
 use passage_packets::{
-    AsyncReadPacket, AsyncWritePacket, INITIAL_BUFFER_SIZE, ReadPacket, State, VarInt,
+    AsyncReadPacket, AsyncWritePacket, ReadPacket, State, VarInt, INITIAL_BUFFER_SIZE,
 };
 use passage_packets::{Packet, WritePacket};
 use std::fmt::Debug;
@@ -31,7 +31,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, debug, instrument};
+use tracing::{debug, instrument, Instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
@@ -425,11 +425,13 @@ where
         // between the login start packet and adapter. Passage instead uses adapter information.
         // Generally, Passage tries to prevent states that result in clients getting disconnected.
 
+        // enable encryption for the connection using the shared secret
+        self.apply_encryption(&shared_secret)?;
+
         // handle authentication if not already authenticated by the token
         if should_authenticate {
             debug!("authenticating user");
             let started = Instant::now();
-            // TODO handle unauthenticated result and send disconnect packet?
             let maybe_auth_response = self
                 .adapters
                 .authenticate(
@@ -443,15 +445,25 @@ where
                 .await;
             metrics::authentication_duration::record(started);
             let auth_response = maybe_auth_response?;
+            let Some(profile) = auth_response else {
+                let reason = self
+                    .adapters
+                    .localize(
+                        self.client_locale.as_deref(),
+                        "disconnect_unauthenticated",
+                        &[],
+                    )
+                    .await?;
+                self.send_packet(login_out::DisconnectPacket { reason })
+                    .await?;
+                return Err(Error::Unauthenticated);
+            };
 
             // update state for actual use info
-            login_start.user_name = auth_response.name;
-            login_start.user_id = auth_response.id;
-            profile_properties = auth_response.properties;
+            login_start.user_name = profile.name;
+            login_start.user_id = profile.id;
+            profile_properties = profile.properties;
         }
-
-        // enable encryption for the connection using the shared secret
-        self.apply_encryption(&shared_secret)?;
 
         debug!("sending login success packet");
         self.send_packet(login_out::LoginSuccessPacket {

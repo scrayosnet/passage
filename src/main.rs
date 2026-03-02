@@ -23,7 +23,8 @@ use tracing_opentelemetry::{MetricsLayer, OpenTelemetryLayer};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
 
-// Create a Resource that captures information about the entity for which telemetry is recorded.
+/// A utility for creating a [`Resource`] based on the package name and version, as well as the dynamic
+/// environment.
 fn resource(environment: &str) -> Resource {
     Resource::builder()
         .with_service_name(env!("CARGO_PKG_NAME"))
@@ -40,8 +41,8 @@ fn resource(environment: &str) -> Resource {
 
 /// Initializes the application and invokes passage.
 ///
-/// This initializes the logging, aggregates configuration and starts the multithreaded tokio runtime. This is only a
-/// thin-wrapper around the passage crate that supplies the necessary settings.
+/// This initializes the logging, aggregates configuration, and starts the multithreaded tokio runtime.
+/// This is only a thin-wrapper around the passage crate that supplies the necessary settings.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // parse the arguments and configuration
     let config = Config::read()?;
