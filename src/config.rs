@@ -75,7 +75,7 @@ pub struct Config {
     pub timeout: u64,
 
     /// The max packet size in bytes accepted by the server.
-    pub max_packet_length: u64,
+    pub max_packet_length: usize,
 
     /// The number of seconds until an auth cookie expires.
     pub auth_cookie_expiry: u64,
@@ -114,7 +114,7 @@ impl Default for Config {
             proxy_protocol: None,
             auth_secret: None,
             adapters: Adapters::default(),
-            max_packet_length: DEFAULT_MAX_PACKET_LENGTH as u64,
+            max_packet_length: DEFAULT_MAX_PACKET_LENGTH,
             auth_cookie_expiry: DEFAULT_AUTH_COOKIE_EXPIRY,
         }
     }

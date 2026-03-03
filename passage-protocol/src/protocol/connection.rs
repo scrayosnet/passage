@@ -1,7 +1,7 @@
 use crate::crypto::cookie::{
-    sign, verify, AuthCookie, SessionCookie, AUTH_COOKIE_KEY, SESSION_COOKIE_KEY,
+    AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign, verify,
 };
-use crate::crypto::stream::{create_ciphers, Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
+use crate::crypto::stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream, create_ciphers};
 use crate::error::Error;
 use crate::protocol::config::Config;
 use crate::{crypto, metrics};
@@ -10,57 +10,36 @@ use passage_adapters::{
     Adapters, AuthenticationAdapter, DiscoveryAdapter, FilterAdapter, LocalizationAdapter,
     Protocol, StatusAdapter, StrategyAdapter,
 };
+use passage_packets::AsyncReadPacket;
+use passage_packets::State;
+use passage_packets::WritePacket;
 use passage_packets::configuration::clientbound as conf_out;
 use passage_packets::configuration::serverbound as conf_in;
 use passage_packets::handshake::serverbound as hand_in;
 use passage_packets::login::clientbound as login_out;
 use passage_packets::login::serverbound as login_in;
+use passage_packets::match_packet;
+use passage_packets::packet_stream::PacketStream;
 use passage_packets::status::clientbound as status_out;
 use passage_packets::status::serverbound as status_in;
-use passage_packets::{
-    AsyncReadPacket, AsyncWritePacket, ReadPacket, State, VarInt, INITIAL_BUFFER_SIZE,
-};
-use passage_packets::{Packet, WritePacket};
 use std::fmt::Debug;
-use std::io::Cursor;
 use std::net::SocketAddr;
 use std::ops::Add;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, instrument, Instrument};
+use tracing::{Instrument, debug, instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
-
-#[macro_export]
-macro_rules! match_packet {
-    {
-        $packet:expr;
-        $($packet_bind:pat = $packet_type:ty => $packet_handler:expr,)*
-    } => {{
-        let (id, mut buf) = $packet;
-        match id {
-            $(
-                <$packet_type>::ID => {
-                    let $packet_bind = <$packet_type>::read_from_buffer(&mut buf).await?;
-                    $packet_handler
-                },
-            )*
-            _ => return Err(Error::UnexpectedPacketId(id)),
-        }
-    }};
-}
 
 /// The interval in seconds at which keep-alive packets are sent. Has to be between 15 and 20 seconds,
 /// such that at most one keep-alive packet is in transit at any point.
 pub const KEEP_ALIVE_INTERVAL: u64 = 16;
 
 pub struct Connection<S, Stat, Disc, Filt, Stra, Auth, Loca> {
-    stream: CipherStream<S, Aes128Cfb8Enc, Aes128Cfb8Dec>,
-    buffer: Vec<u8>,
+    stream: PacketStream<CipherStream<S, Aes128Cfb8Enc, Aes128Cfb8Dec>>,
 
     // configuration
     adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
@@ -89,8 +68,7 @@ where
         client_address: SocketAddr,
     ) -> Self {
         Self {
-            stream: CipherStream::from_stream(stream),
-            buffer: Vec::with_capacity(INITIAL_BUFFER_SIZE),
+            stream: PacketStream::new(CipherStream::from_stream(stream), config.max_packet_length),
             adapters,
             config,
             client_address,
@@ -99,86 +77,39 @@ where
         }
     }
 
-    #[instrument(skip_all)]
-    async fn next_packet(&mut self) -> Result<VarInt, Error> {
-        let length = self
+    #[instrument(skip(self), fields(packet_length))]
+    async fn receive_packet(&mut self) -> Result<Vec<u8>, Error> {
+        // read the next packet from the stream
+        let buffer = self
             .stream
-            .read_varint()
-            .instrument(tracing::info_span!(
-                "read_packet_length",
-                otel.kind = "server"
-            ))
-            .await?;
-        Ok(length)
-    }
-
-    #[instrument(skip(self))]
-    async fn read_packet(&mut self, length: VarInt) -> Result<(VarInt, Cursor<Vec<u8>>), Error> {
-        // check the length of the packet for any following content
-        if length <= 0 || length > self.config.max_packet_length {
-            return Err(passage_packets::Error::IllegalPacketLength.into());
-        }
+            .read_packet()
+            .instrument(tracing::info_span!("read_packet", otel.kind = "server"))
+            .await?
+            // Handle no packet as a connection-closed error. At this point we expect a packet.
+            .ok_or_else(|| Error::Packets(passage_packets::Error::ConnectionClosed))?;
 
         // track metrics
-        let packet_size = u64::try_from(length).expect("length is always positive");
+        let packet_size = buffer.len() as u64;
         metrics::packet_size::record_serverbound(packet_size);
         tracing::Span::current().record("packet_length", packet_size);
 
-        // extract the encoded packet id
-        let id = self
-            .stream
-            .read_varint()
-            .instrument(tracing::info_span!("read_packet_id", otel.kind = "server"))
-            .await?;
-        tracing::Span::current().record("packet_id", id);
-
-        // split a separate reader from the stream and read packet bytes (advancing stream)
-        let mut buffer = vec![];
-        (&mut self.stream)
-            .take(length as u64 - 1)
-            .read_to_end(&mut buffer)
-            .instrument(tracing::info_span!(
-                "read_packet_bytes",
-                otel.kind = "server"
-            ))
-            .await?;
-        let buf = Cursor::new(buffer);
-
-        Ok((id, buf))
+        Ok(buffer)
     }
 
-    #[instrument(skip(self))]
-    async fn read_next_packet(&mut self) -> Result<(VarInt, Cursor<Vec<u8>>), Error> {
-        let length = self.next_packet().await?;
-        self.read_packet(length).await
-    }
-
-    #[instrument(skip_all)]
-    async fn send_packet<T: WritePacket + Send + Sync + Debug>(
+    #[instrument(skip_all, fields(packet_length))]
+    async fn send_packet<T: WritePacket + Send + Sync + Debug + 'static>(
         &mut self,
         packet: T,
     ) -> Result<(), Error> {
-        // write the packets id and the respective packets content
-        self.buffer.clear();
-        self.buffer.write_varint(T::ID as VarInt).await?;
-        packet.write_to_buffer(&mut self.buffer).await?;
-
-        // prepare a final buffer (leaving max 2 bytes for varint as packets never get that big)
-        let packet_len = self.buffer.len();
-        // TODO reuse buffer here or write twice!
-        let mut final_buffer = Vec::with_capacity(packet_len + 2);
-        final_buffer.write_varint(packet_len as VarInt).await?;
-        final_buffer.extend_from_slice(&self.buffer);
-
-        // send the final buffer into the stream
-        self.stream
-            .write_all(&final_buffer)
+        let packet_size = self
+            .stream
+            .write_packet(packet)
             .instrument(tracing::info_span!("write_packet", otel.kind = "server"))
             .await?;
 
         // track metrics
-        let packet_size = u64::try_from(final_buffer.len()).expect("usize always fits into u64");
-        metrics::packet_size::record_clientbound(packet_size);
+        metrics::packet_size::record_clientbound(packet_size as u64);
+        tracing::Span::current().record("packet_length", packet_size);
 
         Ok(())
     }
@@ -218,7 +149,9 @@ where
 
         // get stream ciphers and wrap stream with cipher
         let (encryptor, decryptor) = create_ciphers(shared_secret)?;
-        self.stream.set_encryption(Some(encryptor), Some(decryptor));
+        self.stream
+            .inner_mut()
+            .set_encryption(Some(encryptor), Some(decryptor));
 
         Ok(())
     }
@@ -232,10 +165,13 @@ where
         // version (by the `protocol_version`), and the server address the client used to connect to
         // the server.
         debug!("awaiting handshake packet");
-        let packet = self.read_next_packet().await?;
+        println!("receiving handshake");
+        let packet = self.receive_packet().await?;
+        println!("received handshake buffer {:?}", packet.len());
         let handshake = match_packet! { packet;
             packet = hand_in::HandshakePacket => packet,
-        };
+        }?;
+        println!("received handshake");
 
         // When the client asks for the server status, then it sends the status request packet next.
         // We then use the status adapter to get the server status based on the client and server
@@ -246,10 +182,10 @@ where
         if handshake.next_state == State::Status {
             metrics::status_connections::inc();
             debug!("awaiting status request packet");
-            let packet = self.read_next_packet().await?;
+            let packet = self.receive_packet().await?;
             let _ = match_packet! { packet;
                 packet = status_in::StatusRequestPacket => packet,
-            };
+            }?;
 
             debug!("getting status from supplier");
             let started = Instant::now();
@@ -271,10 +207,10 @@ where
             .await?;
 
             debug!("awaiting ping packet");
-            let packet = self.read_next_packet().await?;
+            let packet = self.receive_packet().await?;
             let ping = match_packet! { packet;
                 packet = status_in::PingPacket => packet,
-            };
+            }?;
 
             debug!("sending pong packet");
             self.send_packet(status_out::PongPacket {
@@ -295,10 +231,10 @@ where
         // handle login request
         metrics::transfer_connections::inc();
         debug!("awaiting login start packet");
-        let packet = self.read_next_packet().await?;
+        let packet = self.receive_packet().await?;
         let mut login_start = match_packet! { packet;
             packet = login_in::LoginStartPacket => packet,
-        };
+        }?;
 
         // check session
         debug!("sending session cookie request packet");
@@ -308,10 +244,10 @@ where
         .await?;
 
         debug!("awaiting session cookie response packet");
-        let packet = self.read_next_packet().await?;
+        let packet = self.receive_packet().await?;
         let session_packet = match_packet! { packet;
             packet = login_in::CookieResponsePacket => packet,
-        };
+        }?;
         let session_cookie = session_packet.decode::<SessionCookie>()?;
 
         // In case the client asked to be transferred, then we also request the Passage auth cookie.
@@ -340,10 +276,10 @@ where
                 .await?;
 
                 debug!("awaiting auth cookie response packet");
-                let packet = self.read_next_packet().await?;
+                let packet = self.receive_packet().await?;
                 let cookie = match_packet! { packet;
                     packet = login_in::CookieResponsePacket => packet,
-                };
+                }?;
 
                 let Some(signed) = cookie.payload else {
                     debug!("no auth cookie received, skipping auth cookie");
@@ -404,10 +340,10 @@ where
         .await?;
 
         debug!("awaiting encryption response packet");
-        let packet = self.read_next_packet().await?;
+        let packet = self.receive_packet().await?;
         let encrypt = match_packet! { packet;
             packet = login_in::EncryptionResponsePacket => packet,
-        };
+        }?;
 
         // decrypt the shared secret and verify the token
         let shared_secret = crypto::decrypt(&crypto::KEY_PAIR.0, &encrypt.shared_secret)?;
@@ -516,10 +452,10 @@ where
         // a translated disconnect packet to the client and close the connection.
 
         debug!("awaiting login acknowledged packet");
-        let packet = self.read_next_packet().await?;
+        let packet = self.receive_packet().await?;
         let _ = match_packet! { packet;
             packet = login_in::LoginAcknowledgedPacket => packet,
-        };
+        }?;
 
         // await the target from the target task
         let interval_duration = Duration::from_secs(KEEP_ALIVE_INTERVAL);
@@ -531,11 +467,9 @@ where
             tokio::select! {
                 biased;
 
-                // Await any client packet. The packet is parsed in the block such that the future
-                // is not canceled, and we gain access to the connection object again.
-                maybe_length = self.next_packet() => {
-                    let packet = self.read_packet(maybe_length?).await?;
-                    match_packet! { packet;
+                // Await any client packet. This method should be cancellation safe.
+                maybe_packet = self.receive_packet() => {
+                    match_packet! { maybe_packet?;
                         // Ignore allowed packets but do nothing
                         _ = conf_in::PluginMessagePacket => continue,
                         _ = conf_in::ResourcePackResponsePacket => continue,
@@ -556,7 +490,7 @@ where
                             self.handle_keep_alive(packet.id);
                             continue;
                         },
-                    }
+                    }?
                 },
 
                 // Send periodic keep alive

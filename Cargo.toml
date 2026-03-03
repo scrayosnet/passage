@@ -63,6 +63,7 @@ fastnbt = { version = "2.6.0" }
 regex = { version = "1.12.3" }
 hickory-resolver = { version = "0.24" }
 sysinfo = { version = "0.38.2" }
+bytes = { version = "1.11.1" }
 
 [package]
 name = "passage"

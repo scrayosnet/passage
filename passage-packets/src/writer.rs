@@ -1,34 +1,10 @@
-use crate::{AsyncWritePacket, Error, INITIAL_BUFFER_SIZE, VarInt, VarLong, WritePacket};
+use crate::{AsyncWritePacket, Error, VarInt, VarLong};
 use fastnbt::SerOpts;
 use serde_json::Value;
-use std::fmt::Debug;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
 
 impl<W: AsyncWrite + Unpin + Send + Sync> AsyncWritePacket for W {
-    async fn write_packet<T: WritePacket + Send + Sync + Debug>(
-        &mut self,
-        packet: T,
-    ) -> Result<usize, Error> {
-        // create a new buffer (our packets are very small)
-        let mut buffer = Vec::with_capacity(INITIAL_BUFFER_SIZE);
-
-        // write the packets id and the respective packets content
-        buffer.write_varint(T::ID as VarInt).await?;
-        packet.write_to_buffer(&mut buffer).await?;
-
-        // prepare a final buffer (leaving max 2 bytes for varint as packets never get that big)
-        let packet_len = buffer.len();
-        let mut final_buffer = Vec::with_capacity(packet_len + 2);
-        final_buffer.write_varint(packet_len as VarInt).await?;
-        final_buffer.extend_from_slice(&buffer);
-
-        // send the final buffer into the stream
-        self.write_all(&final_buffer).await?;
-
-        Ok(final_buffer.len())
-    }
-
     async fn write_varint(&mut self, value: VarInt) -> Result<(), Error> {
         let mut value = value;
         let mut buf = [0];

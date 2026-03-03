@@ -9,12 +9,10 @@ use passage_packets::configuration::serverbound as conf_in;
 use passage_packets::handshake::serverbound as hand_in;
 use passage_packets::login::clientbound as login_out;
 use passage_packets::login::serverbound as login_in;
+use passage_packets::packet_stream::PacketStream;
 use passage_packets::status::clientbound as status_out;
 use passage_packets::status::serverbound as status_in;
-use passage_packets::{
-    AsyncReadPacket, AsyncWritePacket, ChatMode, DisplayedSkinParts, MainHand, ParticleStatus,
-    State,
-};
+use passage_packets::{ChatMode, DisplayedSkinParts, MainHand, ParticleStatus, State};
 use passage_protocol::Error;
 use passage_protocol::crypto::cookie::{
     AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign,
@@ -64,7 +62,8 @@ impl DiscoveryAdapter for SlowDiscoveryAdapter {
 async fn simulate_handshake() {
     // create stream
     let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
-    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = PacketStream::new(CipherStream::from_stream(client_stream), 100_000);
 
     // build supplier
     let adapters = Arc::new(Adapters::new(
@@ -83,7 +82,7 @@ async fn simulate_handshake() {
     let server = tokio::spawn(async move {
         let res = server.listen().await;
         match res {
-            Err(Error::ConnectionClosed(_)) => {}
+            Err(Error::Packets(passage_packets::Error::ConnectionClosed)) => {}
             other => panic!("expected connection closed, got {:?}", other),
         }
     });
@@ -110,7 +109,8 @@ async fn simulate_handshake() {
 async fn simulate_status() {
     // create stream
     let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
-    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = PacketStream::new(CipherStream::from_stream(client_stream), 100_000);
 
     // build supplier
     let adapters = Arc::new(Adapters::new(
@@ -147,7 +147,7 @@ async fn simulate_status() {
         .expect("send status request failed");
 
     let status_response_packet: status_out::StatusResponsePacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("status response packet read failed");
     assert_eq!(status_response_packet.body, "null");
@@ -158,7 +158,7 @@ async fn simulate_status() {
         .expect("send ping request failed");
 
     let pong_packet: status_out::PongPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("pong packet read failed");
     assert_eq!(pong_packet.payload, 42);
@@ -176,7 +176,8 @@ async fn simulate_transfer_no_configuration() {
     // create stream
     let auth_secret = "secret";
     let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
-    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = PacketStream::new(CipherStream::from_stream(client_stream), 100_000);
 
     // build supplier
     let adapters = Arc::new(Adapters::new(
@@ -225,7 +226,7 @@ async fn simulate_transfer_no_configuration() {
         .expect("send login start failed");
 
     let cookie_request_packet: login_out::CookieRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("session cookie request packet read failed");
     assert_eq!(&cookie_request_packet.key, SESSION_COOKIE_KEY);
@@ -247,7 +248,7 @@ async fn simulate_transfer_no_configuration() {
         .expect("send session cookie response failed");
 
     let cookie_request_packet: login_out::CookieRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("cookie request packet read failed");
     assert_eq!(&cookie_request_packet.key, AUTH_COOKIE_KEY);
@@ -276,7 +277,7 @@ async fn simulate_transfer_no_configuration() {
         .expect("send cookie response failed");
 
     let encryption_request_packet: login_out::EncryptionRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("encryption request packet read failed");
     assert!(!encryption_request_packet.should_authenticate);
@@ -293,11 +294,13 @@ async fn simulate_transfer_no_configuration() {
         .await
         .expect("send encryption response failed");
 
-    let mut client_stream =
-        CipherStream::from_secret(client_stream, shared_secret).expect("create ciphers failed");
+    client_stream
+        .inner_mut()
+        .set_secret(shared_secret)
+        .expect("create ciphers failed");
 
     let login_success_packet: login_out::LoginSuccessPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("login success packet read failed");
     assert_eq!(login_success_packet.user_name, user_name);
@@ -325,7 +328,7 @@ async fn simulate_transfer_no_configuration() {
 
     // disconnect as no target configured
     let _disconnect_packet: conf_out::DisconnectPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("disconnect packet read failed");
 
@@ -342,7 +345,8 @@ async fn simulate_slow_transfer_no_configuration() {
     // create stream
     let auth_secret = "secret";
     let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
-    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = PacketStream::new(CipherStream::from_stream(client_stream), 100_000);
 
     // build supplier
     let adapters = Arc::new(Adapters::new(
@@ -391,7 +395,7 @@ async fn simulate_slow_transfer_no_configuration() {
         .expect("send login start failed");
 
     let cookie_request_packet: login_out::CookieRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("session cookie request packet read failed");
     assert_eq!(&cookie_request_packet.key, SESSION_COOKIE_KEY);
@@ -413,7 +417,7 @@ async fn simulate_slow_transfer_no_configuration() {
         .expect("send session cookie response failed");
 
     let cookie_request_packet: login_out::CookieRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("cookie request packet read failed");
     assert_eq!(&cookie_request_packet.key, AUTH_COOKIE_KEY);
@@ -442,7 +446,7 @@ async fn simulate_slow_transfer_no_configuration() {
         .expect("send cookie response failed");
 
     let encryption_request_packet: login_out::EncryptionRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("encryption request packet read failed");
     assert!(!encryption_request_packet.should_authenticate);
@@ -459,11 +463,13 @@ async fn simulate_slow_transfer_no_configuration() {
         .await
         .expect("send encryption response failed");
 
-    let mut client_stream =
-        CipherStream::from_secret(client_stream, shared_secret).expect("create ciphers failed");
+    client_stream
+        .inner_mut()
+        .set_secret(shared_secret)
+        .expect("create ciphers failed");
 
     let login_success_packet: login_out::LoginSuccessPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("login success packet read failed");
     assert_eq!(login_success_packet.user_name, user_name);
@@ -491,7 +497,7 @@ async fn simulate_slow_transfer_no_configuration() {
 
     // handle the first fmt exchange
     let keep_alive: conf_out::KeepAlivePacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("keep-alive packet read failed");
 
@@ -502,13 +508,13 @@ async fn simulate_slow_transfer_no_configuration() {
 
     // start the second exchange
     let _: conf_out::KeepAlivePacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("keep-alive packet read failed");
 
     // disconnect as no target configured
     let _disconnect_packet: conf_out::DisconnectPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("disconnect packet read failed");
 
@@ -530,7 +536,8 @@ async fn simulate_login_no_configuration() {
 
     // create stream
     let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
-    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = PacketStream::new(CipherStream::from_stream(client_stream), 100_000);
 
     // build supplier
     let adapters = Arc::new(Adapters::new(
@@ -574,7 +581,7 @@ async fn simulate_login_no_configuration() {
         .expect("send login start failed");
 
     let cookie_request_packet: login_out::CookieRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("session cookie request packet read failed");
     assert_eq!(&cookie_request_packet.key, SESSION_COOKIE_KEY);
@@ -596,7 +603,7 @@ async fn simulate_login_no_configuration() {
         .expect("send session cookie response failed");
 
     let encryption_request_packet: login_out::EncryptionRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("encryption request packet read failed");
     assert!(encryption_request_packet.should_authenticate);
@@ -613,11 +620,13 @@ async fn simulate_login_no_configuration() {
         .await
         .expect("send encryption response failed");
 
-    let mut client_stream =
-        CipherStream::from_secret(client_stream, shared_secret).expect("create ciphers failed");
+    client_stream
+        .inner_mut()
+        .set_secret(shared_secret)
+        .expect("create ciphers failed");
 
     let login_success_packet: login_out::LoginSuccessPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("login success packet read failed");
     assert_eq!(login_success_packet.user_name, user_name);
@@ -645,7 +654,7 @@ async fn simulate_login_no_configuration() {
 
     // disconnect as no target configured
     let _disconnect_packet: conf_out::DisconnectPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("disconnect packet read failed");
 
@@ -662,7 +671,8 @@ async fn sends_keep_alive() {
     // create stream
     let auth_secret = "secret";
     let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
-    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = PacketStream::new(CipherStream::from_stream(client_stream), 100_000);
 
     // build supplier
     let adapters = Arc::new(Adapters::new(
@@ -711,7 +721,7 @@ async fn sends_keep_alive() {
         .expect("send login start failed");
 
     let cookie_request_packet: login_out::CookieRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("session cookie request packet read failed");
     assert_eq!(&cookie_request_packet.key, SESSION_COOKIE_KEY);
@@ -733,7 +743,7 @@ async fn sends_keep_alive() {
         .expect("send session cookie response failed");
 
     let cookie_request_packet: login_out::CookieRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("cookie request packet read failed");
     assert_eq!(&cookie_request_packet.key, AUTH_COOKIE_KEY);
@@ -762,7 +772,7 @@ async fn sends_keep_alive() {
         .expect("send cookie response failed");
 
     let encryption_request_packet: login_out::EncryptionRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("encryption request packet read failed");
     assert!(!encryption_request_packet.should_authenticate);
@@ -779,11 +789,13 @@ async fn sends_keep_alive() {
         .await
         .expect("send encryption response failed");
 
-    let mut client_stream =
-        CipherStream::from_secret(client_stream, shared_secret).expect("create ciphers failed");
+    client_stream
+        .inner_mut()
+        .set_secret(shared_secret)
+        .expect("create ciphers failed");
 
     let login_success_packet: login_out::LoginSuccessPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("login success packet read failed");
     assert_eq!(login_success_packet.user_name, user_name);
@@ -796,7 +808,7 @@ async fn sends_keep_alive() {
 
     tokio::time::advance(Duration::from_secs(10)).await;
     let _: conf_out::KeepAlivePacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("keep-alive packet read failed");
 
@@ -817,7 +829,7 @@ async fn sends_keep_alive() {
 
     // disconnect as no target configured
     let _disconnect_packet: conf_out::DisconnectPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("disconnect packet read failed");
 
@@ -834,7 +846,8 @@ async fn no_respond_keep_alive() {
     // create stream
     let auth_secret = "secret";
     let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
-    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = PacketStream::new(CipherStream::from_stream(client_stream), 100_000);
 
     // build supplier
     let adapters = Arc::new(Adapters::new(
@@ -879,7 +892,7 @@ async fn no_respond_keep_alive() {
         .expect("send login start failed");
 
     let cookie_request_packet: login_out::CookieRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("session cookie request packet read failed");
     assert_eq!(&cookie_request_packet.key, SESSION_COOKIE_KEY);
@@ -901,7 +914,7 @@ async fn no_respond_keep_alive() {
         .expect("send session cookie response failed");
 
     let cookie_request_packet: login_out::CookieRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("cookie request packet read failed");
     assert_eq!(&cookie_request_packet.key, AUTH_COOKIE_KEY);
@@ -930,7 +943,7 @@ async fn no_respond_keep_alive() {
         .expect("send cookie response failed");
 
     let encryption_request_packet: login_out::EncryptionRequestPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("encryption request packet read failed");
     assert!(!encryption_request_packet.should_authenticate);
@@ -947,11 +960,13 @@ async fn no_respond_keep_alive() {
         .await
         .expect("send encryption response failed");
 
-    let mut client_stream =
-        CipherStream::from_secret(client_stream, shared_secret).expect("create ciphers failed");
+    client_stream
+        .inner_mut()
+        .set_secret(shared_secret)
+        .expect("create ciphers failed");
 
     let login_success_packet: login_out::LoginSuccessPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("login success packet read failed");
     assert_eq!(login_success_packet.user_name, user_name);
@@ -965,14 +980,14 @@ async fn no_respond_keep_alive() {
     // advance to ensure keep-alive is sent at least once
     tokio::time::advance(Duration::from_secs(KEEP_ALIVE_INTERVAL)).await;
     let _: conf_out::KeepAlivePacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("keep-alive packet read failed");
     tokio::time::advance(Duration::from_secs(KEEP_ALIVE_INTERVAL)).await;
 
     // disconnect as no target configured
     let _disconnect_packet: conf_out::DisconnectPacket = client_stream
-        .read_packet()
+        .parse_packet()
         .await
         .expect("disconnect packet read failed");
 
@@ -982,11 +997,13 @@ async fn no_respond_keep_alive() {
 
 #[tokio::test]
 async fn test_proxy_protocol_v1_ipv4() {
-    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = PacketStream::new(CipherStream::from_stream(client_stream), 100_000);
 
     // Write PROXY protocol v1 header
     let proxy_header = b"PROXY TCP4 192.168.1.100 10.0.0.1 12345 25565\r\n";
     client_stream
+        .inner_mut()
         .write_all(proxy_header)
         .await
         .expect("write proxy header failed");
@@ -1007,12 +1024,14 @@ async fn test_proxy_protocol_v1_ipv4() {
 
 #[tokio::test]
 async fn test_proxy_protocol_v1_ipv6() {
-    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = PacketStream::new(CipherStream::from_stream(client_stream), 100_000);
 
     // Write PROXY protocol v1 header with IPv6
     // Note: IPv6 addresses in PROXY protocol v1 should not have brackets
     let proxy_header = b"PROXY TCP6 2001:0db8:0000:0000:0000:0000:0000:0001 2001:0db8:0000:0000:0000:0000:0000:0002 54321 25565\r\n";
     client_stream
+        .inner_mut()
         .write_all(proxy_header)
         .await
         .expect("write proxy header failed");
@@ -1033,7 +1052,8 @@ async fn test_proxy_protocol_v1_ipv6() {
 
 #[tokio::test]
 async fn test_proxy_protocol_v2_ipv4() {
-    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = PacketStream::new(CipherStream::from_stream(client_stream), 100_000);
 
     // Write PROXY protocol v2 header for IPv4
     let mut proxy_header = vec![
@@ -1052,6 +1072,7 @@ async fn test_proxy_protocol_v2_ipv4() {
     proxy_header.extend_from_slice(&25565u16.to_be_bytes());
 
     client_stream
+        .inner_mut()
         .write_all(&proxy_header)
         .await
         .expect("write proxy header failed");
@@ -1072,7 +1093,8 @@ async fn test_proxy_protocol_v2_ipv4() {
 
 #[tokio::test]
 async fn test_proxy_protocol_v2_ipv6() {
-    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = PacketStream::new(CipherStream::from_stream(client_stream), 100_000);
 
     // Write PROXY protocol v2 header for IPv6
     let mut proxy_header = vec![
@@ -1097,6 +1119,7 @@ async fn test_proxy_protocol_v2_ipv6() {
     proxy_header.extend_from_slice(&25565u16.to_be_bytes());
 
     client_stream
+        .inner_mut()
         .write_all(&proxy_header)
         .await
         .expect("write proxy header failed");
@@ -1117,11 +1140,13 @@ async fn test_proxy_protocol_v2_ipv6() {
 
 #[tokio::test]
 async fn test_proxy_protocol_invalid_header() {
-    let (mut client_stream, server_stream) = tokio::io::duplex(1024);
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = PacketStream::new(CipherStream::from_stream(client_stream), 100_000);
 
     // Write invalid data
     let invalid_header = b"INVALID DATA\r\n";
     client_stream
+        .inner_mut()
         .write_all(invalid_header)
         .await
         .expect("write invalid header failed");

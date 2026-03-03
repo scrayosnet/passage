@@ -2605,6 +2605,7 @@ dependencies = [
 name = "passage-packets"
 version = "0.2.1"
 dependencies = [
+ "bytes",
  "criterion",
  "fake",
  "fastnbt",

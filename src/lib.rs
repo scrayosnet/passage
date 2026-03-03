@@ -79,7 +79,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     debug!("building protocol");
     let listener_config = ListenerConfig {
         auth_secret: config.auth_secret.clone(),
-        max_packet_length: config.max_packet_length as i32,
+        max_packet_length: config.max_packet_length,
         auth_cookie_expiry: config.auth_cookie_expiry,
         proxy_protocol: config.proxy_protocol.map(|c| ProxyProtocol {
             allow_v1: c.allow_v1,

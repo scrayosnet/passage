@@ -1,8 +1,7 @@
-use passage_packets::VarInt;
 use serde::Deserialize;
 
 /// The max packet length in bytes. Larger packets are rejected.
-pub const DEFAULT_MAX_PACKET_LENGTH: VarInt = 10_000;
+pub const DEFAULT_MAX_PACKET_LENGTH: usize = 10_000;
 
 /// The default auth cookie expiry time in seconds.
 pub const DEFAULT_AUTH_COOKIE_EXPIRY: u64 = 6 * 60 * 60;
@@ -16,7 +15,7 @@ pub struct Config {
     pub auth_secret: Option<String>,
 
     /// The max packet length in bytes. Larger packets are rejected.
-    pub max_packet_length: VarInt,
+    pub max_packet_length: usize,
 
     /// The auth cookie expiry time in seconds.
     pub auth_cookie_expiry: u64,
