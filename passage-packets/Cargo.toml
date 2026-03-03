@@ -25,6 +25,7 @@ fastnbt = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+bytes = { workspace = true }
 
 [dev-dependencies]
 fake = { workspace = true, features = ["derive", "uuid"] }

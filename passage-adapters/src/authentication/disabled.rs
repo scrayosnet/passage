@@ -23,14 +23,13 @@ impl AuthenticationAdapter for DisabledAuthenticationAdapter {
         (user_name, user_id): (&str, &Uuid),
         _shared_secret: &[u8],
         _encoded_public: &[u8],
-    ) -> Result<Profile> {
+    ) -> Result<Option<Profile>> {
         trace!("skipping authentication");
-        // TODO profile may need skin information, maybe provide default
-        Ok(Profile {
+        Ok(Some(Profile {
             id: *user_id,
             name: user_name.to_string(),
             properties: vec![],
             profile_actions: vec![],
-        })
+        }))
     }
 }

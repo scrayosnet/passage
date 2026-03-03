@@ -54,6 +54,7 @@ impl StatusAdapter for DynStatusAdapter {
 }
 
 impl DynStatusAdapter {
+    /// Creates a new adapter from the provided configuration.
     pub async fn from_config(
         config: config::StatusAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {

@@ -37,7 +37,7 @@ impl GrpcStrategyAdapter {
 
 impl StrategyAdapter for GrpcStrategyAdapter {
     #[instrument(skip_all)]
-    async fn select(
+    async fn strategize(
         &self,
         client_addr: &SocketAddr,
         server_addr: (&str, u16),

@@ -86,12 +86,12 @@ Passage exports the following metrics via OpenTelemetry:
 
 ### Request Metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `passage_requests_total` | Counter | Total requests (status pings + logins) |
-| `passage_status_requests_total` | Counter | Server list ping requests |
-| `passage_login_requests_total` | Counter | Login/join requests |
-| `passage_request_duration_seconds` | Histogram | Request processing time |
+| Metric                             | Type      | Description                            |
+|------------------------------------|-----------|----------------------------------------|
+| `passage_requests_total`           | Counter   | Total requests (status pings + logins) |
+| `passage_status_connections_total` | Counter   | Server list ping requests              |
+| `passage_login_requests_total`     | Counter   | Login/join requests                    |
+| `passage_request_duration_seconds` | Histogram | Request processing time                |
 
 **Labels:**
 - `request_type` - `status` or `login`

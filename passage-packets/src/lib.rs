@@ -1,6 +1,7 @@
 #[cfg(test)]
 use fake::Dummy;
 use std::fmt::{Debug, Display};
+use std::string::FromUtf8Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
@@ -9,18 +10,66 @@ pub use fastnbt;
 pub mod configuration;
 pub mod handshake;
 pub mod login;
+pub mod packet_stream;
 pub mod reader;
 pub mod status;
 pub mod writer;
 
+/// Matches and parses a packet from a byte vector (or similar). If no matching packet arm is found,
+/// then an [Error::UnexpectedPacketId] is returned, otherwise the arm handler is invoked and its result
+/// is returned as an `Ok(...)`. The macro only works in an async context as it parses the packet async.
+///
+/// ```rs
+/// // Read packet from packet stream and match
+/// let packet = stream.read_packet().await?;
+/// let handshake = match_packet! { packet;
+///     packet = HandshakePacket => packet,
+/// }.await?;
+/// ```
+#[macro_export]
+macro_rules! match_packet {
+    {
+        $packet:expr;
+        $($packet_bind:pat = $packet_type:ty => $packet_handler:expr,)*
+    } => {{
+        use passage_packets::{Packet, ReadPacket};
+        use std::io::Cursor;
+
+        let mut reader = Cursor::new($packet);
+        let packet_id = reader.read_varint().await;
+
+        match packet_id {
+            $(
+                Ok(<$packet_type>::ID) => {
+                    match <$packet_type>::read_from_buffer(&mut reader).await {
+                        Err(err) => Err(err),
+                        Ok($packet_bind) => {
+                            #[allow(unreachable_code)]
+                            Ok($packet_handler)
+                        }
+                    }
+                },
+            )*
+            Ok(packet_id) => Err(passage_packets::Error::IllegalPacketId {
+                expected: vec![$(<$packet_type>::ID),*],
+                actual: packet_id,
+            }),
+            Err(err) => Err(err),
+        }
+    }};
+}
+
+/// The initial buffer size used for temporary packet read and write buffers.
 pub const INITIAL_BUFFER_SIZE: usize = 48;
 
+// TODO make this just a vec?
 pub type VerifyToken = [u8; 32];
 
 pub type VarInt = i32;
 
 pub type VarLong = i64;
 
+// TODO better differentiate between client and server errors? -> all client errors?
 /// The internal error type for all errors related to the protocol communication.
 ///
 /// This includes errors with the expected packets, packet contents or encoding of the exchanged fields. Errors of the
@@ -31,6 +80,10 @@ pub enum Error {
     /// An error occurred while reading or writing to the underlying byte stream.
     #[error("error reading or writing data: {0}")]
     Io(#[from] std::io::Error),
+
+    /// The connection was closed by the remote peer.
+    #[error("connection closed by peer")]
+    ConnectionClosed,
 
     /// The received packets is of an invalid length that we cannot process.
     #[error("illegal packets length")]
@@ -45,19 +98,20 @@ pub enum Error {
         value: VarInt,
     },
 
-    /// The received packets ID is not mapped to an expected packet.
-    #[error("illegal packets ID: {actual} (expected {expected})")]
+    /// The received packet ID is not mapped to any expected packet.
+    #[error("illegal packets ID: {actual} (expected any {expected:?})")]
     IllegalPacketId {
-        /// The expected value that should be present.
-        expected: VarInt,
+        /// Any of the expected values that should be present.
+        expected: Vec<VarInt>,
         /// The actual value that was observed.
         actual: VarInt,
     },
 
-    /// The JSON response of a packet is incorrectly encoded (not UTF-8).
-    #[error("invalid response body (invalid encoding)")]
-    InvalidEncoding,
+    /// The string of a packet is incorrectly encoded (not UTF-8).
+    #[error("invalid utf8 encoding: {0}")]
+    Utf8(#[from] FromUtf8Error),
 
+    // TODO clarify error cause
     /// Some array conversion failed.
     #[error("could not convert into array")]
     ArrayConversionFailed,
@@ -119,7 +173,7 @@ pub enum ResourcePackResult {
     Downloaded,
     InvalidUrl,
     ReloadFailed,
-    Discorded,
+    Discarded,
 }
 
 impl From<ResourcePackResult> for VarInt {
@@ -132,7 +186,7 @@ impl From<ResourcePackResult> for VarInt {
             ResourcePackResult::Downloaded => 4,
             ResourcePackResult::InvalidUrl => 5,
             ResourcePackResult::ReloadFailed => 6,
-            ResourcePackResult::Discorded => 7,
+            ResourcePackResult::Discarded => 7,
         }
     }
 }
@@ -149,7 +203,7 @@ impl TryFrom<VarInt> for ResourcePackResult {
             4 => Ok(ResourcePackResult::Downloaded),
             5 => Ok(ResourcePackResult::InvalidUrl),
             6 => Ok(ResourcePackResult::ReloadFailed),
-            7 => Ok(ResourcePackResult::Discorded),
+            7 => Ok(ResourcePackResult::Discarded),
             _ => Err(Error::IllegalEnumValue {
                 kind: "ResourcePackResult",
                 value,
@@ -355,15 +409,6 @@ pub trait ReadPacket: Packet + Sized {
 /// methods to write the data that is encoded in a Minecraft-specific manner. Their implementation is analogous to the
 /// [read implementation](AsyncReadPacket).
 pub trait AsyncWritePacket {
-    /// Writes a [`WritePacket`] onto this object as described in the official [protocol documentation][protocol-doc]
-    /// and returns the raw packet size (before any compression or encryption).
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Packet_format
-    fn write_packet<T: WritePacket + Send + Sync + Debug>(
-        &mut self,
-        packet: T,
-    ) -> impl Future<Output = Result<usize, Error>>;
-
     /// Writes a [`VarInt`] onto this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
@@ -406,14 +451,6 @@ pub trait AsyncWritePacket {
 /// methods to read the data that is encoded in a Minecraft-specific manner. Their implementation is analogous to the
 /// [write implementation](AsyncWritePacket).
 pub trait AsyncReadPacket {
-    /// Reads the supplied [`ReadPacket`] type from this object as described in the official
-    /// [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Packet_format
-    fn read_packet<T: ReadPacket + Send + Sync>(
-        &mut self,
-    ) -> impl Future<Output = Result<T, Error>>;
-
     /// Reads a [`VarInt`] from this object as described in the official [protocol documentation][protocol-doc].
     ///
     /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong

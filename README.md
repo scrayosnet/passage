@@ -65,6 +65,24 @@ Visit [our website][passage-website] to get a full overview over Passage's featu
 Install your own instance of Passage within seconds with our [Getting Started Guide][passage-guide] on our website. You
 can also find more information on how to configure, optimize and embed Passage in your network there.
 
+## Project Structure
+
+The project consists of multiple subprojects, as well as a main project. The main project provides an 
+opinionated method for configuring and starting the Passage network router. It uses a config file
+and environment variables to alter the default configuration. This configuration is then passed to the
+`protocol` subproject which implements the actual Passage network router. In the future, additional
+subprojects may be added giving other ways to configure and start Passage.
+
+- `passage` - The optiononated Passage network router.
+- `passage-protocol` - The Minecraft protocol implementation.
+- `passage-packets` - The Minecraft protocol packets implementations.
+- `passage-adapters` - The adapters interface defintions and basic implementations.
+- `passage-adapters-*` - Specific adapter implementations (e.g., gRPC or Agones).
+
+The docker image and helm chart use the opinionated Passage network router. It includes all adapter
+implementations. You are able to build your own docker image with limited adapter implementations by
+disabling their respective features.
+
 ## Reporting Security Issues
 
 To report a security issue for this project, please note our [Security Policy][security-policy].

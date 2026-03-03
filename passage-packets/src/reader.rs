@@ -1,33 +1,9 @@
-use crate::{AsyncReadPacket, Error, ReadPacket, VarInt, VarLong};
+use crate::{AsyncReadPacket, Error, VarInt, VarLong};
 use fastnbt::{DeOpts, Value};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use uuid::Uuid;
 
 impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
-    async fn read_packet<T: ReadPacket + Send + Sync>(&mut self) -> Result<T, Error> {
-        // extract the length of the packets and check for any following content
-        let length = self.read_varint().await?;
-        if length == 0 || length > 10_000 {
-            return Err(Error::IllegalPacketLength);
-        }
-
-        // extract the encoded packets id and validate if it is expected
-        let packet_id = self.read_varint().await?;
-        let expected_packet_id = T::ID;
-        if packet_id != expected_packet_id {
-            return Err(Error::IllegalPacketId {
-                expected: expected_packet_id,
-                actual: packet_id,
-            });
-        }
-
-        // split a separate reader from the stream
-        let mut take = self.take(length as u64);
-
-        // convert the received buffer into our expected packets
-        T::read_from_buffer(&mut take).await
-    }
-
     async fn read_varint(&mut self) -> Result<VarInt, Error> {
         let mut buf = [0];
         let mut ans = 0;
@@ -60,7 +36,7 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
         let mut buffer = vec![0; length];
         self.read_exact(&mut buffer).await?;
 
-        String::from_utf8(buffer).map_err(|_| Error::InvalidEncoding)
+        Ok(String::from_utf8(buffer)?)
     }
 
     async fn read_bool(&mut self) -> Result<bool, Error> {
@@ -83,7 +59,7 @@ impl<R: AsyncRead + Unpin + Send + Sync> AsyncReadPacket for R {
             let mut buffer = vec![0; len as usize];
             self.read_exact(&mut buffer).await?;
 
-            return String::from_utf8(buffer).map_err(|_| Error::InvalidEncoding);
+            return Ok(String::from_utf8(buffer)?);
         }
 
         // expect it to take the full buffer (the text component is the last element in the packet)

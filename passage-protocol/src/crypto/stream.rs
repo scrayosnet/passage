@@ -34,10 +34,6 @@ impl<S, E, D> CipherStream<S, E, D> {
         }
     }
 
-    pub fn from_stream(inner: S) -> Self {
-        Self::new(inner, None, None)
-    }
-
     pub fn set_encryption(&mut self, encryptor: Option<E>, decryptor: Option<D>) {
         self.encryptor = encryptor;
         self.decryptor = decryptor;
@@ -49,9 +45,20 @@ impl<S, E, D> CipherStream<S, E, D> {
 }
 
 impl<S> CipherStream<S, Aes128Cfb8Enc, Aes128Cfb8Dec> {
+    pub fn from_stream(inner: S) -> Self {
+        Self::new(inner, None, None)
+    }
+
     pub fn from_secret(inner: S, shared_secret: &[u8]) -> Result<Self, Error> {
         let (encryptor, decryptor) = create_ciphers(shared_secret)?;
         Ok(Self::new(inner, Some(encryptor), Some(decryptor)))
+    }
+
+    pub fn set_secret(&mut self, shared_secret: &[u8]) -> Result<(), Error> {
+        let (encryptor, decryptor) = create_ciphers(shared_secret)?;
+        self.encryptor = Some(encryptor);
+        self.decryptor = Some(decryptor);
+        Ok(())
     }
 }
 

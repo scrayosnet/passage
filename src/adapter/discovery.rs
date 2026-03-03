@@ -10,6 +10,7 @@ use passage_adapters_dns::{DnsDiscoveryAdapter, RecordType};
 use passage_adapters_grpc::GrpcDiscoveryAdapter;
 use std::fmt::{Display, Formatter};
 
+/// The dynamic discovery adapter.
 #[derive(Debug)]
 pub enum DynDiscoveryAdapter {
     Fixed(FixedDiscoveryAdapter),
@@ -50,6 +51,7 @@ impl DiscoveryAdapter for DynDiscoveryAdapter {
 }
 
 impl DynDiscoveryAdapter {
+    /// Creates a new adapter from the provided configuration.
     pub async fn from_config(
         config: config::DiscoveryAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {

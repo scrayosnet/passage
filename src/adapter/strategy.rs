@@ -7,6 +7,7 @@ use sentry::protocol::Uuid;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 
+/// The dynamic strategy adapter.
 #[derive(Debug)]
 pub enum DynStrategyAdapter {
     Any(AnyStrategyAdapter),
@@ -27,7 +28,7 @@ impl Display for DynStrategyAdapter {
 }
 
 impl StrategyAdapter for DynStrategyAdapter {
-    async fn select(
+    async fn strategize(
         &self,
         client_addr: &SocketAddr,
         server_addr: (&str, u16),
@@ -38,18 +39,18 @@ impl StrategyAdapter for DynStrategyAdapter {
         match self {
             DynStrategyAdapter::Any(adapter) => {
                 adapter
-                    .select(client_addr, server_addr, protocol, user, targets)
+                    .strategize(client_addr, server_addr, protocol, user, targets)
                     .await
             }
             DynStrategyAdapter::PlayerFill(adapter) => {
                 adapter
-                    .select(client_addr, server_addr, protocol, user, targets)
+                    .strategize(client_addr, server_addr, protocol, user, targets)
                     .await
             }
             #[cfg(feature = "adapters-grpc")]
             DynStrategyAdapter::Grpc(adapter) => {
                 adapter
-                    .select(client_addr, server_addr, protocol, user, targets)
+                    .strategize(client_addr, server_addr, protocol, user, targets)
                     .await
             }
         }
@@ -57,6 +58,7 @@ impl StrategyAdapter for DynStrategyAdapter {
 }
 
 impl DynStrategyAdapter {
+    /// Creates a new adapter from the provided configuration.
     pub async fn from_config(
         config: config::StrategyAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {

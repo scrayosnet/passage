@@ -4,7 +4,16 @@ use std::hash::Hash;
 use tokio::time::{Duration, Instant};
 use tracing::instrument;
 
-/// [`RateLimiter`] tracks connections per client address over some (approximate) time window.
+/// [`RateLimiter`] is a sliding-window-counter rate limiter. It allows at most `limit` connections
+/// per `duration` window. However, the number of requests in the current window is only approximated.
+/// This approximation is generally good enough with the advantage of only having to store two floats
+/// and a timestamp per requestor instead of a whole request history.
+///
+/// Use [`RateLimiter::enqueue`] to add a new request to the rate limiter. It returns `false` if the
+/// request should be rejected. Rejected requests do not increase the number of requests in the current
+/// window. As such, spamming will eventually result in a request not getting rejected.
+///
+/// Expired buckets are automatically removed at some point, but not necessarily as soon as they expire.
 pub struct RateLimiter<T> {
     last_cleanup: Instant,
     buckets: HashMap<T, (Instant, f32, f32)>,
@@ -16,6 +25,7 @@ impl<T> RateLimiter<T>
 where
     T: Eq + Copy + Hash,
 {
+    /// Creates a new [`RateLimiter`] that allows at most `limit` connections per `duration` window.
     pub fn new(duration: Duration, limit: usize) -> Self {
         assert!(duration.as_secs_f32() > 0f32);
         metrics::rate_limiter_size::set(0u64);
@@ -27,6 +37,9 @@ where
         }
     }
 
+    /// Enqueues a new request for the bucket key into the current window. Returns `false` if the request
+    /// should be rejected. Rejected requests do not increase the number of requests in the current window.
+    /// As such, spamming will eventually result in a request not getting rejected.
     #[instrument(skip_all)]
     pub fn enqueue(&mut self, key: T) -> bool {
         // get the current time only once

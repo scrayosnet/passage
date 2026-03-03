@@ -37,6 +37,7 @@ sha2 = { workspace = true }
 hmac = { workspace = true }
 aes = { workspace = true }
 cfb8 = { workspace = true }
+sysinfo = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

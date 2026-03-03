@@ -3,6 +3,7 @@ use passage_adapters::FixedLocalizationAdapter;
 use passage_adapters::localization::LocalizationAdapter;
 use std::fmt::{Display, Formatter};
 
+/// The dynamic localization adapter.
 #[derive(Debug)]
 pub enum DynLocalizationAdapter {
     Fixed(FixedLocalizationAdapter),
@@ -30,6 +31,7 @@ impl LocalizationAdapter for DynLocalizationAdapter {
 }
 
 impl DynLocalizationAdapter {
+    /// Creates a new adapter from the provided configuration.
     pub async fn from_config(
         config: config::LocalizationAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {
