@@ -35,7 +35,7 @@ impl AuthenticationAdapter for DynAuthenticationAdapter {
         user: (&str, &Uuid),
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> passage_adapters::Result<Profile> {
+    ) -> passage_adapters::Result<Option<Profile>> {
         match self {
             DynAuthenticationAdapter::Disabled(adapter) => {
                 adapter

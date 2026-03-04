@@ -15,7 +15,7 @@ impl AnyStrategyAdapter {
 
 impl StrategyAdapter for AnyStrategyAdapter {
     #[tracing::instrument(skip_all)]
-    async fn select(
+    async fn strategize(
         &self,
         _client_addr: &SocketAddr,
         _server_addr: (&str, u16),

@@ -32,16 +32,16 @@ impl AuthenticationAdapter for MojangAdapter {
         user: (&str, &Uuid),
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> passage_adapters::Result<Profile> {
+    ) -> passage_adapters::Result<Option<Profile>> {
         // calculate the minecraft hash for this secret, key and username
         let hash = minecraft_hash(&self.server_id, shared_secret, encoded_public);
 
-        // issue a request to Mojang's authentication endpoint
+        // issue a request to the Mojang authentication endpoint
         let username = user.0;
         let url = format!(
             "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}"
         );
-        let profile = HTTP_CLIENT
+        let response = HTTP_CLIENT
             .get(&url)
             .send()
             .await
@@ -53,13 +53,22 @@ impl AuthenticationAdapter for MojangAdapter {
             .map_err(|err| passage_adapters::Error::FailedFetch {
                 adapter_type: "mojang",
                 cause: Box::new(err),
-            })?
-            .json()
-            .await
-            .map_err(|err| passage_adapters::Error::FailedParse {
-                adapter_type: "mojang",
-                cause: Box::new(err),
             })?;
-        Ok(profile)
+
+        // if the response is empty, then the client did not make an auth request
+        if response.status() == 204 {
+            return Ok(None);
+        }
+
+        // parse the response profile
+        let profile =
+            response
+                .json()
+                .await
+                .map_err(|err| passage_adapters::Error::FailedParse {
+                    adapter_type: "mojang",
+                    cause: Box::new(err),
+                })?;
+        Ok(Some(profile))
     }
 }

@@ -44,6 +44,7 @@
 use config::{ConfigError, Environment, File, FileStoredFormat, Format, Map, Value, ValueKind};
 use passage_adapters::authentication::Profile;
 use passage_adapters::{Protocol, Target};
+use passage_protocol::config::DEFAULT_CONNECTION_TIMEOUT;
 use passage_protocol::connection::{DEFAULT_AUTH_COOKIE_EXPIRY, DEFAULT_MAX_PACKET_LENGTH};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -72,7 +73,7 @@ pub struct Config {
     pub timeout: u64,
 
     /// The max packet size in bytes accepted by the server.
-    pub max_packet_length: u64,
+    pub max_packet_length: usize,
 
     /// The number of seconds until an auth cookie expires.
     pub auth_cookie_expiry: u64,
@@ -104,14 +105,14 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             address: "0.0.0.0:25565".to_string(),
-            timeout: 120,
+            timeout: DEFAULT_CONNECTION_TIMEOUT,
             sentry: None,
             otel: OpenTelemetry::default(),
             rate_limiter: None,
             proxy_protocol: None,
             auth_secret: None,
             adapters: Adapters::default(),
-            max_packet_length: DEFAULT_MAX_PACKET_LENGTH as u64,
+            max_packet_length: DEFAULT_MAX_PACKET_LENGTH as usize,
             auth_cookie_expiry: DEFAULT_AUTH_COOKIE_EXPIRY,
         }
     }
@@ -554,7 +555,7 @@ impl Default for AuthenticationAdapter {
 #[serde(default)]
 pub struct FixedAuthentication {
     /// The fixed profile that should be used for authentication.
-    pub profile: Profile,
+    pub profile: Option<Profile>,
 }
 
 /// [`MojangAuthentication`] hold the mojang authentication configuration.
@@ -600,31 +601,37 @@ impl Default for FixedLocalization {
                     "locale" => "English",
                     "disconnect_timeout" => "{\"text\":\"Disconnected: No response from client (keep-alive timeout)\"}",
                     "disconnect_no_target" => "{\"text\":\"Disconnected: No available server to handle your connection\"}",
+                    "disconnect_unauthenticated" => "{\"text\":\"Disconnected: Could not authenticate client\"}",
                 },
                 "es" => hashmap! {
                     "locale" => "Español",
                     "disconnect_timeout" => "{\"text\":\"Desconectado: No hubo respuesta del cliente (tiempo de espera agotado)\"}",
                     "disconnect_no_target" => "{\"text\":\"Desconectado: No hay un servidor disponible para manejar tu conexión\"}",
+                    "disconnect_unauthenticated" => "{\"text\":\"Desconectado: No se pudo autenticar el cliente\"}",
                 },
                 "fr" => hashmap! {
                     "locale" => "Français",
                     "disconnect_timeout" => "{\"text\":\"Déconnecté : aucune réponse du client (délai de keep-alive dépassé)\"}",
                     "disconnect_no_target" => "{\"text\":\"Déconnecté : aucun serveur disponible pour traiter votre connexion\"}",
+                    "disconnect_unauthenticated" => "{\"text\":\"DDéconnecté : Impossible d’authentifier le client\"}",
                 },
                 "de" => hashmap! {
                     "locale" => "Deutsch",
                     "disconnect_timeout" => "{\"text\":\"Verbindung getrennt: Keine Antwort vom Client (Keep-Alive-Timeout)\"}",
                     "disconnect_no_target" => "{\"text\":\"Verbindung getrennt: Kein verfügbarer Server für diese Verbindung\"}",
+                    "disconnect_unauthenticated" => "{\"text\":\"Verbindung getrennt: Client konnte nicht authentifiziert werden\"}",
                 },
                 "zh-CN" => hashmap! {
                     "locale" => "简体中文",
                     "disconnect_timeout" => "{\"text\":\"已断开连接：客户端无响应（保持连接超时）\"}",
                     "disconnect_no_target" => "{\"text\":\"已断开连接：没有可用的服务器来处理你的连接\"}",
+                    "disconnect_no_target" => "{\"text\":\"已断开连接：无法验证客户端\"}",
                 },
                 "ru" => hashmap! {
                     "locale" => "English",
                     "disconnect_timeout" => "{\"text\":\"Отключено: нет ответа от клиента (тайм-аут keep-alive)\"}",
                     "disconnect_no_target" => "{\"text\":\"Отключено: нет доступного сервера для обработки подключения\"}",
+                    "disconnect_unauthenticated" => "{\"text\":\"Отключено: не удалось аутентифицировать клиента\"}",
                 },
             },
         }

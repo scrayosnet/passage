@@ -6,11 +6,11 @@ use uuid::Uuid;
 
 #[derive(Debug, Default)]
 pub struct FixedAuthenticationAdapter {
-    profile: Profile,
+    profile: Option<Profile>,
 }
 
 impl FixedAuthenticationAdapter {
-    pub fn new(profile: Profile) -> Self {
+    pub fn new(profile: Option<Profile>) -> Self {
         Self { profile }
     }
 }
@@ -25,7 +25,7 @@ impl AuthenticationAdapter for FixedAuthenticationAdapter {
         _user: (&str, &Uuid),
         _shared_secret: &[u8],
         _encoded_public: &[u8],
-    ) -> Result<Profile> {
+    ) -> Result<Option<Profile>> {
         trace!("authenticating fixed profile");
         Ok(self.profile.clone())
     }

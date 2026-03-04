@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::cookie::{AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign, verify};
 use crate::crypto::stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream, create_ciphers};
 pub(crate) use crate::error::Error;
@@ -7,7 +8,8 @@ use passage_adapters::authentication::AuthenticationAdapter;
 use passage_adapters::filter::FilterAdapter;
 use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::{
-    Protocol, discovery::DiscoveryAdapter, status::StatusAdapter, strategy::StrategyAdapter,
+    Adapters, Protocol, discovery::DiscoveryAdapter, status::StatusAdapter,
+    strategy::StrategyAdapter,
 };
 use passage_packets::configuration::clientbound as conf_out;
 use passage_packets::configuration::serverbound as conf_in;
@@ -72,22 +74,15 @@ pub struct Connection<S, Stat, Disc, Filt, Stra, Auth, Loca> {
     buffer: Vec<u8>,
 
     // adapters
-    status_adapter: Arc<Stat>,
-    discovery_adapter: Arc<Disc>,
-    filter_adapter: Arc<Filt>,
-    strategy_adapter: Arc<Stra>,
-    authentication_adapter: Arc<Auth>,
-    localization_adapter: Arc<Loca>,
+    adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
+    config: Config,
+    client_address: SocketAddr,
 
-    // config and internal state
+    // keep alive state
     keep_alive_id: Option<u64>,
     keep_alive_interval: Interval,
-    auth_secret: Option<Vec<u8>>,
-    max_packet_length: VarInt,
-    auth_cookie_expiry: u64,
 
     // client information
-    client_address: SocketAddr,
     client_locale: Option<String>,
 }
 
@@ -103,12 +98,9 @@ where
 {
     pub fn new(
         stream: S,
-        status_adapter: Arc<Stat>,
-        discovery_adapter: Arc<Disc>,
-        filter_adapter: Arc<Filt>,
-        strategy_adapter: Arc<Stra>,
-        authentication_adapter: Arc<Auth>,
-        localization_adapter: Arc<Loca>,
+        adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
+        config: Config,
+        client_address: SocketAddr,
     ) -> Self {
         // start ticker for keep-alive packets, it has to be sent at least every 20 seconds.
         // Then, the client has 15 seconds to respond with a keep-alive packet. We ensure that only
@@ -120,42 +112,15 @@ where
             stream: CipherStream::from_stream(stream),
             buffer: Vec::with_capacity(INITIAL_BUFFER_SIZE),
             // adapters
-            status_adapter,
-            discovery_adapter,
-            filter_adapter,
-            strategy_adapter,
-            authentication_adapter,
-            localization_adapter,
-            // config and internal state
+            adapters,
+            config,
+            // keep alive state
             keep_alive_id: None,
             keep_alive_interval: interval,
-            auth_secret: None,
-            max_packet_length: DEFAULT_MAX_PACKET_LENGTH,
-            auth_cookie_expiry: DEFAULT_AUTH_COOKIE_EXPIRY,
             // client information
-            client_address: "127.0.0.1:8080".parse().expect("hardcoded default address"),
+            client_address,
             client_locale: None,
         }
-    }
-
-    pub fn with_max_packet_length(mut self, max_packet_length: VarInt) -> Self {
-        self.max_packet_length = max_packet_length;
-        self
-    }
-
-    pub fn with_auth_cookie_expiry(mut self, auth_cookie_expiry: u64) -> Self {
-        self.auth_cookie_expiry = auth_cookie_expiry;
-        self
-    }
-
-    pub fn with_auth_secret(mut self, auth_secret: Option<Vec<u8>>) -> Self {
-        self.auth_secret = auth_secret;
-        self
-    }
-
-    pub fn with_client_address(mut self, client_address: SocketAddr) -> Self {
-        self.client_address = client_address;
-        self
     }
 
     #[instrument(skip_all, fields(packet_length = field::Empty, packet_id = field::Empty))]
@@ -173,7 +138,7 @@ where
                     if !keep_alive { continue; }
                     debug!("checking that keep-alive packet was received");
                     if self.keep_alive_id.is_some() {
-                        let reason = self.localization_adapter.localize(
+                        let reason = self.adapters.localize(
                             self.client_locale.as_deref(),
                             "disconnect_timeout",
                             &[]
@@ -195,10 +160,10 @@ where
         };
 
         // check the length of the packet for any following content
-        if length <= 0 || length > self.max_packet_length {
+        if length <= 0 || length as usize > self.config.max_packet_length {
             debug!(
                 length,
-                "packet length should be between 0 and {}", self.max_packet_length
+                "packet length should be between 0 and {}", self.config.max_packet_length
             );
             return Err(passage_packets::Error::IllegalPacketLength.into());
         }
@@ -324,7 +289,7 @@ where
 
             debug!("getting status from supplier");
             let status = self
-                .status_adapter
+                .adapters
                 .status(
                     &self.client_address,
                     (&handshake.server_address, handshake.server_port),
@@ -382,7 +347,7 @@ where
         let mut profile_properties = vec![];
         'transfer: {
             if handshake.next_state == State::Transfer {
-                if self.auth_secret.is_none() {
+                if self.config.auth_secret.is_none() {
                     debug!("no auth secret configured, skipping auth cookie");
                     break 'transfer;
                 }
@@ -403,19 +368,19 @@ where
                     break 'transfer;
                 };
 
-                let Some(secret) = &self.auth_secret else {
+                let Some(secret) = &self.config.auth_secret else {
                     debug!("no auth secret configured, skipping auth cookie");
                     break 'transfer;
                 };
 
-                let (ok, message) = verify(&signed, secret);
+                let (ok, message) = verify(&signed, secret.as_bytes());
                 if !ok {
                     debug!("invalid auth cookie signature received, skipping auth cookie");
                     break 'transfer;
                 }
 
                 let cookie = serde_json::from_slice::<AuthCookie>(message)?;
-                let expires_at = cookie.timestamp + self.auth_cookie_expiry;
+                let expires_at = cookie.timestamp + self.config.auth_cookie_expiry;
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("time error")
@@ -466,8 +431,8 @@ where
         if should_authenticate {
             debug!("authenticating user");
             let request_start = Instant::now();
-            let auth_response = self
-                .authentication_adapter
+            let maybe_auth_response = self
+                .adapters
                 .authenticate(
                     &self.client_address,
                     (&handshake.server_address, handshake.server_port),
@@ -481,13 +446,27 @@ where
                     // track request failed
                     error!(err = %err, "authentication request failed");
                     metrics::authentication_request_duration::record(request_start, "failed");
-                })?;
+                });
             metrics::authentication_request_duration::record(request_start, "success");
+            let auth_response = maybe_auth_response?;
+            let Some(profile) = auth_response else {
+                let reason = self
+                    .adapters
+                    .localize(
+                        self.client_locale.as_deref(),
+                        "disconnect_unauthenticated",
+                        &[],
+                    )
+                    .await?;
+                self.send_packet(login_out::DisconnectPacket { reason })
+                    .await?;
+                return Err(Error::Unauthenticated);
+            };
 
             // update state for actual use info
-            login_start.user_name = auth_response.name;
-            login_start.user_id = auth_response.id;
-            profile_properties = auth_response.properties;
+            login_start.user_name = profile.name;
+            login_start.user_id = profile.id;
+            profile_properties = profile.properties;
         }
 
         // enable encryption for the connection using the shared secret
@@ -534,14 +513,14 @@ where
         // in the future we might want to consider the client information when selecting a target
         debug!("discovering targets");
         let client_address = self.client_address;
-        let discovery_adapter = self.discovery_adapter.clone();
+        let discovery_adapter = self.adapters.clone();
         let targets = tokio::select! {
             result = self.keep_alive() => result?,
             maybe_targets = discovery_adapter.discover() => maybe_targets?,
         };
 
         debug!("filtering targets");
-        let filter_adapter = self.filter_adapter.clone();
+        let filter_adapter = self.adapters.clone();
         let targets = tokio::select! {
             result = self.keep_alive() => result?,
             maybe_targets = filter_adapter.filter(
@@ -554,10 +533,10 @@ where
         };
 
         debug!("selecting target");
-        let strategy_adapter = self.strategy_adapter.clone();
+        let strategy_adapter = self.adapters.clone();
         let target = tokio::select! {
             result = self.keep_alive() => result?,
-            maybe_target = strategy_adapter.select(
+            maybe_target = strategy_adapter.strategize(
                 &client_address,
                 (&handshake.server_address, handshake.server_port),
                 handshake.protocol_version as Protocol,
@@ -570,7 +549,7 @@ where
         let Some(target) = target else {
             debug!("no transfer target found");
             let reason = self
-                .localization_adapter
+                .adapters
                 .localize(self.client_locale.as_deref(), "disconnect_no_target", &[])
                 .await?;
             debug!("sending disconnect packet");
@@ -584,7 +563,7 @@ where
             if should_authenticate {
                 debug!("writing auth cookie");
 
-                let Some(secret) = &self.auth_secret else {
+                let Some(secret) = &self.config.auth_secret else {
                     debug!("no auth secret configured, skipping writing auth cookie");
                     break 'auth_cookie;
                 };
@@ -606,7 +585,7 @@ where
                 debug!("sending auth cookie packet");
                 self.send_packet(conf_out::StoreCookiePacket {
                     key: AUTH_COOKIE_KEY.to_string(),
-                    payload: sign(&auth_payload, secret),
+                    payload: sign(&auth_payload, secret.as_bytes()),
                 })
                 .await?;
             }

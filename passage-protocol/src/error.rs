@@ -47,6 +47,10 @@ pub enum Error {
         value: VarInt,
     },
 
+    /// The auth adapter returned no profile.
+    #[error("no profile found")]
+    Unauthenticated,
+
     /// The received packets ID is not mapped to an expected packet.
     #[error("unexpected packet id received {0}")]
     UnexpectedPacketId(VarInt),
@@ -112,6 +116,7 @@ impl Error {
             Error::MissedKeepAlive => "missed-keep-alive",
             Error::NoTargetFound => "no-target-found",
             Error::ConnectionClosed(_) => "connection-closed",
+            Error::Unauthenticated => "unauthenticated",
             Error::IllegalPacketLength
             | Error::IllegalEnumValue { .. }
             | Error::UnexpectedPacketId { .. }

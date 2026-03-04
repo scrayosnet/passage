@@ -63,7 +63,7 @@ pub trait AuthenticationAdapter: Debug + Send + Sync {
         user: (&str, &Uuid),
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> impl Future<Output = Result<Profile>> + Send;
+    ) -> impl Future<Output = Result<Option<Profile>>> + Send;
 }
 
 /// Creates hash for the Minecraft protocol.
