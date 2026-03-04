@@ -1,6 +1,8 @@
-use crate::connection::{Connection, DEFAULT_AUTH_COOKIE_EXPIRY, DEFAULT_MAX_PACKET_LENGTH, Error};
+use crate::config::Config;
+use crate::connection::{Connection, Error};
 use crate::metrics;
 use crate::rate_limiter::RateLimiter;
+use passage_adapters::Adapters;
 use passage_adapters::authentication::AuthenticationAdapter;
 use passage_adapters::discovery::DiscoveryAdapter;
 use passage_adapters::filter::FilterAdapter;
@@ -20,23 +22,12 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{debug, info, instrument, warn};
 
-const DEFAULT_CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
-
 // the server listener
 pub struct Listener<Stat, Disc, Filt, Stra, Auth, Loca> {
-    status_adapter: Arc<Stat>,
-    discovery_adapter: Arc<Disc>,
-    filter_adapter: Arc<Filt>,
-    strategy_adapter: Arc<Stra>,
-    authentication_adapter: Arc<Auth>,
-    localization_adapter: Arc<Loca>,
+    adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
     tracker: TaskTracker,
     rate_limiter: Option<RateLimiter<IpAddr>>,
-    proxy_protocol: Option<ParseConfig>,
-    connection_timeout: Duration,
-    auth_secret: Option<Vec<u8>>,
-    max_packet_length: i32,
-    auth_cookie_expiry: u64,
+    config: Config,
 }
 
 impl<Stat, Disc, Filt, Stra, Auth, Loca> Listener<Stat, Disc, Filt, Stra, Auth, Loca>
@@ -49,58 +40,16 @@ where
     Loca: LocalizationAdapter + 'static,
 {
     pub fn new(
-        status_adapter: Arc<Stat>,
-        discovery_adapter: Arc<Disc>,
-        filter_adapter: Arc<Filt>,
-        strategy_adapter: Arc<Stra>,
-        authentication_adapter: Arc<Auth>,
-        localization_adapter: Arc<Loca>,
+        adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
+        rate_limiter: Option<RateLimiter<IpAddr>>,
+        config: Config,
     ) -> Self {
         Self {
-            status_adapter,
-            discovery_adapter,
-            filter_adapter,
-            strategy_adapter,
-            authentication_adapter,
-            localization_adapter,
+            adapters,
             tracker: TaskTracker::new(),
-            rate_limiter: None,
-            proxy_protocol: None,
-            connection_timeout: DEFAULT_CONNECTION_TIMEOUT,
-            auth_secret: None,
-            max_packet_length: DEFAULT_MAX_PACKET_LENGTH,
-            auth_cookie_expiry: DEFAULT_AUTH_COOKIE_EXPIRY,
+            rate_limiter,
+            config,
         }
-    }
-
-    pub fn with_rate_limiter(mut self, rate_limiter: Option<RateLimiter<IpAddr>>) -> Self {
-        self.rate_limiter = rate_limiter;
-        self
-    }
-
-    pub fn with_proxy_protocol(mut self, proxy_protocol: Option<ParseConfig>) -> Self {
-        self.proxy_protocol = proxy_protocol;
-        self
-    }
-
-    pub fn with_connection_timeout(mut self, connection_timeout: Duration) -> Self {
-        self.connection_timeout = connection_timeout;
-        self
-    }
-
-    pub fn with_auth_secret(mut self, auth_secret: Option<Vec<u8>>) -> Self {
-        self.auth_secret = auth_secret;
-        self
-    }
-
-    pub fn with_max_packet_length(mut self, max_packet_length: i32) -> Self {
-        self.max_packet_length = max_packet_length;
-        self
-    }
-
-    pub fn with_auth_cookie_expiry(mut self, auth_cookie_expiry: u64) -> Self {
-        self.auth_cookie_expiry = auth_cookie_expiry;
-        self
     }
 
     #[instrument(skip_all)]
@@ -109,7 +58,10 @@ where
         address: A,
         stop: CancellationToken,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        info!(proxy = self.proxy_protocol.is_some(), "starting listener");
+        info!(
+            proxy = self.config.proxy_protocol.is_some(),
+            "starting listener"
+        );
         let listener = TcpListener::bind(address).await?;
         loop {
             // accept the next incoming connection
@@ -135,8 +87,13 @@ where
     async fn handle(&mut self, stream: TcpStream, addr: SocketAddr) {
         let connection_start = Instant::now();
 
-        let (mut stream, client_addr) = if let Some(proxy_config) = self.proxy_protocol {
-            match ProxiedStream::create_from_tokio(stream, proxy_config).await {
+        let (mut stream, client_addr) = if let Some(proxy_config) = &self.config.proxy_protocol {
+            let proxy = ParseConfig {
+                include_tlvs: false,
+                allow_v1: proxy_config.allow_v1,
+                allow_v2: proxy_config.allow_v2,
+            };
+            match ProxiedStream::create_from_tokio(stream, proxy).await {
                 Ok(stream) => {
                     let client_addr = stream
                         .proxy_header()
@@ -172,29 +129,15 @@ where
             return;
         }
 
-        let connection_timeout = self.connection_timeout;
-        let status_adapter = self.status_adapter.clone();
-        let discovery_adapter = self.discovery_adapter.clone();
-        let filter_adapter = self.filter_adapter.clone();
-        let strategy_adapter = self.strategy_adapter.clone();
-        let authentication_adapter = self.authentication_adapter.clone();
-        let localization_adapter = self.localization_adapter.clone();
-        let auth_secret = self.auth_secret.clone();
+        let adapters = self.adapters.clone();
+        let connection_config = self.config.clone();
+        let connection_timeout = Duration::from_secs(self.config.connection_timeout);
 
         // create a new connection and run protocol
         self.tracker.spawn(async move {
             metrics::open_connections::inc();
-            let mut connection = Connection::new(
-                &mut stream,
-                status_adapter,
-                discovery_adapter,
-                filter_adapter,
-                strategy_adapter,
-                authentication_adapter,
-                localization_adapter,
-            )
-            .with_client_address(client_addr)
-            .with_auth_secret(auth_secret);
+            let mut connection =
+                Connection::new(&mut stream, adapters, connection_config, client_addr);
 
             // handle the client connection (ignore connection closed by the client)
             let timeout = timeout(connection_timeout, connection.listen()).await;

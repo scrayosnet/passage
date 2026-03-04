@@ -1,3 +1,4 @@
+pub mod config;
 pub mod connection;
 pub mod cookie;
 pub mod crypto;

@@ -27,7 +27,7 @@ impl Display for DynStrategyAdapter {
 }
 
 impl StrategyAdapter for DynStrategyAdapter {
-    async fn select(
+    async fn strategize(
         &self,
         client_addr: &SocketAddr,
         server_addr: (&str, u16),
@@ -38,18 +38,18 @@ impl StrategyAdapter for DynStrategyAdapter {
         match self {
             DynStrategyAdapter::Any(adapter) => {
                 adapter
-                    .select(client_addr, server_addr, protocol, user, targets)
+                    .strategize(client_addr, server_addr, protocol, user, targets)
                     .await
             }
             DynStrategyAdapter::PlayerFill(adapter) => {
                 adapter
-                    .select(client_addr, server_addr, protocol, user, targets)
+                    .strategize(client_addr, server_addr, protocol, user, targets)
                     .await
             }
             #[cfg(feature = "adapters-grpc")]
             DynStrategyAdapter::Grpc(adapter) => {
                 adapter
-                    .select(client_addr, server_addr, protocol, user, targets)
+                    .strategize(client_addr, server_addr, protocol, user, targets)
                     .await
             }
         }

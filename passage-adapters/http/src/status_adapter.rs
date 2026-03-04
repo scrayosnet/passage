@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::select;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, instrument, warn};
+use tracing::{info, instrument, warn};
 
 pub struct HttpStatusAdapter {
     inner: Arc<RwLock<Option<ServerStatus>>>,
@@ -32,7 +32,7 @@ impl HttpStatusAdapter {
         let mut interval = tokio::time::interval(refresh_interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         tokio::spawn(async move {
-            debug!("Starting refresh task");
+            info!("Starting refresh task");
             loop {
                 select! {
                     biased;
