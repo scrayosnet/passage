@@ -58,10 +58,14 @@ kube = { version = "3.0", default-features = false }
 k8s-openapi = { version = "0.27", default-features = false }
 schemars = { version = "1.2", default-features = false }
 futures-util = { version = "0.3", default-features = false }
+futures = { version = "0.3" }
 fake = { version = "4.4" }
 fastnbt = { version = "2.6.0" }
 regex = { version = "1.12.3" }
 hickory-resolver = { version = "0.24" }
+bytes = { version = "1.11.1" }
+byteorder = { version = "1.5.0" }
+tokio-stream = { version = "0.1.18" }
 
 [package]
 name = "passage"

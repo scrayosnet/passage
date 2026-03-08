@@ -12,6 +12,7 @@ pub mod login;
 pub mod reader;
 pub mod status;
 pub mod writer;
+pub mod codec;
 
 pub const INITIAL_BUFFER_SIZE: usize = 48;
 

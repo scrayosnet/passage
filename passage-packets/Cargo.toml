@@ -18,6 +18,11 @@ rust-version.workspace = true
 
 [dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal"] }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true, features = ["codec"] }
+futures = { workspace = true }
+bytes = { workspace = true }
+byteorder = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 fake = { workspace = true, features = ["derive", "uuid"] }
