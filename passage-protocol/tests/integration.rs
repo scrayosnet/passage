@@ -19,7 +19,7 @@ use passage_protocol::Error;
 use passage_protocol::config::Config;
 use passage_protocol::connection::{Connection, KEEP_ALIVE_INTERVAL};
 use passage_protocol::cookie::{
-    AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign,
+    sign, AuthCookie, SessionCookie, AUTH_COOKIE_KEY, SESSION_COOKIE_KEY,
 };
 use passage_protocol::crypto::stream::CipherStream;
 use proxy_header::ParseConfig;

@@ -1,6 +1,6 @@
 use crate::config::Config;
-use crate::cookie::{AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign, verify};
-use crate::crypto::stream::{Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream, create_ciphers};
+use crate::cookie::{sign, verify, AuthCookie, SessionCookie, AUTH_COOKIE_KEY, SESSION_COOKIE_KEY};
+use crate::crypto::stream::{create_ciphers, Aes128Cfb8Dec, Aes128Cfb8Enc, CipherStream};
 pub(crate) use crate::error::Error;
 use crate::{crypto, metrics};
 use opentelemetry::trace::TraceContextExt;
@@ -8,8 +8,8 @@ use passage_adapters::authentication::AuthenticationAdapter;
 use passage_adapters::filter::FilterAdapter;
 use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::{
-    Adapters, Protocol, discovery::DiscoveryAdapter, status::StatusAdapter,
-    strategy::StrategyAdapter,
+    discovery::DiscoveryAdapter, status::StatusAdapter, strategy::StrategyAdapter, Adapters,
+    Protocol,
 };
 use passage_packets::configuration::clientbound as conf_out;
 use passage_packets::configuration::serverbound as conf_in;
@@ -19,7 +19,7 @@ use passage_packets::login::serverbound as login_in;
 use passage_packets::status::clientbound as status_out;
 use passage_packets::status::serverbound as status_in;
 use passage_packets::{
-    AsyncReadPacket, AsyncWritePacket, INITIAL_BUFFER_SIZE, ReadPacket, State, VarInt,
+    AsyncWritePacket, ReadPacket, ReadPacket, State, VarInt, INITIAL_BUFFER_SIZE,
 };
 use passage_packets::{Packet, WritePacket};
 use std::fmt::Debug;
@@ -30,7 +30,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{Instant, Interval};
-use tracing::{Instrument, debug, error, field, info, instrument};
+use tracing::{debug, error, field, info, instrument, Instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 

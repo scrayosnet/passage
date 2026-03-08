@@ -1,9 +1,8 @@
 #[cfg(test)]
 use fake::Dummy;
 use std::fmt::{Debug, Display};
-use tokio::io::{AsyncRead, AsyncWrite};
-use uuid::Uuid;
 
+// re-export fastnbt
 pub use fastnbt;
 
 pub mod configuration;
@@ -13,6 +12,7 @@ pub mod reader;
 pub mod status;
 pub mod writer;
 pub mod codec;
+pub mod packet;
 
 pub const INITIAL_BUFFER_SIZE: usize = 48;
 
@@ -46,6 +46,7 @@ pub enum Error {
         value: VarInt,
     },
 
+    // TODO remove
     /// The received packets ID is not mapped to an expected packet.
     #[error("illegal packets ID: {actual} (expected {expected})")]
     IllegalPacketId {
@@ -55,10 +56,12 @@ pub enum Error {
         actual: VarInt,
     },
 
+    // TODO make to UTF8 string error
     /// The JSON response of a packet is incorrectly encoded (not UTF-8).
     #[error("invalid response body (invalid encoding)")]
     InvalidEncoding,
 
+    // TODO try to remove? (pad with zeros?)
     /// Some array conversion failed.
     #[error("could not convert into array")]
     ArrayConversionFailed,
@@ -334,131 +337,16 @@ pub trait Packet {
     const ID: VarInt;
 }
 
-/// `WritePacket`s are packets that can be written to a buffer.
-pub trait WritePacket: Packet {
-    /// Writes the data from this packet into the supplied [`S`].
-    fn write_to_buffer<S>(&self, buffer: &mut S) -> impl Future<Output = Result<(), Error>>
-    where
-        S: AsyncWrite + Unpin + Send + Sync;
-}
-
-/// `ReadPacket`s are packets that can be read from a buffer.
-pub trait ReadPacket: Packet + Sized {
-    /// Creates a new instance of this packet with the data from the buffer.
-    fn read_from_buffer<S>(buffer: &mut S) -> impl Future<Output = Result<Self, Error>>
-    where
-        S: AsyncRead + Unpin + Send + Sync;
-}
-
-/// `AsyncWritePacket` allows writing a specific [`WritePacket`] to an [`AsyncWrite`].
-///
-/// Only [`WritePacket`s](WritePacket) can be written as only those packets are sent. There are additional
-/// methods to write the data that is encoded in a Minecraft-specific manner. Their implementation is analogous to the
-/// [read implementation](AsyncReadPacket).
-pub trait AsyncWritePacket {
-    /// Writes a [`WritePacket`] onto this object as described in the official [protocol documentation][protocol-doc]
-    /// and returns the raw packet size (before any compression or encryption).
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Packet_format
-    fn write_packet<T: WritePacket + Send + Sync + Debug>(
-        &mut self,
-        packet: T,
-    ) -> impl Future<Output = Result<usize, Error>>;
-
-    /// Writes a [`VarInt`] onto this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
-    fn write_varint(&mut self, int: VarInt) -> impl Future<Output = Result<(), Error>>;
-
-    /// Writes a [`VarLong`] onto this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
-    fn write_varlong(&mut self, int: VarLong) -> impl Future<Output = Result<(), Error>>;
-
-    /// Writes a `String` onto this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:String
-    fn write_string(&mut self, string: &str) -> impl Future<Output = Result<(), Error>>;
-
-    /// Writes a `Uuid` onto this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:UUID
-    fn write_uuid(&mut self, uuid: &Uuid) -> impl Future<Output = Result<(), Error>>;
-
-    /// Writes a `bool` onto this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Boolean
-    fn write_bool(&mut self, bool: bool) -> impl Future<Output = Result<(), Error>>;
-
-    /// Writes a string `TextComponent` onto this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Java_Edition_protocol/Packets#Type:Text_Component
-    fn write_text_component(&mut self, str: &str) -> impl Future<Output = Result<(), Error>>;
-
-    /// Writes a vec of `u8` onto this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Prefixed_Array
-    fn write_bytes(&mut self, arr: &[u8]) -> impl Future<Output = Result<(), Error>>;
-}
-
-/// `AsyncReadPacket` allows reading a specific [`ReadPacket`] from an [`AsyncWrite`].
-///
-/// Only [`ReadPacket`s](ReadPacket) can be read as only those packets are received. There are additional
-/// methods to read the data that is encoded in a Minecraft-specific manner. Their implementation is analogous to the
-/// [write implementation](AsyncWritePacket).
-pub trait AsyncReadPacket {
-    /// Reads the supplied [`ReadPacket`] type from this object as described in the official
-    /// [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Packet_format
-    fn read_packet<T: ReadPacket + Send + Sync>(
-        &mut self,
-    ) -> impl Future<Output = Result<T, Error>>;
-
-    /// Reads a [`VarInt`] from this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
-    fn read_varint(&mut self) -> impl Future<Output = Result<VarInt, Error>>;
-
-    /// Reads a [`VarLong`] from this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#VarInt_and_VarLong
-    fn read_varlong(&mut self) -> impl Future<Output = Result<VarLong, Error>>;
-
-    /// Reads a `String` from this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:String
-    fn read_string(&mut self) -> impl Future<Output = Result<String, Error>>;
-
-    /// Reads a `bool` from this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Boolean
-    fn read_bool(&mut self) -> impl Future<Output = Result<bool, Error>>;
-
-    /// Reads a `Uuid` from this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:UUID
-    fn read_uuid(&mut self) -> impl Future<Output = Result<Uuid, Error>>;
-
-    /// Reads a string `TextComponent` from this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Java_Edition_protocol/Packets#Type:Text_Component
-    fn read_text_component(&mut self) -> impl Future<Output = Result<String, Error>>;
-
-    /// Reads a vec of `u8` from this object as described in the official [protocol documentation][protocol-doc].
-    ///
-    /// [protocol-doc]: https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol#Type:Prefixed_Array
-    fn read_bytes(&mut self) -> impl Future<Output = Result<Vec<u8>, Error>>;
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::{ReadPacket, VarInt, WritePacket};
+    use crate::reader::ReadPacket;
+    use crate::writer::WritePacket;
+    use crate::VarInt;
     use fake::{Dummy, Fake, Faker};
     use std::fmt::Debug;
     use std::io::Cursor;
 
-    pub async fn assert_packet<T>(packet_id: VarInt)
+    pub fn assert_packet<T>(packet_id: VarInt)
     where
         T: PartialEq + Eq + Dummy<Faker> + ReadPacket + WritePacket + Send + Sync + Debug + Clone,
     {
@@ -468,14 +356,12 @@ mod tests {
         // write packets
         let mut writer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
         expected
-            .write_to_buffer(&mut writer)
-            .await
+            .write_packet(&mut writer)
             .expect("failed to write packets");
 
         // read packets
         let mut reader: Cursor<Vec<u8>> = Cursor::new(writer.into_inner());
-        let actual = T::read_from_buffer(&mut reader)
-            .await
+        let actual = T::read_packet(&mut reader)
             .expect("failed to read packets");
 
         assert_eq!(T::ID, packet_id, "mismatching packet id");

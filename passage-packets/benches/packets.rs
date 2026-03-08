@@ -1,7 +1,7 @@
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use passage_packets::{
-    ChatMode, DisplayedSkinParts, MainHand, ParticleStatus, ReadPacket, ResourcePackResult, State,
-    WritePacket, configuration, handshake, login, status,
+    configuration, handshake, login, status, ChatMode, DisplayedSkinParts, MainHand,
+    ParticleStatus, ReadPacket, ResourcePackResult, State, WritePacket,
 };
 use std::fmt::Debug;
 use std::io::Cursor;
@@ -475,7 +475,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         |b| {
             b.to_async(&runtime).iter(|| {
                 rw_packet(
-                    configuration::serverbound::AckFinishConfigurationPacket,
+                    configuration::serverbound::AcknowledgeFinishConfigurationPacket,
                     buf.clone(),
                 )
             })

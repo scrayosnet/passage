@@ -141,8 +141,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::TryRng;
     use rand::rngs::SysRng;
+    use rand::TryRng;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     const SHARED_SECRET: &[u8; 16] = b"verysecuresecret";
@@ -155,8 +155,8 @@ mod tests {
         data
     }
 
-    #[tokio::test]
-    async fn without_encryption() {
+    #[test]
+    fn without_encryption() {
         // create connected streams
         let (client_stream, server_stream) = tokio::io::duplex(1024);
 
@@ -186,8 +186,8 @@ mod tests {
         assert_eq!(&sent, &received);
     }
 
-    #[tokio::test]
-    async fn with_encryption() {
+    #[test]
+    fn with_encryption() {
         // create connected streams
         let (client_stream, server_stream) = tokio::io::duplex(1024);
 
@@ -219,8 +219,8 @@ mod tests {
         assert_eq!(&sent, &received);
     }
 
-    #[tokio::test]
-    async fn with_some_encryption() {
+    #[test]
+    fn with_some_encryption() {
         // create connected streams
         let (client_stream, server_stream) = tokio::io::duplex(1024);
 

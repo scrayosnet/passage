@@ -2600,8 +2600,10 @@ dependencies = [
 name = "passage-packets"
 version = "0.2.1"
 dependencies = [
+ "aes",
  "byteorder",
  "bytes",
+ "cfb8",
  "criterion",
  "fake",
  "fastnbt",

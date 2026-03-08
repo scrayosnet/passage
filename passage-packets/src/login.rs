@@ -6,17 +6,13 @@ use uuid::Uuid;
 
 pub mod clientbound {
     use super::{Error, Packet, Uuid, VarInt};
-    use crate::VerifyToken;
     #[cfg(feature = "client")]
-    use crate::{AsyncReadPacket, ReadPacket};
+    use crate::reader::{Read, ReadPacket, ReadPacketExt};
     #[cfg(feature = "server")]
-    use crate::{AsyncWritePacket, WritePacket};
+    use crate::writer::{Write, WritePacket, WritePacketExt};
+    use crate::VerifyToken;
     #[cfg(test)]
     use fake::Dummy;
-    #[cfg(feature = "client")]
-    use tokio::io::AsyncRead;
-    #[cfg(feature = "server")]
-    use tokio::io::AsyncWrite;
     use tracing::instrument;
 
     /// The [`DisconnectPacket`].
@@ -35,12 +31,8 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for DisconnectPacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
-            buffer.write_string(&self.reason).await?;
+        fn write_packet(&self, dst: &mut impl Write) -> Result<(), Error> {
+            dst.write_string(&self.reason)?;
 
             Ok(())
         }
@@ -49,11 +41,8 @@ pub mod clientbound {
     #[cfg(feature = "client")]
     impl ReadPacket for DisconnectPacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
-            let reason = buffer.read_string().await?;
+        fn read_packet(src: &mut impl Read) -> Result<Self, Error> {
+            let reason = src.read_string()?;
 
             Ok(Self { reason })
         }
@@ -78,15 +67,11 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for EncryptionRequestPacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
-            buffer.write_string(&self.server_id).await?;
-            buffer.write_bytes(&self.public_key).await?;
-            buffer.write_bytes(&self.verify_token).await?;
-            buffer.write_bool(self.should_authenticate).await?;
+        fn write_packet(&self, dst: &mut impl Write) -> Result<(), Error> {
+            dst.write_string(&self.server_id)?;
+            dst.write_bytes(&self.public_key)?;
+            dst.write_bytes(&self.verify_token)?;
+            dst.write_bool(self.should_authenticate)?;
 
             Ok(())
         }
@@ -95,18 +80,15 @@ pub mod clientbound {
     #[cfg(feature = "client")]
     impl ReadPacket for EncryptionRequestPacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
-            let server_id = buffer.read_string().await?;
-            let public_key = buffer.read_bytes().await?;
-            let verify_token = buffer
+        fn read_packet(src: &mut impl Read) -> Result<Self, Error> {
+            let server_id = src.read_string()?;
+            let public_key = src.read_bytes()?;
+            let verify_token = src
                 .read_bytes()
-                .await?
+                ?
                 .try_into()
                 .map_err(|_| Error::ArrayConversionFailed)?;
-            let should_authenticate = buffer.read_bool().await?;
+            let should_authenticate = src.read_bool()?;
 
             Ok(Self {
                 server_id,
@@ -134,15 +116,11 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for LoginSuccessPacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
-            buffer.write_uuid(&self.user_id).await?;
-            buffer.write_string(&self.user_name).await?;
-            // no properties in array
-            buffer.write_varint(0).await?;
+        fn write_packet(&self, dst: &mut impl Write) -> Result<(), Error> {
+            dst.write_uuid(&self.user_id)?;
+            dst.write_string(&self.user_name)?;
+            // no properties in the array
+            dst.write_varint(0)?;
 
             Ok(())
         }
@@ -151,14 +129,11 @@ pub mod clientbound {
     #[cfg(feature = "client")]
     impl ReadPacket for LoginSuccessPacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
-            let user_id = buffer.read_uuid().await?;
-            let user_name = buffer.read_string().await?;
-            // expect no properties in array
-            let _properties = buffer.read_varint().await?;
+        fn read_packet(src: &mut impl Read) -> Result<Self, Error> {
+            let user_id = src.read_uuid()?;
+            let user_name = src.read_string()?;
+            // expect no properties in the array
+            let _properties = src.read_varint()?;
 
             Ok(Self { user_id, user_name })
         }
@@ -183,11 +158,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for SetCompressionPacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
+        fn write_packet(&self, _dst: &mut impl Write) -> Result<(), Error> {
             Ok(())
         }
     }
@@ -195,10 +166,7 @@ pub mod clientbound {
     #[cfg(feature = "client")]
     impl ReadPacket for SetCompressionPacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
+        fn read_packet(_src: &mut impl Read) -> Result<Self, Error> {
             Ok(Self)
         }
     }
@@ -221,11 +189,7 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for LoginPluginRequestPacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
+        fn write_packet(&self, _dst: &mut impl Write) -> Result<(), Error> {
             Ok(())
         }
     }
@@ -233,10 +197,7 @@ pub mod clientbound {
     #[cfg(feature = "client")]
     impl ReadPacket for LoginPluginRequestPacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
+        fn read_packet(_src: &mut impl Read) -> Result<Self, Error> {
             Ok(Self)
         }
     }
@@ -258,12 +219,8 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for CookieRequestPacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
-            buffer.write_string(&self.key).await?;
+        fn write_packet(&self, dst: &mut impl Write) -> Result<(), Error> {
+            dst.write_string(&self.key)?;
 
             Ok(())
         }
@@ -272,11 +229,8 @@ pub mod clientbound {
     #[cfg(feature = "client")]
     impl ReadPacket for CookieRequestPacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
-            let key = buffer.read_string().await?;
+        fn read_packet(src: &mut impl Read) -> Result<Self, Error> {
+            let key = src.read_string()?;
 
             Ok(Self { key })
         }
@@ -284,20 +238,15 @@ pub mod clientbound {
 }
 
 pub mod serverbound {
-    use super::{Error, Packet, VarInt};
+    use super::{Error, Packet, Uuid, VarInt};
     #[cfg(feature = "server")]
-    use crate::{AsyncReadPacket, ReadPacket};
+    use crate::reader::{Read, ReadPacket, ReadPacketExt};
     #[cfg(feature = "client")]
-    use crate::{AsyncWritePacket, WritePacket};
+    use crate::writer::{Write, WritePacket, WritePacketExt};
     #[cfg(test)]
     use fake::Dummy;
     use serde::Deserialize;
-    #[cfg(feature = "server")]
-    use tokio::io::AsyncRead;
-    #[cfg(feature = "client")]
-    use tokio::io::AsyncWrite;
     use tracing::instrument;
-    use uuid::Uuid;
 
     /// The [`LoginStartPacket`].
     ///
@@ -315,13 +264,9 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for LoginStartPacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
-            buffer.write_string(&self.user_name).await?;
-            buffer.write_uuid(&self.user_id).await?;
+        fn write_packet(&self, dst: &mut impl Write) -> Result<(), Error> {
+            dst.write_string(&self.user_name)?;
+            dst.write_uuid(&self.user_id)?;
 
             Ok(())
         }
@@ -330,12 +275,9 @@ pub mod serverbound {
     #[cfg(feature = "server")]
     impl ReadPacket for LoginStartPacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
-            let name = buffer.read_string().await?;
-            let user_id = buffer.read_uuid().await?;
+        fn read_packet(src: &mut impl Read) -> Result<Self, Error> {
+            let name = src.read_string()?;
+            let user_id = src.read_uuid()?;
 
             Ok(Self {
                 user_name: name,
@@ -360,13 +302,9 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for EncryptionResponsePacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
-            buffer.write_bytes(&self.shared_secret).await?;
-            buffer.write_bytes(&self.verify_token).await?;
+        fn write_packet(&self, dst: &mut impl Write) -> Result<(), Error> {
+            dst.write_bytes(&self.shared_secret)?;
+            dst.write_bytes(&self.verify_token)?;
 
             Ok(())
         }
@@ -375,12 +313,9 @@ pub mod serverbound {
     #[cfg(feature = "server")]
     impl ReadPacket for EncryptionResponsePacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
-            let shared_secret = buffer.read_bytes().await?;
-            let verify_token = buffer.read_bytes().await?;
+        fn read_packet(src: &mut impl Read) -> Result<Self, Error> {
+            let shared_secret = src.read_bytes()?;
+            let verify_token = src.read_bytes()?;
 
             Ok(Self {
                 shared_secret,
@@ -402,11 +337,7 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for LoginPluginResponsePacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
+        fn write_packet(&self, _dst: &mut impl Write) -> Result<(), Error> {
             Ok(())
         }
     }
@@ -414,10 +345,7 @@ pub mod serverbound {
     #[cfg(feature = "server")]
     impl ReadPacket for LoginPluginResponsePacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
+        fn read_packet(_src: &mut impl Read) -> Result<Self, Error> {
             Ok(Self)
         }
     }
@@ -435,11 +363,7 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for LoginAcknowledgedPacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
+        fn write_packet(&self, _dst: &mut impl Write) -> Result<(), Error> {
             Ok(())
         }
     }
@@ -447,10 +371,7 @@ pub mod serverbound {
     #[cfg(feature = "server")]
     impl ReadPacket for LoginAcknowledgedPacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
+        fn read_packet(_src: &mut impl Read) -> Result<Self, Error> {
             Ok(Self)
         }
     }
@@ -481,15 +402,11 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for CookieResponsePacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
-            buffer.write_string(&self.key).await?;
-            buffer.write_bool(self.payload.is_some()).await?;
+        fn write_packet(&self, dst: &mut impl Write) -> Result<(), Error> {
+            dst.write_string(&self.key)?;
+            dst.write_bool(self.payload.is_some())?;
             if let Some(payload) = &self.payload {
-                buffer.write_bytes(payload).await?;
+                dst.write_bytes(payload)?;
             }
 
             Ok(())
@@ -499,15 +416,12 @@ pub mod serverbound {
     #[cfg(feature = "server")]
     impl ReadPacket for CookieResponsePacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
-            let key = buffer.read_string().await?;
-            let has_payload = buffer.read_bool().await?;
+        fn read_packet(src: &mut impl Read) -> Result<Self, Error> {
+            let key = src.read_string()?;
+            let has_payload = src.read_bool()?;
             let mut payload = None;
             if has_payload {
-                payload = Some(buffer.read_bytes().await?);
+                payload = Some(src.read_bytes()?);
             }
 
             Ok(Self { key, payload })
@@ -520,58 +434,58 @@ mod tests {
     use super::*;
     use crate::tests::assert_packet;
 
-    #[tokio::test]
-    async fn write_read_clientbound_disconnect_packet() {
-        assert_packet::<clientbound::DisconnectPacket>(0x00).await;
+    #[test]
+    fn write_read_clientbound_disconnect_packet() {
+        assert_packet::<clientbound::DisconnectPacket>(0x00);
     }
 
-    #[tokio::test]
-    async fn write_read_clientbound_encryption_request_packet() {
-        assert_packet::<clientbound::EncryptionRequestPacket>(0x01).await;
+    #[test]
+    fn write_read_clientbound_encryption_request_packet() {
+        assert_packet::<clientbound::EncryptionRequestPacket>(0x01);
     }
 
-    #[tokio::test]
-    async fn write_read_clientbound_login_success_packet() {
-        assert_packet::<clientbound::LoginSuccessPacket>(0x02).await;
+    #[test]
+    fn write_read_clientbound_login_success_packet() {
+        assert_packet::<clientbound::LoginSuccessPacket>(0x02);
     }
 
-    #[tokio::test]
-    async fn write_read_clientbound_set_compression_packet() {
-        assert_packet::<clientbound::SetCompressionPacket>(0x03).await;
+    #[test]
+    fn write_read_clientbound_set_compression_packet() {
+        assert_packet::<clientbound::SetCompressionPacket>(0x03);
     }
 
-    #[tokio::test]
-    async fn write_read_clientbound_login_plugin_request_packet() {
-        assert_packet::<clientbound::LoginPluginRequestPacket>(0x04).await;
+    #[test]
+    fn write_read_clientbound_login_plugin_request_packet() {
+        assert_packet::<clientbound::LoginPluginRequestPacket>(0x04);
     }
 
-    #[tokio::test]
-    async fn write_read_clientbound_cookie_request_packet() {
-        assert_packet::<clientbound::CookieRequestPacket>(0x05).await;
+    #[test]
+    fn write_read_clientbound_cookie_request_packet() {
+        assert_packet::<clientbound::CookieRequestPacket>(0x05);
     }
 
-    #[tokio::test]
-    async fn write_read_serverbound_login_start_packet() {
-        assert_packet::<serverbound::LoginStartPacket>(0x00).await;
+    #[test]
+    fn write_read_serverbound_login_start_packet() {
+        assert_packet::<serverbound::LoginStartPacket>(0x00);
     }
 
-    #[tokio::test]
-    async fn write_read_serverbound_encryption_response_packet() {
-        assert_packet::<serverbound::EncryptionResponsePacket>(0x01).await;
+    #[test]
+    fn write_read_serverbound_encryption_response_packet() {
+        assert_packet::<serverbound::EncryptionResponsePacket>(0x01);
     }
 
-    #[tokio::test]
-    async fn write_read_serverbound_login_plugin_response_packet() {
-        assert_packet::<serverbound::LoginPluginResponsePacket>(0x02).await;
+    #[test]
+    fn write_read_serverbound_login_plugin_response_packet() {
+        assert_packet::<serverbound::LoginPluginResponsePacket>(0x02);
     }
 
-    #[tokio::test]
-    async fn write_read_serverbound_login_acknowledged_packet() {
-        assert_packet::<serverbound::LoginAcknowledgedPacket>(0x03).await;
+    #[test]
+    fn write_read_serverbound_login_acknowledged_packet() {
+        assert_packet::<serverbound::LoginAcknowledgedPacket>(0x03);
     }
 
-    #[tokio::test]
-    async fn write_read_serverbound_cookie_response_packet() {
-        assert_packet::<serverbound::CookieResponsePacket>(0x04).await;
+    #[test]
+    fn write_read_serverbound_cookie_response_packet() {
+        assert_packet::<serverbound::CookieResponsePacket>(0x04);
     }
 }

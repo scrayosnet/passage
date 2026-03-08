@@ -4,16 +4,13 @@ use crate::{Packet, State, VarInt};
 
 pub mod serverbound {
     use super::{Error, Packet, State, VarInt};
-    #[cfg(feature = "server")]
-    use crate::{AsyncReadPacket, ReadPacket};
     #[cfg(feature = "client")]
-    use crate::{AsyncWritePacket, WritePacket};
+    use crate::reader::{Read, ReadBytesExt, ReadPacket, ReadPacketExt};
+    #[cfg(feature = "server")]
+    use crate::writer::{Write, WriteBytesExt, WritePacket, WritePacketExt};
+    use byteorder::BigEndian;
     #[cfg(test)]
     use fake::Dummy;
-    #[cfg(feature = "server")]
-    use tokio::io::{AsyncRead, AsyncReadExt};
-    #[cfg(feature = "client")]
-    use tokio::io::{AsyncWrite, AsyncWriteExt};
     use tracing::instrument;
 
     /// The [`HandshakePacket`].
@@ -41,15 +38,11 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for HandshakePacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
-            buffer.write_varint(self.protocol_version).await?;
-            buffer.write_string(&self.server_address).await?;
-            buffer.write_u16(self.server_port).await?;
-            buffer.write_varint(self.next_state.into()).await?;
+        fn write_packet(&self, dst: &mut impl Write) -> Result<(), Error> {
+            dst.write_varint(self.protocol_version)?;
+            dst.write_string(&self.server_address)?;
+            dst.write_u16::<BigEndian>(self.server_port)?;
+            dst.write_varint(self.next_state.into())?;
 
             Ok(())
         }
@@ -58,14 +51,11 @@ pub mod serverbound {
     #[cfg(feature = "server")]
     impl ReadPacket for HandshakePacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
-            let protocol_version = buffer.read_varint().await?;
-            let server_address = buffer.read_string().await?;
-            let server_port = buffer.read_u16().await?;
-            let next_state = buffer.read_varint().await?.try_into()?;
+        fn read_packet(src: &mut impl Read) -> Result<Self, Error> {
+            let protocol_version = src.read_varint()?;
+            let server_address = src.read_string()?;
+            let server_port = src.read_u16::<BigEndian>()?;
+            let next_state = src.read_varint()?.try_into()?;
 
             Ok(Self {
                 protocol_version,
@@ -82,8 +72,8 @@ mod tests {
     use super::*;
     use crate::tests::assert_packet;
 
-    #[tokio::test]
-    async fn write_read_serverbound_handshake_packet() {
-        assert_packet::<serverbound::HandshakePacket>(0x00).await;
+    #[test]
+    fn write_read_serverbound_handshake_packet() {
+        assert_packet::<serverbound::HandshakePacket>(0x00);
     }
 }
