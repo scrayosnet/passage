@@ -5,9 +5,9 @@ use crate::{Packet, State, VarInt};
 pub mod serverbound {
     use super::{Error, Packet, State, VarInt};
     #[cfg(feature = "client")]
-    use crate::reader::{Read, ReadBytesExt, ReadPacket, ReadPacketExt};
+    use crate::io::reader::{Read, ReadBytesExt, ReadPacket, ReadPacketExt};
     #[cfg(feature = "server")]
-    use crate::writer::{Write, WriteBytesExt, WritePacket, WritePacketExt};
+    use crate::io::writer::{Write, WriteBytesExt, WritePacket, WritePacketExt};
     use byteorder::BigEndian;
     #[cfg(test)]
     use fake::Dummy;
@@ -70,7 +70,7 @@ pub mod serverbound {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::assert_packet;
+    use crate::io::tests::assert_packet;
 
     #[test]
     fn write_read_serverbound_handshake_packet() {

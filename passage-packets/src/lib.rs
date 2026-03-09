@@ -8,11 +8,8 @@ pub use fastnbt;
 pub mod configuration;
 pub mod handshake;
 pub mod login;
-pub mod reader;
 pub mod status;
-pub mod writer;
-pub mod codec;
-pub mod packet;
+pub mod io;
 
 pub const INITIAL_BUFFER_SIZE: usize = 48;
 
@@ -335,41 +332,4 @@ impl TryFrom<VarInt> for ParticleStatus {
 pub trait Packet {
     /// Returns the defined ID of this network packet.
     const ID: VarInt;
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::reader::ReadPacket;
-    use crate::writer::WritePacket;
-    use crate::VarInt;
-    use fake::{Dummy, Fake, Faker};
-    use std::fmt::Debug;
-    use std::io::Cursor;
-
-    pub fn assert_packet<T>(packet_id: VarInt)
-    where
-        T: PartialEq + Eq + Dummy<Faker> + ReadPacket + WritePacket + Send + Sync + Debug + Clone,
-    {
-        // generate data
-        let expected: T = Faker.fake();
-
-        // write packets
-        let mut writer: Cursor<Vec<u8>> = Cursor::new(Vec::new());
-        expected
-            .write_packet(&mut writer)
-            .expect("failed to write packets");
-
-        // read packets
-        let mut reader: Cursor<Vec<u8>> = Cursor::new(writer.into_inner());
-        let actual = T::read_packet(&mut reader)
-            .expect("failed to read packets");
-
-        assert_eq!(T::ID, packet_id, "mismatching packet id");
-        assert_eq!(expected, actual);
-        assert_eq!(
-            reader.position() as usize,
-            reader.get_ref().len(),
-            "there are remaining bytes in the buffer"
-        );
-    }
 }

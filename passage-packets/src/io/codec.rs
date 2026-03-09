@@ -1,11 +1,9 @@
-use crate::handshake;
-use crate::packet::DynPacket;
-use crate::reader::{ReadPacket, ReadPacketExt};
-use crate::writer::{WritePacket, WritePacketExt};
-use crate::{Error, Packet, VarInt};
+use crate::io::reader::{ReadPacket, ReadPacketExt};
+use crate::io::writer::{WritePacket, WritePacketExt};
+use crate::{Error, VarInt};
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut, BlockSizeUser, InvalidLength};
-use bytes::BufMut;
+use bytes::{BufMut, Bytes};
 use cfb8::cipher::KeyIvInit;
 use futures::SinkExt;
 use std::io::{Cursor, Write};
@@ -20,14 +18,12 @@ pub struct Connection<S> {
 
 impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
     pub fn new(stream: S, max_packet_size: usize) -> Self {
-        Self { stream: Framed::new(stream, PacketCodec::new_server(max_packet_size)) }
+        Self { stream: Framed::new(stream, PacketCodec::new(max_packet_size)) }
     }
 
-    pub async fn read(&mut self) -> Result<DynPacket, Error> {
+    pub async fn read<T: ReadPacket>(&mut self) -> Result<T, Error> {
         // TODO add tracing span here
-        self.stream.next().await
-            // TODO add own error type here
-            .ok_or(Error::Io(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Connection closed")))?
+        Ok(self.stream.next().await.expect("Connection closed")?.into_packet()?)
     }
 
     pub async fn write<T: WritePacket>(&mut self, packet: T) -> Result<(), Error> {
@@ -35,14 +31,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Connection<S> {
         self.stream.send(packet).await?;
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Phase {
-    Handshake,
-    Status,
-    Login,
-    Play,
 }
 
 pub type Aes128Cfb8Enc = cfb8::Encryptor<aes::Aes128>;
@@ -55,25 +43,31 @@ pub fn ciphers(shared_secret: &[u8]) -> Result<(Aes128Cfb8Enc, Aes128Cfb8Dec), I
     Ok((encryptor, decryptor))
 }
 
-// TODO encryption and phase enum?
+pub struct PacketFrame {
+    pub length: usize,
+    pub id: VarInt,
+    pub data: Bytes,
+}
+
+impl PacketFrame {
+    pub fn into_packet<T: ReadPacket>(self) -> Result<T, Error> {
+        let mut reader = Cursor::new(&self.data);
+        let packet = T::read_packet(&mut reader)?;
+        Ok(packet)
+    }
+}
+
 pub struct PacketCodec {
     max_packet_size: usize,
     write_buffer: BytesMut,
     decrypted_until: usize,
     ciphers: Option<(Aes128Cfb8Enc, Aes128Cfb8Dec)>,
-    server: bool,
-    phase: Phase,
 }
 
 impl PacketCodec {
-    pub fn new_server(max_packet_size: usize) -> Self {
+    pub fn new(max_packet_size: usize) -> Self {
         assert_eq!(Aes128Cfb8Dec::block_size(), 1, "The aes-cfb8 block size should be one byte");
-        Self { max_packet_size, write_buffer: BytesMut::new(), decrypted_until: 0, ciphers: None, server: true, phase: Phase::Handshake }
-    }
-
-    pub fn new_client(max_packet_size: usize) -> Self {
-        assert_eq!(Aes128Cfb8Enc::block_size(), 1, "The aes-cfb8 block size should be one byte");
-        Self { max_packet_size, write_buffer: BytesMut::new(), decrypted_until: 0, ciphers: None, server: false, phase: Phase::Handshake }
+        Self { max_packet_size, write_buffer: BytesMut::new(), decrypted_until: 0, ciphers: None }
     }
 
     pub fn encrypt(&mut self, shared_secret: &[u8]) -> Result<(), InvalidLength> {
@@ -84,26 +78,10 @@ impl PacketCodec {
     pub fn is_encrypted(&self) -> bool {
         self.ciphers.is_some()
     }
-
-    pub fn set_phase(&mut self, phase: Phase) {
-        self.phase = phase;
-    }
-
-    pub fn phase(&self) -> Phase {
-        self.phase
-    }
-
-    pub fn set_server(&mut self, server: bool) {
-        self.server = server;
-    }
-
-    pub fn is_server(&self) -> bool {
-        self.server
-    }
 }
 
 impl Decoder for PacketCodec {
-    type Item = DynPacket;
+    type Item = PacketFrame;
     type Error = Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -140,32 +118,16 @@ impl Decoder for PacketCodec {
             return Ok(None);
         }
 
-        // Try reading the packet id from the buffer. There should be enough bytes to parse the whole packet.
-        // First read the packet id and then create a buffer that holds just the
-        let mut reader = {
-            use std::io::Read;
-            reader.take(length as u64)
-        };
+        // Take a view of the packet bytes, not including the packet length field. All previous bytes
+        // are dropped. Taking the view is zero-copy, as such unsupported packets entail minimal
+        // performance loss.
         let id = reader.read_varint()?;
-        let packet = match (self.server, self.phase, id) {
-            // TODO add serverbound and phase as const to type? Then define this match with a macro?
-            (true, Phase::Handshake, handshake::serverbound::HandshakePacket::ID) => DynPacket::Handshake(handshake::serverbound::HandshakePacket::read_packet(&mut reader)?),
-            // TODO update error
-            _ => return Err(Error::IllegalPacketId { expected: id, actual: id }),
-        };
-
-        // Update the source buffer to the position after the packet data and decryption position.
-        {
-            use bytes::Buf;
-            src.advance(length + length_len);
-            self.decrypted_until = self.decrypted_until.saturating_sub(length + length_len);
-        }
-
-        Ok(Some(packet))
+        self.decrypted_until = self.decrypted_until.saturating_sub(reader.position() as usize);
+        let data = src.split_to(reader.position() as usize).freeze();
+        Ok(Some(PacketFrame { length, id, data }))
     }
 }
 
-// TODO implement for dyn packet?
 impl <T> Encoder<T> for PacketCodec where T: WritePacket {
     type Error = Error;
 

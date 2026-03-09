@@ -8,9 +8,9 @@ use uuid::Uuid;
 pub mod clientbound {
     use super::{Error, Packet, Uuid, VarInt};
     #[cfg(feature = "client")]
-    use crate::reader::{Read, ReadBytesExt, ReadPacket, ReadPacketExt};
+    use crate::io::reader::{Read, ReadBytesExt, ReadPacket, ReadPacketExt};
     #[cfg(feature = "server")]
-    use crate::writer::{Write, WriteBytesExt, WritePacket, WritePacketExt};
+    use crate::io::writer::{Write, WriteBytesExt, WritePacket, WritePacketExt};
     use byteorder::BigEndian;
     #[cfg(test)]
     use fake::Dummy;
@@ -587,9 +587,9 @@ pub mod serverbound {
     use byteorder::BigEndian;
 
     #[cfg(feature = "server")]
-    use crate::reader::{Read, ReadBytesExt, ReadPacket, ReadPacketExt};
+    use crate::io::reader::{Read, ReadBytesExt, ReadPacket, ReadPacketExt};
     #[cfg(feature = "client")]
-    use crate::writer::{Write, WriteBytesExt, WritePacket, WritePacketExt};
+    use crate::io::writer::{Write, WriteBytesExt, WritePacket, WritePacketExt};
     #[cfg(test)]
     use fake::Dummy;
     use tracing::instrument;
@@ -893,7 +893,7 @@ pub mod serverbound {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::assert_packet;
+    use crate::io::tests::assert_packet;
 
     #[test]
     fn write_read_clientbound_cookie_request_packet() {

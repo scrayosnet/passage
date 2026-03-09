@@ -7,9 +7,9 @@ use uuid::Uuid;
 pub mod clientbound {
     use super::{Error, Packet, Uuid, VarInt};
     #[cfg(feature = "client")]
-    use crate::reader::{Read, ReadPacket, ReadPacketExt};
+    use crate::io::reader::{Read, ReadPacket, ReadPacketExt};
     #[cfg(feature = "server")]
-    use crate::writer::{Write, WritePacket, WritePacketExt};
+    use crate::io::writer::{Write, WritePacket, WritePacketExt};
     use crate::VerifyToken;
     #[cfg(test)]
     use fake::Dummy;
@@ -240,9 +240,9 @@ pub mod clientbound {
 pub mod serverbound {
     use super::{Error, Packet, Uuid, VarInt};
     #[cfg(feature = "server")]
-    use crate::reader::{Read, ReadPacket, ReadPacketExt};
+    use crate::io::reader::{Read, ReadPacket, ReadPacketExt};
     #[cfg(feature = "client")]
-    use crate::writer::{Write, WritePacket, WritePacketExt};
+    use crate::io::writer::{Write, WritePacket, WritePacketExt};
     #[cfg(test)]
     use fake::Dummy;
     use serde::Deserialize;
@@ -432,7 +432,7 @@ pub mod serverbound {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::assert_packet;
+    use crate::io::tests::assert_packet;
 
     #[test]
     fn write_read_clientbound_disconnect_packet() {
