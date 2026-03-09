@@ -20,7 +20,7 @@ passage-adapters-dns = { path = "passage-adapters/dns" }
 passage-protocol = { path = "passage-protocol" }
 
 # external
-tokio = { version = "1.49" }
+tokio = { version = "1.50" }
 tokio-util = { version = "0.7" }
 thiserror = { version = "2.0" }
 serde = { version = "1.0", features = ["derive"] }
