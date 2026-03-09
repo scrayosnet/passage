@@ -6,11 +6,11 @@ use uuid::Uuid;
 
 pub mod clientbound {
     use super::{Error, Packet, Uuid, VarInt};
+    use crate::VerifyToken;
     #[cfg(feature = "client")]
     use crate::io::reader::{Read, ReadPacket, ReadPacketExt};
     #[cfg(feature = "server")]
     use crate::io::writer::{Write, WritePacket, WritePacketExt};
-    use crate::VerifyToken;
     #[cfg(test)]
     use fake::Dummy;
     use tracing::instrument;
@@ -84,8 +84,7 @@ pub mod clientbound {
             let server_id = src.read_string()?;
             let public_key = src.read_bytes()?;
             let verify_token = src
-                .read_bytes()
-                ?
+                .read_bytes()?
                 .try_into()
                 .map_err(|_| Error::ArrayConversionFailed)?;
             let should_authenticate = src.read_bool()?;

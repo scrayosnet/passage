@@ -4,10 +4,14 @@ use fastnbt::{DeOpts, Value};
 pub use std::io::Read;
 use uuid::Uuid;
 
+/// A [`ReadPacket`] is a [`Packet`] that can be read from a [`Read`].
 pub trait ReadPacket: Packet + Sized {
+    /// Reads the packet from a [`Read`] starting at the data field of the packet format. The [`Read`]
+    /// should not include neither the packet length nor the packet id.
     fn read_packet(src: &mut impl Read) -> Result<Self, Error>;
 }
 
+/// A collection of utilities for reading packet related data from a [`Read`].
 pub trait ReadPacketExt {
     /// Reads a [`VarInt`] from this object as described in the official [protocol documentation][protocol-doc].
     ///
@@ -45,7 +49,10 @@ pub trait ReadPacketExt {
     fn read_bytes(&mut self) -> Result<Vec<u8>, Error>;
 }
 
-impl <T> ReadPacketExt for T where T: Read {
+impl<T> ReadPacketExt for T
+where
+    T: Read,
+{
     fn read_varint(&mut self) -> Result<VarInt, Error> {
         let mut buf = [0];
         let mut ans = 0;

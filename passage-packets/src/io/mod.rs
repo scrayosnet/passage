@@ -1,6 +1,6 @@
+pub mod codec;
 pub mod reader;
 pub mod writer;
-pub mod codec;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -26,8 +26,7 @@ pub(crate) mod tests {
 
         // read packets
         let mut reader: Cursor<Vec<u8>> = Cursor::new(writer.into_inner());
-        let actual = T::read_packet(&mut reader)
-            .expect("failed to read packets");
+        let actual = T::read_packet(&mut reader).expect("failed to read packets");
 
         assert_eq!(T::ID, packet_id, "mismatching packet id");
         assert_eq!(expected, actual);

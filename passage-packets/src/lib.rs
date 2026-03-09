@@ -7,9 +7,9 @@ pub use fastnbt;
 
 pub mod configuration;
 pub mod handshake;
+pub mod io;
 pub mod login;
 pub mod status;
-pub mod io;
 
 pub const INITIAL_BUFFER_SIZE: usize = 48;
 

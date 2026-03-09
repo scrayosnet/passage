@@ -4,10 +4,13 @@ use fastnbt::{SerOpts, Value};
 pub use std::io::Write;
 use uuid::Uuid;
 
+/// A [`WritePacket`] is a [`Packet`] that can be written to a [`Write`].
 pub trait WritePacket: Packet {
+    /// Writes a [`Packet`] to a [`Write`]. It writes neither the packet length nor the packet id.
     fn write_packet(&self, dst: &mut impl Write) -> Result<(), Error>;
 }
 
+/// A collection of utilities for writing packet related data to a [`Write`].
 pub trait WritePacketExt {
     /// Writes a [`VarInt`] onto this object as described in the official [protocol documentation][protocol-doc].
     ///
@@ -45,7 +48,10 @@ pub trait WritePacketExt {
     fn write_bytes(&mut self, value: &[u8]) -> Result<(), Error>;
 }
 
-impl <T> WritePacketExt for T where T: Write {
+impl<T> WritePacketExt for T
+where
+    T: Write,
+{
     fn write_varint(&mut self, mut value: VarInt) -> Result<(), Error> {
         let mut buf = [0];
         loop {
