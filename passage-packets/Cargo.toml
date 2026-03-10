@@ -18,7 +18,6 @@ rust-version.workspace = true
 
 [dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal"] }
-tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["codec"] }
 futures = { workspace = true }
 bytes = { workspace = true }

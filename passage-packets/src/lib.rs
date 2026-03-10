@@ -11,8 +11,6 @@ pub mod io;
 pub mod login;
 pub mod status;
 
-pub const INITIAL_BUFFER_SIZE: usize = 48;
-
 pub type VerifyToken = [u8; 32];
 
 pub type VarInt = i32;
@@ -43,15 +41,9 @@ pub enum Error {
         value: VarInt,
     },
 
-    // TODO remove
     /// The received packets ID is not mapped to an expected packet.
-    #[error("illegal packets ID: {actual} (expected {expected})")]
-    IllegalPacketId {
-        /// The expected value that should be present.
-        expected: VarInt,
-        /// The actual value that was observed.
-        actual: VarInt,
-    },
+    #[error("illegal packets ID: {0}")]
+    IllegalPacketId(VarInt),
 
     // TODO make to UTF8 string error
     /// The JSON response of a packet is incorrectly encoded (not UTF-8).

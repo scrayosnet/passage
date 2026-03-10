@@ -32,7 +32,7 @@ pub enum Error {
 
     /// The connection was closed, presumably by the client.
     #[error("The connection was closed (by the client)")]
-    ConnectionClosed(std::io::Error),
+    ConnectionClosed,
 
     /// The received packets is of an invalid length that we cannot process.
     #[error("illegal packets length")]
@@ -85,7 +85,7 @@ impl From<std::io::Error> for Error {
             | ErrorKind::BrokenPipe
             | ErrorKind::TimedOut
             | ErrorKind::WriteZero
-            | ErrorKind::UnexpectedEof => Error::ConnectionClosed(value),
+            | ErrorKind::UnexpectedEof => Error::ConnectionClosed,
             _ => Error::InternalIo(value),
         }
     }
@@ -99,9 +99,7 @@ impl From<passage_packets::Error> for Error {
             passage_packets::Error::IllegalEnumValue { kind, value } => {
                 Error::IllegalEnumValue { kind, value }
             }
-            passage_packets::Error::IllegalPacketId { actual, .. } => {
-                Error::UnexpectedPacketId(actual)
-            }
+            passage_packets::Error::IllegalPacketId(actual) => Error::UnexpectedPacketId(actual),
             passage_packets::Error::InvalidEncoding => Error::InvalidEncoding,
             passage_packets::Error::ArrayConversionFailed => Error::ArrayConversionFailed,
             passage_packets::Error::Json(err) => Error::Json(err),
@@ -115,7 +113,7 @@ impl Error {
         match self {
             Error::MissedKeepAlive => "missed-keep-alive",
             Error::NoTargetFound => "no-target-found",
-            Error::ConnectionClosed(_) => "connection-closed",
+            Error::ConnectionClosed => "connection-closed",
             Error::Unauthenticated => "unauthenticated",
             Error::IllegalPacketLength
             | Error::IllegalEnumValue { .. }

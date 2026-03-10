@@ -126,6 +126,9 @@ impl PacketFrame {
     /// Parses the [`PacketFrame`] into a [`ReadPacket`] by consuming the frame. If one of multiple
     /// possible packets should be parsed, use the [`match_packet`] macro instead.
     pub fn into_packet<T: ReadPacket>(self) -> Result<T, Error> {
+        if T::ID != self.id {
+            return Err(Error::IllegalPacketId(self.id));
+        }
         let mut reader = Cursor::new(&self.data);
         let packet = T::read_packet(&mut reader)?;
         Ok(packet)
@@ -222,7 +225,7 @@ impl Decoder for PacketCodec {
         // to read the size of the packet minus the bytes it already read, without including the packet
         // length field.
         let length_len = reader.position() as usize;
-        if (src.len() - length_len) < length {
+        if src.len() < length + length_len {
             src.reserve(length - (src.len() - length_len));
             return Ok(None);
         }
@@ -231,10 +234,9 @@ impl Decoder for PacketCodec {
         // are dropped. Taking the view is zero-copy, as such unsupported packets entail minimal
         // performance loss.
         let id = reader.read_varint()?;
-        self.decrypted_until = self
-            .decrypted_until
-            .saturating_sub(reader.position() as usize);
-        let data = src.split_to(reader.position() as usize).freeze();
+        let id_len = reader.position() as usize;
+        self.decrypted_until = self.decrypted_until.saturating_sub(length_len + length);
+        let data = src.split_to(length_len + length).split_off(id_len).freeze();
         Ok(Some(PacketFrame { length, id, data }))
     }
 }
@@ -250,13 +252,13 @@ where
         // the packet length is not known yet.
         self.write_buffer.clear();
         let mut writer = (&mut self.write_buffer).writer();
+        writer.write_varint(T::ID as VarInt)?;
         item.write_packet(&mut writer)?;
 
         // Write the packet length, id, and data.
         let encrypted_until = dst.len();
         let mut writer = dst.writer();
         writer.write_varint(self.write_buffer.len() as VarInt)?;
-        writer.write_varint(T::ID as VarInt)?;
         writer.write_all(&self.write_buffer)?;
 
         // Encrypt all new bytes if the ciphers are set. The bytes are encrypted in place on the source
