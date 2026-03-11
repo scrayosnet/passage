@@ -11,15 +11,15 @@ use passage_adapters::{
     Adapters, Protocol, discovery::DiscoveryAdapter, status::StatusAdapter,
     strategy::StrategyAdapter,
 };
+use passage_packets::codec::{PacketCodec, PacketFrame};
 use passage_packets::configuration::clientbound as conf_out;
 use passage_packets::configuration::serverbound as conf_in;
 use passage_packets::handshake::serverbound as hand_in;
-use passage_packets::io::codec::{PacketCodec, PacketFrame};
 use passage_packets::login::clientbound as login_out;
 use passage_packets::login::serverbound as login_in;
 use passage_packets::status::clientbound as status_out;
 use passage_packets::status::serverbound as status_in;
-use passage_packets::{State, VarInt, io::writer::WritePacket, match_packet};
+use passage_packets::{State, VarInt, match_packet, writer::WritePacket};
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::ops::Add;

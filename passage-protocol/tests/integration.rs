@@ -5,13 +5,13 @@ use passage_adapters::{
     Adapters, AnyStrategyAdapter, FixedAuthenticationAdapter, FixedDiscoveryAdapter,
     FixedLocalizationAdapter, FixedStatusAdapter, MetaFilterAdapter, Target,
 };
+use passage_packets::codec::PacketCodec;
 use passage_packets::configuration::clientbound as conf_out;
 use passage_packets::configuration::serverbound as conf_in;
 use passage_packets::handshake::serverbound as hand_in;
-use passage_packets::io::codec::PacketCodec;
-use passage_packets::io::reader::ReadPacket;
 use passage_packets::login::clientbound as login_out;
 use passage_packets::login::serverbound as login_in;
+use passage_packets::reader::ReadPacket;
 use passage_packets::status::clientbound as status_out;
 use passage_packets::status::serverbound as status_in;
 use passage_packets::{ChatMode, DisplayedSkinParts, MainHand, ParticleStatus, State};

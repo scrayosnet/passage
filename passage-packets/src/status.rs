@@ -6,9 +6,9 @@ use crate::VarInt;
 pub mod clientbound {
     use super::{Error, Packet, VarInt};
     #[cfg(feature = "client")]
-    use crate::io::reader::{Read, ReadBytesExt, ReadPacket, ReadPacketExt};
+    use crate::reader::{Read, ReadBytesExt, ReadPacket, ReadPacketExt};
     #[cfg(feature = "server")]
-    use crate::io::writer::{Write, WriteBytesExt, WritePacket, WritePacketExt};
+    use crate::writer::{Write, WriteBytesExt, WritePacket, WritePacketExt};
     use byteorder::BigEndian;
     #[cfg(test)]
     use fake::Dummy;
@@ -88,9 +88,9 @@ pub mod clientbound {
 pub mod serverbound {
     use super::{Error, Packet, VarInt};
     #[cfg(feature = "server")]
-    use crate::io::reader::{Read, ReadBytesExt, ReadPacket};
+    use crate::reader::{Read, ReadBytesExt, ReadPacket};
     #[cfg(feature = "client")]
-    use crate::io::writer::{Write, WriteBytesExt, WritePacket};
+    use crate::writer::{Write, WriteBytesExt, WritePacket};
     use byteorder::BigEndian;
     #[cfg(test)]
     use fake::Dummy;
@@ -162,7 +162,7 @@ pub mod serverbound {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::tests::assert_packet;
+    use crate::tests::assert_packet;
 
     #[test]
     fn write_read_clientbound_status_response_packet() {

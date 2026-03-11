@@ -1,7 +1,7 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use passage_packets::{
     ChatMode, DisplayedSkinParts, MainHand, ParticleStatus, ResourcePackResult, State,
-    configuration, handshake, io::reader::ReadPacket, io::writer::WritePacket, login, status,
+    configuration, handshake, login, reader::ReadPacket, status, writer::WritePacket,
 };
 use std::fmt::Debug;
 use std::io::Cursor;

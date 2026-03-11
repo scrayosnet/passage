@@ -1,5 +1,5 @@
-use crate::io::reader::{ReadPacket, ReadPacketExt};
-use crate::io::writer::{WritePacket, WritePacketExt};
+use crate::reader::{ReadPacket, ReadPacketExt};
+use crate::writer::{WritePacket, WritePacketExt};
 use crate::{Error, VarInt};
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut, BlockSizeUser, InvalidLength};
@@ -38,7 +38,7 @@ use tokio_util::codec::{Decoder, Encoder};
 /// # Examples
 ///
 /// ```ignore
-/// use passage_packets::io::codec::PacketFrame;
+/// use passage_packets::codec::PacketFrame;
 /// use passage_packets::handshake::serverbound::HandshakePacket;
 /// use passage_packets::status::serverbound::{StatusRequestPacket, PingRequestPacket};
 ///
@@ -78,7 +78,7 @@ macro_rules! match_packet {
         $($rest:tt)*
     ) => {{
         if $id == <$packet_type as $crate::Packet>::ID {
-            let $packet_bind = <$packet_type as $crate::io::reader::ReadPacket>::read_packet(&mut $reader);
+            let $packet_bind = <$packet_type as $crate::reader::ReadPacket>::read_packet(&mut $reader);
             $packet_handler
         } else {
             match_packet!(@dispatch $id, $reader; $($rest)*)
