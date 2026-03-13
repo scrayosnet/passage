@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::cookie::{AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign, verify};
+use crate::crypto;
 pub(crate) use crate::error::Error;
-use crate::{crypto, metrics};
 use futures::{SinkExt, StreamExt};
 use opentelemetry::trace::TraceContextExt;
 use passage_adapters::authentication::AuthenticationAdapter;
@@ -95,8 +95,6 @@ where
             .instrument(tracing::info_span!("read_packet", otel.kind = "server"))
             .await
             .ok_or_else(|| Error::ConnectionClosed)??;
-        // TODO maybe track packet size in codec?
-        metrics::packet_size::record_serverbound(frame.length as u64);
         tracing::Span::current().record("packet_length", frame.length);
         Ok(frame)
     }
@@ -106,7 +104,6 @@ where
         &mut self,
         packet: T,
     ) -> Result<(), Error> {
-        // TODO packet size missing metrics, maybe track in codec instead?
         self.stream
             .send(packet)
             .instrument(tracing::info_span!("write_packet", otel.kind = "server"))

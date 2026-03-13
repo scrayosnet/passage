@@ -2607,11 +2607,9 @@ dependencies = [
  "criterion",
  "fake",
  "fastnbt",
- "futures",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tokio",
  "tokio-util",
  "tracing",
  "uuid",
@@ -2621,7 +2619,6 @@ dependencies = [
 name = "passage-protocol"
 version = "0.2.1"
 dependencies = [
- "aes",
  "cfb8",
  "criterion",
  "futures",

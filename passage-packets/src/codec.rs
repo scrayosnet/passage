@@ -8,6 +8,7 @@ use cfb8::cipher::KeyIvInit;
 use std::io::{Cursor, Write};
 use tokio_util::bytes::BytesMut;
 use tokio_util::codec::{Decoder, Encoder};
+use tracing::instrument;
 
 /// A macro for pattern matching on packet frames based on their packet ID.
 ///
@@ -194,10 +195,12 @@ impl Decoder for PacketCodec {
     type Item = PacketFrame;
     type Error = Error;
 
+    #[instrument(skip_all, fields(packet_length, packet_id, encrypted))]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         // Decrypt all new bytes if the ciphers are set. The bytes are decrypted in place on the source
         // buffer. The chunking always aligns as the block size of the decryptor is always one.
         if let Some((_, decryptor)) = self.ciphers.as_mut() {
+            tracing::Span::current().record("encrypted", true);
             let unencrypted = &mut src[self.decrypted_until..];
             for chunk in unencrypted.chunks_mut(Aes128Cfb8Dec::block_size()) {
                 let gen_arr = GenericArray::from_mut_slice(chunk);
@@ -217,6 +220,7 @@ impl Decoder for PacketCodec {
         };
 
         // In case the length is larger than the maximum packet size, return an error.
+        tracing::Span::current().record("packet_length", length);
         if length > self.max_packet_size {
             return Err(Error::IllegalPacketLength);
         }
@@ -235,6 +239,7 @@ impl Decoder for PacketCodec {
         // performance loss.
         let id = reader.read_varint()?;
         let id_len = reader.position() as usize;
+        tracing::Span::current().record("packet_id", id);
         self.decrypted_until = self.decrypted_until.saturating_sub(length_len + length);
         let data = src.split_to(length_len + length).split_off(id_len).freeze();
         Ok(Some(PacketFrame { length, id, data }))
