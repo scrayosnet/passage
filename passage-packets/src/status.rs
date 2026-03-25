@@ -6,15 +6,12 @@ use crate::VarInt;
 pub mod clientbound {
     use super::{Error, Packet, VarInt};
     #[cfg(feature = "client")]
-    use crate::{AsyncReadPacket, ReadPacket};
+    use crate::reader::{Read, ReadBytesExt, ReadPacket, ReadPacketExt};
     #[cfg(feature = "server")]
-    use crate::{AsyncWritePacket, WritePacket};
+    use crate::writer::{Write, WriteBytesExt, WritePacket, WritePacketExt};
+    use byteorder::BigEndian;
     #[cfg(test)]
     use fake::Dummy;
-    #[cfg(feature = "client")]
-    use tokio::io::{AsyncRead, AsyncReadExt};
-    #[cfg(feature = "server")]
-    use tokio::io::{AsyncWrite, AsyncWriteExt};
     use tracing::instrument;
 
     /// The [`StatusResponsePacket`].
@@ -36,12 +33,8 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for StatusResponsePacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
-            buffer.write_string(&self.body).await?;
+        fn write_packet(&self, dst: &mut impl Write) -> Result<(), Error> {
+            dst.write_string(&self.body)?;
 
             Ok(())
         }
@@ -50,11 +43,8 @@ pub mod clientbound {
     #[cfg(feature = "client")]
     impl ReadPacket for StatusResponsePacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
-            let body = buffer.read_string().await?;
+        fn read_packet(src: &mut impl Read) -> Result<Self, Error> {
+            let body = src.read_string()?;
 
             Ok(Self { body })
         }
@@ -77,12 +67,8 @@ pub mod clientbound {
 
     #[cfg(feature = "server")]
     impl WritePacket for PongPacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
-            buffer.write_u64(self.payload).await?;
+        fn write_packet(&self, dst: &mut impl Write) -> Result<(), Error> {
+            dst.write_u64::<BigEndian>(self.payload)?;
 
             Ok(())
         }
@@ -91,11 +77,8 @@ pub mod clientbound {
     #[cfg(feature = "client")]
     impl ReadPacket for PongPacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
-            let payload = buffer.read_u64().await?;
+        fn read_packet(src: &mut impl Read) -> Result<Self, Error> {
+            let payload = src.read_u64::<BigEndian>()?;
 
             Ok(Self { payload })
         }
@@ -104,16 +87,13 @@ pub mod clientbound {
 
 pub mod serverbound {
     use super::{Error, Packet, VarInt};
-    use crate::ReadPacket;
+    #[cfg(feature = "server")]
+    use crate::reader::{Read, ReadBytesExt, ReadPacket};
     #[cfg(feature = "client")]
-    use crate::WritePacket;
+    use crate::writer::{Write, WriteBytesExt, WritePacket};
+    use byteorder::BigEndian;
     #[cfg(test)]
     use fake::Dummy;
-    #[cfg(feature = "server")]
-    use tokio::io::AsyncRead;
-    #[cfg(feature = "client")]
-    use tokio::io::AsyncWrite;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tracing::instrument;
 
     /// The [`StatusRequestPacket`].
@@ -132,11 +112,7 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for StatusRequestPacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, _buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
+        fn write_packet(&self, _dst: &mut impl Write) -> Result<(), Error> {
             Ok(())
         }
     }
@@ -144,10 +120,7 @@ pub mod serverbound {
     #[cfg(feature = "server")]
     impl ReadPacket for StatusRequestPacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(_buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
+        fn read_packet(_src: &mut impl Read) -> Result<Self, Error> {
             Ok(Self)
         }
     }
@@ -168,12 +141,8 @@ pub mod serverbound {
 
     #[cfg(feature = "client")]
     impl WritePacket for PingPacket {
-        #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn write_to_buffer<S>(&self, buffer: &mut S) -> Result<(), Error>
-        where
-            S: AsyncWrite + Unpin + Send + Sync,
-        {
-            buffer.write_u64(self.payload).await?;
+        fn write_packet(&self, dst: &mut impl Write) -> Result<(), Error> {
+            dst.write_u64::<BigEndian>(self.payload)?;
 
             Ok(())
         }
@@ -182,11 +151,8 @@ pub mod serverbound {
     #[cfg(feature = "server")]
     impl ReadPacket for PingPacket {
         #[instrument(skip_all, fields(packet_type = std::any::type_name::<Self>()))]
-        async fn read_from_buffer<S>(buffer: &mut S) -> Result<Self, Error>
-        where
-            S: AsyncRead + Unpin + Send + Sync,
-        {
-            let payload = buffer.read_u64().await?;
+        fn read_packet(src: &mut impl Read) -> Result<Self, Error> {
+            let payload = src.read_u64::<BigEndian>()?;
 
             Ok(Self { payload })
         }
@@ -198,18 +164,18 @@ mod tests {
     use super::*;
     use crate::tests::assert_packet;
 
-    #[tokio::test]
-    async fn write_read_clientbound_status_response_packet() {
-        assert_packet::<clientbound::StatusResponsePacket>(0x00).await;
+    #[test]
+    fn write_read_clientbound_status_response_packet() {
+        assert_packet::<clientbound::StatusResponsePacket>(0x00);
     }
 
-    #[tokio::test]
-    async fn write_read_clientbound_pong_packet() {
-        assert_packet::<clientbound::PongPacket>(0x01).await;
+    #[test]
+    fn write_read_clientbound_pong_packet() {
+        assert_packet::<clientbound::PongPacket>(0x01);
     }
 
-    #[tokio::test]
-    async fn write_read_serverbound_status_request_packet() {
-        assert_packet::<serverbound::StatusRequestPacket>(0x00).await;
+    #[test]
+    fn write_read_serverbound_status_request_packet() {
+        assert_packet::<serverbound::StatusRequestPacket>(0x00);
     }
 }

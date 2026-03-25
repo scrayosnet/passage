@@ -1,5 +1,4 @@
 pub mod error;
-pub mod stream;
 
 pub(crate) use crate::crypto::error::Error;
 use passage_packets::VerifyToken;

@@ -142,7 +142,7 @@ where
             // handle the client connection (ignore connection closed by the client)
             let timeout = timeout(connection_timeout, connection.listen()).await;
             let connection_result = match timeout {
-                Ok(Err(Error::ConnectionClosed(_))) => "connection-closed",
+                Ok(Err(Error::ConnectionClosed)) => "connection-closed",
                 Ok(Err(err)) => {
                     warn!(cause = err.to_string(), "failed to handle connection");
                     err.as_label()

@@ -1,33 +1,29 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use passage_packets::{
-    ChatMode, DisplayedSkinParts, MainHand, ParticleStatus, ReadPacket, ResourcePackResult, State,
-    WritePacket, configuration, handshake, login, status,
+    ChatMode, DisplayedSkinParts, MainHand, ParticleStatus, ResourcePackResult, State,
+    configuration, handshake, login, reader::ReadPacket, status, writer::WritePacket,
 };
 use std::fmt::Debug;
 use std::io::Cursor;
 use uuid::uuid;
 
-pub async fn rw_packet<T>(packet: T, buf: Vec<u8>)
+pub fn rw_packet<T>(packet: T, buf: Vec<u8>)
 where
     T: PartialEq + Eq + ReadPacket + WritePacket + Send + Sync + Debug + Clone,
 {
     // write packets
     let mut writer: Cursor<Vec<u8>> = Cursor::new(buf);
     packet
-        .write_to_buffer(&mut writer)
-        .await
+        .write_packet(&mut writer)
         .expect("failed to write packets");
 
     // read packets
     let mut reader: Cursor<Vec<u8>> = Cursor::new(writer.into_inner());
-    T::read_from_buffer(&mut reader)
-        .await
-        .expect("failed to read packets");
+    T::read_packet(&mut reader).expect("failed to read packets");
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("rw");
-    let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     let user_id = uuid!("09879557-e479-45a9-b434-a56377674627");
     let packet_id = uuid!("9c09eef4-f68d-4387-9751-72bbff53d5a0");
     let buf = Vec::with_capacity(1000);
@@ -35,7 +31,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("handshake::serverbound::HandshakePacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     handshake::serverbound::HandshakePacket {
                         protocol_version: 742,
@@ -52,7 +48,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("status::clientbound::StatusResponsePacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     status::clientbound::StatusResponsePacket {
                         body: "JustChunks".to_string(),
@@ -66,7 +62,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("status::clientbound::PongPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     status::clientbound::PongPacket { payload: 100 },
                     buf.clone(),
@@ -77,16 +73,13 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function(
         BenchmarkId::new("status::serverbound::StatusRequestPacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(status::serverbound::StatusRequestPacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(status::serverbound::StatusRequestPacket, buf.clone())),
     );
 
     group.bench_function(
         BenchmarkId::new("status::serverbound::PingPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     status::serverbound::PingPacket { payload: 100 },
                     buf.clone(),
@@ -98,7 +91,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("login::clientbound::DisconnectPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     login::clientbound::DisconnectPacket {
                         reason: "kicked".to_string(),
@@ -112,7 +105,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("login::clientbound::EncryptionRequestPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     login::clientbound::EncryptionRequestPacket {
                         server_id: "mc.justchunks.net".to_string(),
@@ -129,7 +122,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("login::clientbound::LoginSuccessPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     login::clientbound::LoginSuccessPacket {
                         user_id,
@@ -143,24 +136,18 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function(
         BenchmarkId::new("login::clientbound::SetCompressionPacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(login::clientbound::SetCompressionPacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(login::clientbound::SetCompressionPacket, buf.clone())),
     );
 
     group.bench_function(
         BenchmarkId::new("login::clientbound::LoginPluginRequestPacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(login::clientbound::LoginPluginRequestPacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(login::clientbound::LoginPluginRequestPacket, buf.clone())),
     );
 
     group.bench_function(
         BenchmarkId::new("login::clientbound::CookieRequestPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     login::clientbound::CookieRequestPacket {
                         key: "passage:something".to_string(),
@@ -174,7 +161,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("login::serverbound::LoginStartPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     login::serverbound::LoginStartPacket {
                         user_id,
@@ -189,7 +176,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("login::serverbound::EncryptionResponsePacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     login::serverbound::EncryptionResponsePacket {
                         shared_secret: vec![0u8; 32],
@@ -203,24 +190,18 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function(
         BenchmarkId::new("login::serverbound::LoginPluginResponsePacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(login::serverbound::LoginPluginResponsePacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(login::serverbound::LoginPluginResponsePacket, buf.clone())),
     );
 
     group.bench_function(
         BenchmarkId::new("login::serverbound::LoginAcknowledgedPacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(login::serverbound::LoginAcknowledgedPacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(login::serverbound::LoginAcknowledgedPacket, buf.clone())),
     );
 
     group.bench_function(
         BenchmarkId::new("login::serverbound::CookieResponsePacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     login::serverbound::CookieResponsePacket {
                         key: "passage:something".to_string(),
@@ -235,7 +216,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::CookieRequestPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::clientbound::CookieRequestPacket {
                         key: "foo".to_string(),
@@ -248,16 +229,13 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::PluginMessagePacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(configuration::clientbound::PluginMessagePacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(configuration::clientbound::PluginMessagePacket, buf.clone())),
     );
 
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::DisconnectPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::clientbound::DisconnectPacket {
                         reason: "kicked".to_string(),
@@ -271,7 +249,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::FinishConfigurationPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::clientbound::FinishConfigurationPacket,
                     buf.clone(),
@@ -283,7 +261,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::KeepAlivePacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::clientbound::KeepAlivePacket { id: 100 },
                     buf.clone(),
@@ -295,7 +273,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::PingPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::clientbound::PingPacket { id: 100 },
                     buf.clone(),
@@ -306,24 +284,18 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::ResetChatPacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(configuration::clientbound::ResetChatPacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(configuration::clientbound::ResetChatPacket, buf.clone())),
     );
 
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::RegistryDataPacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(configuration::clientbound::RegistryDataPacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(configuration::clientbound::RegistryDataPacket, buf.clone())),
     );
 
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::RemoveResourcePackPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::clientbound::RemoveResourcePackPacket,
                     buf.clone(),
@@ -335,7 +307,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::AddResourcePackPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::clientbound::AddResourcePackPacket {
                         uuid: packet_id,
@@ -354,7 +326,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::StoreCookiePacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::clientbound::StoreCookiePacket {
                         key: "passage:something".to_string(),
@@ -369,7 +341,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::TransferPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::clientbound::TransferPacket {
                         host: "mc.justchunks.net".to_string(),
@@ -383,32 +355,23 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::FeatureFlagsPacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(configuration::clientbound::FeatureFlagsPacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(configuration::clientbound::FeatureFlagsPacket, buf.clone())),
     );
 
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::UpdateTagsPacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(configuration::clientbound::UpdateTagsPacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(configuration::clientbound::UpdateTagsPacket, buf.clone())),
     );
 
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::KnownPacksPacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(configuration::clientbound::KnownPacksPacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(configuration::clientbound::KnownPacksPacket, buf.clone())),
     );
 
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::CustomReportDetailsPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::clientbound::CustomReportDetailsPacket,
                     buf.clone(),
@@ -419,16 +382,13 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function(
         BenchmarkId::new("configuration::clientbound::ServerLinksPacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(configuration::clientbound::ServerLinksPacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(configuration::clientbound::ServerLinksPacket, buf.clone())),
     );
 
     group.bench_function(
         BenchmarkId::new("configuration::serverbound::ClientInformationPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::serverbound::ClientInformationPacket {
                         locale: "de".to_string(),
@@ -450,7 +410,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("configuration::serverbound::CookieResponsePacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::serverbound::CookieResponsePacket,
                     buf.clone(),
@@ -461,10 +421,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function(
         BenchmarkId::new("configuration::serverbound::PluginMessagePacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(configuration::serverbound::PluginMessagePacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(configuration::serverbound::PluginMessagePacket, buf.clone())),
     );
 
     group.bench_function(
@@ -473,9 +430,9 @@ fn criterion_benchmark(c: &mut Criterion) {
             0,
         ),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
-                    configuration::serverbound::AckFinishConfigurationPacket,
+                    configuration::serverbound::AcknowledgeFinishConfigurationPacket,
                     buf.clone(),
                 )
             })
@@ -485,7 +442,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("configuration::serverbound::KeepAlivePacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::serverbound::KeepAlivePacket { id: 420 },
                     buf.clone(),
@@ -497,7 +454,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("configuration::serverbound::PongPacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::serverbound::PongPacket { id: 420 },
                     buf.clone(),
@@ -509,7 +466,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     group.bench_function(
         BenchmarkId::new("configuration::serverbound::ResourcePackResponsePacket", 0),
         |b| {
-            b.to_async(&runtime).iter(|| {
+            b.iter(|| {
                 rw_packet(
                     configuration::serverbound::ResourcePackResponsePacket {
                         uuid: packet_id,
@@ -523,10 +480,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function(
         BenchmarkId::new("configuration::serverbound::KnownPacksPacket", 0),
-        |b| {
-            b.to_async(&runtime)
-                .iter(|| rw_packet(configuration::serverbound::KnownPacksPacket, buf.clone()))
-        },
+        |b| b.iter(|| rw_packet(configuration::serverbound::KnownPacksPacket, buf.clone())),
     );
 }
 

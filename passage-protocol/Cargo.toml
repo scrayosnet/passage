@@ -23,7 +23,7 @@ passage-adapters = { workspace = true }
 thiserror = { workspace = true }
 reqwest = { workspace = true }
 tokio = { workspace = true }
-tokio-util = { workspace = true, features = ["rt"] }
+tokio-util = { workspace = true, features = ["rt", "codec"] }
 proxy-header = { workspace = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
@@ -35,8 +35,8 @@ rand = { workspace = true }
 rsa = { workspace = true }
 sha2 = { workspace = true }
 hmac = { workspace = true }
-aes = { workspace = true }
 cfb8 = { workspace = true }
+futures = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
