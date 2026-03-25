@@ -68,7 +68,6 @@ impl AgonesDiscoveryAdapter {
                     maybe_server = stream.try_next() => maybe_server,
                 };
 
-                let start = Instant::now();
                 let server = match maybe_server {
                     Ok(Some(server)) => server,
                     // TODO is this the right thing to do? Should try to restart or return adapter errors.

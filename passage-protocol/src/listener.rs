@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::connection::{Connection, Error};
+use crate::connection::Connection;
 use crate::metrics;
 use crate::rate_limiter::RateLimiter;
 use passage_adapters::Adapters;
@@ -17,7 +17,6 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::select;
-use tokio::time::error::Elapsed;
 use tokio::time::{Instant, timeout};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;

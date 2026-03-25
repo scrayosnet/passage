@@ -86,7 +86,7 @@ pub mod clientbound {
             let verify_token = src
                 .read_bytes()?
                 .try_into()
-                .map_err(|_| Error::ArrayConversionFailed)?;
+                .map_err(|_| Error::IllegalTokenEncoding)?;
             let should_authenticate = src.read_bool()?;
 
             Ok(Self {

@@ -69,12 +69,13 @@ macro_rules! match_packet {
 
         match_packet!(@dispatch
             __match_packet_id,
-            __match_packet_reader;
+            __match_packet_reader,
+            [];
             $($arms)*
         )
     }};
 
-    (@dispatch $id:expr, $reader:ident;
+    (@dispatch $id:expr, $reader:ident, [$($ids:expr,)*];
         $packet_bind:pat = $packet_type:ty => $packet_handler:expr,
         $($rest:tt)*
     ) => {{
@@ -82,14 +83,14 @@ macro_rules! match_packet {
             let $packet_bind = <$packet_type as $crate::reader::ReadPacket>::read_packet(&mut $reader);
             $packet_handler
         } else {
-            match_packet!(@dispatch $id, $reader; $($rest)*)
+            match_packet!(@dispatch $id, $reader, [$($ids,)* $id,]; $($rest)*)
         }
     }};
 
-    (@dispatch $id:expr, $reader:ident;
+    (@dispatch $id:expr, $reader:ident, [$($ids:expr,)*];
         $else_bind:pat => $else_handler:expr $(,)?
     ) => {{
-        let $else_bind = $id;
+        let $else_bind = ($id, vec![$($ids,)*]);
         $else_handler
     }};
 }
@@ -110,7 +111,7 @@ pub fn ciphers(shared_secret: &[u8]) -> Result<(Aes128Cfb8Enc, Aes128Cfb8Dec), I
 /// A [`PacketFrame`] represents a packet that has been read from the network as a frame following the
 /// [official packet format](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Packet_format).
 ///
-/// The frame can then be parsed into a packet using the [`PacketFrame::into_packet`] method. This
+/// The frame can then be parsed into a packet using the [`PacketFrame::try_into`] method. This
 /// mechanism allows the frame to remain oblivious to which packet it is until it is parsed.
 pub struct PacketFrame {
     /// The length of the packet in bytes, including the packet ID field.
@@ -126,9 +127,12 @@ pub struct PacketFrame {
 impl PacketFrame {
     /// Parses the [`PacketFrame`] into a [`ReadPacket`] by consuming the frame. If one of multiple
     /// possible packets should be parsed, use the [`match_packet`] macro instead.
-    pub fn into_packet<T: ReadPacket>(self) -> Result<T, Error> {
+    pub fn try_into<T: ReadPacket>(self) -> Result<T, Error> {
         if T::ID != self.id {
-            return Err(Error::IllegalPacketId(self.id));
+            return Err(Error::IllegalPacketId {
+                expected: vec![T::ID],
+                actual: self.id,
+            });
         }
         let mut reader = Cursor::new(&self.data);
         let packet = T::read_packet(&mut reader)?;
@@ -222,7 +226,10 @@ impl Decoder for PacketCodec {
         // In case the length is larger than the maximum packet size, return an error.
         tracing::Span::current().record("packet_length", length);
         if length > self.max_packet_size {
-            return Err(Error::IllegalPacketLength);
+            return Err(Error::IllegalPacketLength {
+                limit: self.max_packet_size,
+                length,
+            });
         }
 
         // In case the buffer is not large enough, reserve space for the rest of the packet. It needs
