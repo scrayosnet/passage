@@ -3,6 +3,7 @@
 
 pub mod adapter;
 pub mod config;
+pub mod metrics;
 
 use crate::adapter::authentication::DynAuthenticationAdapter;
 use crate::adapter::discovery::DynDiscoveryAdapter;
@@ -60,6 +61,11 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // build and start system observer
+    let system_observer = config
+        .system_observer_interval
+        .map(|seconds| metrics::system::Observer::new(Duration::from_secs(seconds)));
+
     // build and start the protocol
     debug!("building protocol");
     let listener_config = ListenerConfig {
@@ -77,5 +83,11 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     debug!("starting listener");
     listener.listen(config.address, stop_token.clone()).await?;
     stop_token.cancel();
+
+    // shutdown the system observer
+    if let Some(observer) = system_observer {
+        observer.shutdown().await;
+    }
+
     Ok(())
 }

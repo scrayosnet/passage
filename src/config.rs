@@ -41,6 +41,7 @@
 
 #![allow(clippy::derivable_impls)]
 
+use crate::metrics::system::DEFAULT_OBSERVE_INTERVAL;
 use config::{ConfigError, Environment, File, FileStoredFormat, Format, Map, Value, ValueKind};
 use passage_adapters::authentication::Profile;
 use passage_adapters::{Protocol, Target};
@@ -78,6 +79,9 @@ pub struct Config {
     /// The number of seconds until an auth cookie expires.
     pub auth_cookie_expiry: u64,
 
+    /// The interval in seconds at which the system observer should be run.
+    pub system_observer_interval: Option<u64>,
+
     /// The sentry configuration (disabled if empty).
     pub sentry: Option<Sentry>,
 
@@ -106,6 +110,7 @@ impl Default for Config {
         Self {
             address: "0.0.0.0:25565".to_string(),
             timeout: DEFAULT_CONNECTION_TIMEOUT,
+            system_observer_interval: Some(DEFAULT_OBSERVE_INTERVAL),
             sentry: None,
             otel: OpenTelemetry::default(),
             rate_limiter: None,
