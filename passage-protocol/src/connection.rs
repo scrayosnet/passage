@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::cookie::{AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign, verify};
-use crate::crypto;
 pub(crate) use crate::error::Error;
+use crate::{crypto, metrics};
 use futures::{SinkExt, StreamExt};
 use opentelemetry::trace::TraceContextExt;
 use passage_adapters::authentication::AuthenticationAdapter;
@@ -162,6 +162,7 @@ where
             packet = hand_in::HandshakePacket => packet,
             unexpected => return Err(Error::UnexpectedPacketId(unexpected)),
         }?;
+        metrics::handshake_states::inc(handshake.next_state);
 
         // When the client asks for the server status, then it sends the status request packet next.
         // We then use the status adapter to get the server status based on the client and server
@@ -466,7 +467,10 @@ where
 
                         // Update the client locale whenever a client information packet is received
                         packet = conf_in::ClientInformationPacket => {
-                            self.client_locale = Some(packet?.locale.clone());
+                            let packet = packet?;
+                            metrics::client_locales::inc(packet.locale.clone());
+                            metrics::client_view_distances::record(packet.view_distance as u64);
+                            self.client_locale = Some(packet.locale);
                             continue;
                         },
 

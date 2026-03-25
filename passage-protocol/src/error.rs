@@ -107,19 +107,3 @@ impl From<passage_packets::Error> for Error {
         }
     }
 }
-
-impl Error {
-    pub fn as_label(&self) -> &'static str {
-        match self {
-            Error::MissedKeepAlive => "missed-keep-alive",
-            Error::NoTargetFound => "no-target-found",
-            Error::ConnectionClosed => "connection-closed",
-            Error::Unauthenticated => "unauthenticated",
-            Error::IllegalPacketLength
-            | Error::IllegalEnumValue { .. }
-            | Error::UnexpectedPacketId { .. }
-            | Error::InvalidEncoding => "protocol-error",
-            _ => "internal-error",
-        }
-    }
-}

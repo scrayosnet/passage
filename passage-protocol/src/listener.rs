@@ -17,6 +17,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::select;
+use tokio::time::error::Elapsed;
 use tokio::time::{Instant, timeout};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -121,7 +122,8 @@ where
             && !rate_limiter.enqueue(client_addr.ip())
         {
             info!(addr = client_addr.to_string(), "rate limited client");
-            metrics::request_duration::record(connection_start, "rejected");
+            metrics::requests::reject();
+            metrics::connection_duration::record(connection_start);
 
             if let Err(e) = stream.shutdown().await {
                 debug!(cause = e.to_string(), "failed to close a client connection");
@@ -132,6 +134,7 @@ where
         let adapters = self.adapters.clone();
         let connection_config = self.config.clone();
         let connection_timeout = Duration::from_secs(self.config.connection_timeout);
+        metrics::requests::accept();
 
         // create a new connection and run protocol
         self.tracker.spawn(async move {
@@ -139,17 +142,12 @@ where
             let mut connection =
                 Connection::new(&mut stream, adapters, connection_config, client_addr);
 
+            // TODO adapters are not cancellation safe. Therefore, the timeout is not ok
             // handle the client connection (ignore connection closed by the client)
             let timeout = timeout(connection_timeout, connection.listen()).await;
-            let connection_result = match timeout {
-                Ok(Err(Error::ConnectionClosed)) => "connection-closed",
-                Ok(Err(err)) => {
-                    warn!(cause = err.to_string(), "failed to handle connection");
-                    err.as_label()
-                }
-                Ok(_) => "success",
-                Err(_) => "timeout",
-            };
+            if let Ok(Err(err)) = timeout {
+                warn!(cause = err.to_string(), "failed to handle connection");
+            }
 
             // flush connection and shutdown
             if let Err(err) = stream.shutdown().await {
@@ -158,7 +156,7 @@ where
             info!("closed connection");
 
             // update metrics
-            metrics::request_duration::record(connection_start, connection_result);
+            metrics::connection_duration::record(connection_start);
             metrics::open_connections::dec();
         });
     }
