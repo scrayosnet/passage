@@ -590,12 +590,16 @@ pub struct FixedLocalization {
 
     /// The localizable messages.
     pub messages: HashMap<String, HashMap<String, String>>,
+
+    /// Whether to warn about unknown keys.
+    pub warn_unknown_keys: bool,
 }
 
 impl Default for FixedLocalization {
     fn default() -> Self {
         Self {
             default_locale: "en_US".to_string(),
+            warn_unknown_keys: true,
             messages: hashmap! {
                 "en" => hashmap! {
                     "locale" => "English",

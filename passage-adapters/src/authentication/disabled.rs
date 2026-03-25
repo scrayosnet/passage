@@ -1,8 +1,12 @@
 use crate::authentication::{AuthenticationAdapter, Profile};
-use crate::{Protocol, error::Result};
+use crate::{Protocol, error::Result, metrics};
 use std::net::SocketAddr;
+use tokio::time::Instant;
 use tracing::trace;
 use uuid::Uuid;
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "disabled_authentication_adapter";
 
 #[derive(Debug, Default)]
 pub struct DisabledAuthenticationAdapter {}
@@ -25,6 +29,7 @@ impl AuthenticationAdapter for DisabledAuthenticationAdapter {
         _encoded_public: &[u8],
     ) -> Result<Option<Profile>> {
         trace!("skipping authentication");
+        metrics::adapter_duration::record(ADAPTER_TYPE, Instant::now());
         // TODO profile may need skin information, maybe provide default
         Ok(Some(Profile {
             id: *user_id,

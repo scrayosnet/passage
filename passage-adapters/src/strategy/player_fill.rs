@@ -1,7 +1,11 @@
 use crate::strategy::StrategyAdapter;
-use crate::{Protocol, Target, error::Result};
+use crate::{Protocol, Target, error::Result, metrics};
 use std::net::SocketAddr;
+use tokio::time::Instant;
 use uuid::Uuid;
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "player_fill_strategy_adapter";
 
 #[derive(Debug, Default)]
 pub struct PlayerFillStrategyAdapter {
@@ -25,6 +29,7 @@ impl StrategyAdapter for PlayerFillStrategyAdapter {
         _user: (&str, &Uuid),
         targets: Vec<Target>,
     ) -> Result<Option<Target>> {
+        let start = Instant::now();
         let target = targets
             .iter()
             .map(|target| {
@@ -39,6 +44,7 @@ impl StrategyAdapter for PlayerFillStrategyAdapter {
             .filter(|(_, players)| *players < self.max_players)
             .max_by_key(|(_, players)| *players)
             .map(|(target, _)| target.clone());
+        metrics::adapter_duration::record(ADAPTER_TYPE, start);
         Ok(target)
     }
 }

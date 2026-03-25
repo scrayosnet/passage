@@ -12,6 +12,7 @@ pub mod discovery;
 pub mod error;
 pub mod filter;
 pub mod localization;
+pub mod metrics;
 pub mod status;
 pub mod strategy;
 

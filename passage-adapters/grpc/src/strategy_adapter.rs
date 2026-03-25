@@ -1,12 +1,16 @@
 use crate::proto::strategy_client::StrategyClient;
 use crate::proto::{Address, SelectRequest};
 use passage_adapters::strategy::StrategyAdapter;
-use passage_adapters::{Error, Protocol, Target};
+use passage_adapters::{Error, Protocol, Target, metrics};
 use std::fmt::{Debug, Formatter};
 use std::net::SocketAddr;
+use tokio::time::Instant;
 use tonic::transport::Channel;
 use tracing::instrument;
 use uuid::Uuid;
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "grpc_strategy_adapter";
 
 pub struct GrpcStrategyAdapter {
     client: StrategyClient<Channel>,
@@ -27,15 +31,13 @@ impl GrpcStrategyAdapter {
         Ok(Self {
             client: StrategyClient::connect(address).await.map_err(|err| {
                 Error::FailedInitialization {
-                    adapter_type: "target_strategy",
+                    adapter_type: ADAPTER_TYPE,
                     cause: err.into(),
                 }
             })?,
         })
     }
-}
 
-impl StrategyAdapter for GrpcStrategyAdapter {
     #[instrument(skip_all)]
     async fn strategize(
         &self,
@@ -65,7 +67,7 @@ impl StrategyAdapter for GrpcStrategyAdapter {
             .select_target(request)
             .await
             .map_err(|err| Error::FailedFetch {
-                adapter_type: "grpc_target_strategy",
+                adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })?;
 
@@ -75,5 +77,24 @@ impl StrategyAdapter for GrpcStrategyAdapter {
             .target
             .map(TryInto::try_into)
             .transpose()
+    }
+}
+
+impl StrategyAdapter for GrpcStrategyAdapter {
+    #[instrument(skip_all)]
+    async fn strategize(
+        &self,
+        client_addr: &SocketAddr,
+        server_addr: (&str, u16),
+        protocol: Protocol,
+        user: (&str, &Uuid),
+        targets: Vec<Target>,
+    ) -> Result<Option<Target>, Error> {
+        let start = Instant::now();
+        let target = self
+            .strategize(client_addr, server_addr, protocol, user, targets)
+            .await;
+        metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        target
     }
 }

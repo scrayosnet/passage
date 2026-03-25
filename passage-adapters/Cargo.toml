@@ -25,3 +25,5 @@ uuid = { workspace = true, features = ["v4"] }
 num-bigint = { workspace = true }
 sha1 = { workspace = true }
 regex = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+opentelemetry = { workspace = true, features = ["metrics"] }
