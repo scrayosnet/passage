@@ -9,6 +9,7 @@ pub mod codec;
 pub mod configuration;
 pub mod handshake;
 pub mod login;
+pub mod metrics;
 pub mod reader;
 pub mod status;
 pub mod writer;

@@ -1,6 +1,6 @@
 use crate::reader::{ReadPacket, ReadPacketExt};
 use crate::writer::{WritePacket, WritePacketExt};
-use crate::{Error, VarInt};
+use crate::{Error, VarInt, metrics};
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut, BlockSizeUser, InvalidLength};
 use bytes::{BufMut, Bytes};
@@ -242,6 +242,8 @@ impl Decoder for PacketCodec {
         tracing::Span::current().record("packet_id", id);
         self.decrypted_until = self.decrypted_until.saturating_sub(length_len + length);
         let data = src.split_to(length_len + length).split_off(id_len).freeze();
+        metrics::packet_size::record_decoded(length as u64);
+        metrics::packet_bytes::add_decoded(length as u64);
         Ok(Some(PacketFrame { length, id, data }))
     }
 }
@@ -257,13 +259,14 @@ where
         // the packet length is not known yet.
         self.write_buffer.clear();
         let mut writer = (&mut self.write_buffer).writer();
-        writer.write_varint(T::ID as VarInt)?;
+        writer.write_varint(T::ID)?;
         item.write_packet(&mut writer)?;
 
         // Write the packet length, id, and data.
         let encrypted_until = dst.len();
         let mut writer = dst.writer();
-        writer.write_varint(self.write_buffer.len() as VarInt)?;
+        let packet_size = self.write_buffer.len();
+        writer.write_varint(packet_size as VarInt)?;
         writer.write_all(&self.write_buffer)?;
 
         // Encrypt all new bytes if the ciphers are set. The bytes are encrypted in place on the source
@@ -276,6 +279,8 @@ where
             }
         }
 
+        metrics::packet_size::record_encoded(packet_size as u64);
+        metrics::packet_bytes::add_encoded(packet_size as u64);
         Ok(())
     }
 }
