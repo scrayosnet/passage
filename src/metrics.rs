@@ -79,7 +79,7 @@ pub mod system {
         }
     }
 
-    /// The metric `cpu_usage` tracks the global CPU usage percentage.
+    /// The metric `cpu_usage` tracks the global CPU usage percentage (0-100%).
     pub(crate) mod cpu_usage {
         use crate::metrics::METER;
         use opentelemetry::metrics::Gauge;
@@ -88,7 +88,7 @@ pub mod system {
         static INSTRUMENT: LazyLock<Gauge<f64>> = LazyLock::new(|| {
             METER
                 .f64_gauge("cpu_usage")
-                .with_description("The global CPU usage percentage")
+                .with_description("The global CPU usage percentage (0-100%)")
                 .with_unit("percent")
                 .build()
         });

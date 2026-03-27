@@ -166,8 +166,8 @@ pub(crate) mod client_view_distances {
         METER
             .u64_histogram("client_view_distances")
             .with_description("The view distance of clients")
-            .with_unit("bytes")
-            .with_boundaries(linear_buckets(0.0, 512.0, 10))
+            .with_unit("chunks")
+            .with_boundaries(linear_buckets(2.0, 1.0, 30))
             .build()
     });
 
