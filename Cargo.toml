@@ -62,7 +62,7 @@ futures = { version = "0.3" }
 fake = { version = "4.4" }
 fastnbt = { version = "2.6" }
 regex = { version = "1.12" }
-hickory-resolver = { version = "0.24" }
+hickory-resolver = { version = "0.25" }
 bytes = { version = "1.11" }
 byteorder = { version = "1.5" }
 sysinfo = { version = "0.38.4" }
