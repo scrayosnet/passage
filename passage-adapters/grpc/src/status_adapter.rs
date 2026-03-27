@@ -1,10 +1,14 @@
 use crate::proto::status_client::StatusClient;
 use crate::proto::{Address, StatusRequest};
-use passage_adapters::{Error, Protocol, Result, ServerStatus, status::StatusAdapter};
+use passage_adapters::{Error, Protocol, Result, ServerStatus, metrics, status::StatusAdapter};
 use std::fmt::{Debug, Formatter};
 use std::net::SocketAddr;
+use tokio::time::Instant;
 use tonic::transport::Channel;
 use tracing::instrument;
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "grpc_status_adapter";
 
 pub struct GrpcStatusAdapter {
     client: StatusClient<Channel>,
@@ -31,9 +35,7 @@ impl GrpcStatusAdapter {
             })?,
         })
     }
-}
 
-impl StatusAdapter for GrpcStatusAdapter {
     #[instrument(skip_all)]
     async fn status(
         &self,
@@ -65,5 +67,20 @@ impl StatusAdapter for GrpcStatusAdapter {
             .status
             .map(TryInto::try_into)
             .transpose()
+    }
+}
+
+impl StatusAdapter for GrpcStatusAdapter {
+    #[instrument(skip_all)]
+    async fn status(
+        &self,
+        client_addr: &SocketAddr,
+        server_addr: (&str, u16),
+        protocol: Protocol,
+    ) -> Result<Option<ServerStatus>> {
+        let start = Instant::now();
+        let status = self.status(client_addr, server_addr, protocol).await;
+        metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        status
     }
 }

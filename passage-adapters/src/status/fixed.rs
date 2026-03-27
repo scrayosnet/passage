@@ -1,7 +1,11 @@
 use crate::status::StatusAdapter;
-use crate::{Protocol, ServerStatus, error::Result};
+use crate::{Protocol, ServerStatus, error::Result, metrics};
 use std::net::SocketAddr;
+use tokio::time::Instant;
 use tracing::trace;
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "fixed_status_adapter";
 
 #[derive(Debug, Default)]
 pub struct FixedStatusAdapter {
@@ -36,8 +40,11 @@ impl StatusAdapter for FixedStatusAdapter {
         protocol: Protocol,
     ) -> Result<Option<ServerStatus>> {
         trace!(has_status = self.status.is_some(), "passing fixed status");
+        let start = Instant::now();
+
         let stat = self.status.clone();
         let Some(mut stat) = stat else {
+            metrics::adapter_duration::record(ADAPTER_TYPE, start);
             return Ok(None);
         };
 
@@ -47,6 +54,7 @@ impl StatusAdapter for FixedStatusAdapter {
             stat.version.protocol = protocol;
         }
 
+        metrics::adapter_duration::record(ADAPTER_TYPE, start);
         Ok(Some(stat))
     }
 }

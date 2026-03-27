@@ -1,9 +1,13 @@
 use crate::filter::FilterAdapter;
-use crate::{Protocol, Target, error::Result};
+use crate::{Protocol, Target, error::Result, metrics};
 use regex::Regex;
 use std::net::SocketAddr;
+use tokio::time::Instant;
 use tracing::trace;
 use uuid::Uuid;
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "player_block_filter_adapter";
 
 #[derive(Debug, Default)]
 pub struct PlayerBlockFilterAdapter {
@@ -47,11 +51,13 @@ impl FilterAdapter for PlayerBlockFilterAdapter {
             ids = self.ids.is_some(),
             "blocking players"
         );
+        let start = Instant::now();
 
         // check usernames
         if let Some(items) = &self.usernames {
             trace!("filtering block usernames");
             if items.iter().any(|item| item == username) {
+                metrics::adapter_duration::record(ADAPTER_TYPE, start);
                 return Ok(vec![]);
             }
         }
@@ -60,6 +66,7 @@ impl FilterAdapter for PlayerBlockFilterAdapter {
         if let Some(item) = &self.username {
             trace!("filtering block username");
             if item.is_match(username) {
+                metrics::adapter_duration::record(ADAPTER_TYPE, start);
                 return Ok(vec![]);
             }
         }
@@ -68,10 +75,12 @@ impl FilterAdapter for PlayerBlockFilterAdapter {
         if let Some(items) = &self.ids {
             trace!("filtering block ids");
             if items.iter().any(|item| item == user_id) {
+                metrics::adapter_duration::record(ADAPTER_TYPE, start);
                 return Ok(vec![]);
             }
         }
 
+        metrics::adapter_duration::record(ADAPTER_TYPE, start);
         Ok(targets)
     }
 }

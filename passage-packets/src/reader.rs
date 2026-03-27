@@ -83,7 +83,7 @@ where
         let length = self.read_varint()? as usize;
         let mut buffer = vec![0; length];
         self.read_exact(&mut buffer)?;
-        String::from_utf8(buffer).map_err(|_| Error::InvalidEncoding)
+        Ok(String::from_utf8(buffer)?)
     }
 
     fn read_bool(&mut self) -> Result<bool, Error> {
@@ -103,7 +103,7 @@ where
             let len = self.read_u16::<BigEndian>()?;
             let mut buffer = vec![0; len as usize];
             self.read_exact(&mut buffer)?;
-            return String::from_utf8(buffer).map_err(|_| Error::InvalidEncoding);
+            return Ok(String::from_utf8(buffer)?);
         }
 
         // expect it to take the full buffer (the text component is the last element in the packet)

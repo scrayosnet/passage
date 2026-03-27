@@ -1,9 +1,13 @@
 use crate::HTTP_CLIENT;
-use passage_adapters::Protocol;
 use passage_adapters::authentication::{AuthenticationAdapter, Profile, minecraft_hash};
+use passage_adapters::{Protocol, metrics};
 use std::fmt::{Debug, Formatter};
 use std::net::SocketAddr;
+use tokio::time::Instant;
 use uuid::Uuid;
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "mojang_authentication_adapter";
 
 #[derive(Default)]
 pub struct MojangAdapter {
@@ -15,15 +19,7 @@ impl MojangAdapter {
         self.server_id = server_id;
         self
     }
-}
 
-impl Debug for MojangAdapter {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MojangAdapter")
-    }
-}
-
-impl AuthenticationAdapter for MojangAdapter {
     async fn authenticate(
         &self,
         _client_addr: &SocketAddr,
@@ -70,5 +66,37 @@ impl AuthenticationAdapter for MojangAdapter {
                     cause: Box::new(err),
                 })?;
         Ok(Some(profile))
+    }
+}
+
+impl Debug for MojangAdapter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MojangAdapter")
+    }
+}
+
+impl AuthenticationAdapter for MojangAdapter {
+    async fn authenticate(
+        &self,
+        client_addr: &SocketAddr,
+        server_addr: (&str, u16),
+        protocol: Protocol,
+        user: (&str, &Uuid),
+        shared_secret: &[u8],
+        encoded_public: &[u8],
+    ) -> passage_adapters::Result<Option<Profile>> {
+        let start = Instant::now();
+        let profile = self
+            .authenticate(
+                client_addr,
+                server_addr,
+                protocol,
+                user,
+                shared_secret,
+                encoded_public,
+            )
+            .await;
+        metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        profile
     }
 }

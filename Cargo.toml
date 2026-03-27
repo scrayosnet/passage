@@ -65,6 +65,7 @@ regex = { version = "1.12" }
 hickory-resolver = { version = "0.24" }
 bytes = { version = "1.11" }
 byteorder = { version = "1.5" }
+sysinfo = { version = "0.38.4" }
 
 [package]
 name = "passage"
@@ -101,6 +102,7 @@ serde_json = { workspace = true, features = ["raw_value"] }
 config = { workspace = true }
 regex = { workspace = true }
 uuid = { workspace = true }
+sysinfo = { workspace = true }
 
 tracing-opentelemetry = { workspace = true }
 opentelemetry-appender-tracing = { workspace = true }

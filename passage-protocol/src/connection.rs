@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::cookie::{AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign, verify};
-use crate::crypto;
 pub(crate) use crate::error::Error;
+use crate::{crypto, metrics};
 use futures::{SinkExt, StreamExt};
 use opentelemetry::trace::TraceContextExt;
 use passage_adapters::authentication::AuthenticationAdapter;
@@ -160,8 +160,9 @@ where
         let packet = self.next_packet().await?;
         let handshake = match_packet! { packet,
             packet = hand_in::HandshakePacket => packet,
-            unexpected => return Err(Error::UnexpectedPacketId(unexpected)),
+            (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
         }?;
+        metrics::handshake_states::inc(handshake.next_state);
 
         // When the client asks for the server status, then it sends the status request packet next.
         // We then use the status adapter to get the server status based on the client and server
@@ -174,7 +175,7 @@ where
             let packet = self.next_packet().await?;
             let _ = match_packet! { packet,
                 packet = status_in::StatusRequestPacket => packet,
-                unexpected => return Err(Error::UnexpectedPacketId(unexpected))
+                (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
             }?;
 
             debug!("getting status from supplier");
@@ -189,16 +190,14 @@ where
             let status = maybe_status?;
 
             debug!("sending status response packet");
-            self.send_packet(status_out::StatusResponsePacket {
-                body: serde_json::to_string(&status)?,
-            })
-            .await?;
+            self.send_packet(status_out::StatusResponsePacket::try_from(&status)?)
+                .await?;
 
             debug!("awaiting ping packet");
             let packet = self.next_packet().await?;
             let ping = match_packet! { packet,
                 packet = status_in::PingPacket => packet,
-                unexpected => return Err(Error::UnexpectedPacketId(unexpected))
+                (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
             }?;
 
             debug!("sending pong packet");
@@ -222,7 +221,7 @@ where
         let packet = self.next_packet().await?;
         let mut login_start = match_packet! { packet,
             packet = login_in::LoginStartPacket => packet,
-            unexpected => return Err(Error::UnexpectedPacketId(unexpected))
+            (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
         }?;
 
         // check session
@@ -236,9 +235,15 @@ where
         let packet = self.next_packet().await?;
         let session_packet = match_packet! { packet,
             packet = login_in::CookieResponsePacket => packet,
-            unexpected => return Err(Error::UnexpectedPacketId(unexpected))
+            (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
         }?;
-        let session_cookie = session_packet.decode::<SessionCookie>()?;
+        let session_cookie =
+            session_packet
+                .decode::<SessionCookie>()
+                .map_err(|err| Error::Cookie {
+                    cookie: "session",
+                    source: err,
+                })?;
 
         // In case the client asked to be transferred, then we also request the Passage auth cookie.
         // The auth cookie contains (verified) information about the client session signed using some
@@ -269,7 +274,7 @@ where
                 let packet = self.next_packet().await?;
                 let cookie = match_packet! { packet,
                     packet = login_in::CookieResponsePacket => packet,
-                    unexpected => return Err(Error::UnexpectedPacketId(unexpected))
+                    (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
                 }?;
 
                 let Some(signed) = cookie.payload else {
@@ -288,7 +293,11 @@ where
                     break 'transfer;
                 }
 
-                let cookie = serde_json::from_slice::<AuthCookie>(message)?;
+                let cookie =
+                    serde_json::from_slice::<AuthCookie>(message).map_err(|err| Error::Cookie {
+                        cookie: "auth",
+                        source: err,
+                    })?;
                 let expires_at = cookie.timestamp + self.config.auth_cookie_expiry;
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -334,7 +343,7 @@ where
         let packet = self.next_packet().await?;
         let encrypt = match_packet! { packet,
             packet = login_in::EncryptionResponsePacket => packet,
-            unexpected => return Err(Error::UnexpectedPacketId(unexpected))
+            (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
         }?;
 
         // decrypt the shared secret and verify the token
@@ -443,7 +452,7 @@ where
         let packet = self.next_packet().await?;
         let _ = match_packet! { packet,
             packet = login_in::LoginAcknowledgedPacket => packet,
-            unexpected => return Err(Error::UnexpectedPacketId(unexpected))
+            (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
         }?;
 
         // await the target from the target task
@@ -466,7 +475,10 @@ where
 
                         // Update the client locale whenever a client information packet is received
                         packet = conf_in::ClientInformationPacket => {
-                            self.client_locale = Some(packet?.locale.clone());
+                            let packet = packet?;
+                            metrics::client_locales::inc(packet.locale.clone());
+                            metrics::client_view_distances::record(packet.view_distance as u64);
+                            self.client_locale = Some(packet.locale);
                             continue;
                         },
 
@@ -477,7 +489,7 @@ where
                         },
 
                         // Throw on any other packet
-                        unexpected => return Err(Error::UnexpectedPacketId(unexpected))
+                        (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
                     }
                 },
 
@@ -536,7 +548,10 @@ where
                 extra: Default::default(),
             };
 
-            let auth_payload = serde_json::to_vec(&cookie)?;
+            let auth_payload = serde_json::to_vec(&cookie).map_err(|err| Error::Cookie {
+                cookie: "auth",
+                source: err,
+            })?;
             debug!("sending auth cookie packet");
             self.send_packet(conf_out::StoreCookiePacket {
                 key: AUTH_COOKIE_KEY.to_string(),
@@ -561,6 +576,10 @@ where
                     server_address: handshake.server_address.clone(),
                     server_port: handshake.server_port,
                     trace_id: Some(trace_id),
+                })
+                .map_err(|err| Error::Cookie {
+                    cookie: "session",
+                    source: err,
                 })?,
             })
             .await?;

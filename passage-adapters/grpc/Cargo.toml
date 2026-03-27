@@ -23,6 +23,7 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
 
 tonic = { workspace = true }
 tonic-prost = { workspace = true }

@@ -1,8 +1,12 @@
 use crate::filter::FilterAdapter;
-use crate::{Protocol, Target, error::Result};
+use crate::{Protocol, Target, error::Result, metrics};
 use std::net::SocketAddr;
+use tokio::time::Instant;
 use tracing::trace;
 use uuid::Uuid;
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "meta_filter_adapter";
 
 /// Filter operation to apply to a target field.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,13 +107,14 @@ impl FilterAdapter for MetaFilterAdapter {
         );
 
         // apply filters
+        let start = Instant::now();
         let filtered: Vec<Target> = targets
             .into_iter()
             .filter(|target| self.matches_filters(target))
             .collect();
 
         trace!(filtered_len = filtered.len(), "filtering complete");
-
+        metrics::adapter_duration::record(ADAPTER_TYPE, start);
         Ok(filtered)
     }
 }

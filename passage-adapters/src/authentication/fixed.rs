@@ -1,8 +1,12 @@
 use crate::authentication::{AuthenticationAdapter, Profile};
-use crate::{Protocol, error::Result};
+use crate::{Protocol, error::Result, metrics};
 use std::net::SocketAddr;
+use tokio::time::Instant;
 use tracing::trace;
 use uuid::Uuid;
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "fixed_authentication_adapter";
 
 #[derive(Debug, Default)]
 pub struct FixedAuthenticationAdapter {
@@ -27,6 +31,7 @@ impl AuthenticationAdapter for FixedAuthenticationAdapter {
         _encoded_public: &[u8],
     ) -> Result<Option<Profile>> {
         trace!("authenticating fixed profile");
+        metrics::adapter_duration::record(ADAPTER_TYPE, Instant::now());
         Ok(self.profile.clone())
     }
 }

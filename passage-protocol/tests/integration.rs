@@ -45,7 +45,7 @@ impl<S: AsyncRead + Unpin> PacketStreamExt for Framed<S, PacketCodec> {
             .next()
             .await
             .ok_or(Error::ConnectionClosed)??
-            .into_packet()?;
+            .try_into()?;
         Ok(packet)
     }
 }

@@ -18,6 +18,7 @@ rust-version.workspace = true
 
 [dependencies]
 tokio-util = { workspace = true, features = ["codec"] }
+opentelemetry = { workspace = true, features = ["metrics"] }
 bytes = { workspace = true }
 byteorder = { workspace = true }
 thiserror = { workspace = true }

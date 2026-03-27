@@ -36,7 +36,11 @@ impl DynLocalizationAdapter {
         #[allow(unreachable_patterns)]
         match config {
             config::LocalizationAdapter::Fixed(config) => {
-                let adapter = FixedLocalizationAdapter::new(config.default_locale, config.messages);
+                let adapter = FixedLocalizationAdapter::new(
+                    config.default_locale,
+                    config.messages,
+                    config.warn_unknown_keys,
+                );
                 Ok(DynLocalizationAdapter::Fixed(adapter))
             }
             _ => Err("unknown localization adapter configured".into()),

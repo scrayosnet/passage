@@ -4,12 +4,16 @@ use kube::runtime::watcher::Config;
 use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Api, Client};
 use passage_adapters::discovery::DiscoveryAdapter;
-use passage_adapters::{Error, Target};
+use passage_adapters::{Error, Target, metrics};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "agones_discovery_adapter";
 
 // re-export watcher for configuration config
 pub mod watcher_config {
@@ -36,7 +40,7 @@ impl AgonesDiscoveryAdapter {
         let client = Client::try_default()
             .await
             .map_err(|err| Error::FailedInitialization {
-                adapter_type: "agones_target_strategy",
+                adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })?;
         let servers: Api<GameServer> = if let Some(namespace) = namespace {
@@ -66,6 +70,7 @@ impl AgonesDiscoveryAdapter {
 
                 let server = match maybe_server {
                     Ok(Some(server)) => server,
+                    // TODO is this the right thing to do? Should try to restart or return adapter errors.
                     Ok(None) => break,
                     Err(err) => {
                         warn!(err = ?err, "error while watching game servers");
@@ -116,6 +121,9 @@ impl Drop for AgonesDiscoveryAdapter {
 
 impl DiscoveryAdapter for AgonesDiscoveryAdapter {
     async fn discover(&self) -> passage_adapters::Result<Vec<Target>> {
-        Ok(self.inner.read().await.clone())
+        let start = Instant::now();
+        let servers = self.inner.read().await.clone();
+        metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        Ok(servers)
     }
 }

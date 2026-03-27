@@ -1,19 +1,30 @@
 use crate::error::Result;
 use crate::localization::LocalizationAdapter;
+use crate::metrics;
 use std::collections::HashMap;
+use tokio::time::Instant;
 use tracing::{debug, trace, warn};
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "fixed_localization_adapter";
 
 #[derive(Debug)]
 pub struct FixedLocalizationAdapter {
     default_locale: String,
     messages: HashMap<String, HashMap<String, String>>,
+    warn_unknown_keys: bool,
 }
 
 impl FixedLocalizationAdapter {
-    pub fn new(default_locale: String, messages: HashMap<String, HashMap<String, String>>) -> Self {
+    pub fn new(
+        default_locale: String,
+        messages: HashMap<String, HashMap<String, String>>,
+        ignore_not_found: bool,
+    ) -> Self {
         Self {
             default_locale,
             messages,
+            warn_unknown_keys: ignore_not_found,
         }
     }
 
@@ -41,6 +52,7 @@ impl Default for FixedLocalizationAdapter {
         Self {
             default_locale: "en_us".to_string(),
             messages: HashMap::new(),
+            warn_unknown_keys: false,
         }
     }
 }
@@ -54,6 +66,8 @@ impl LocalizationAdapter for FixedLocalizationAdapter {
         params: &[(&'static str, String)],
     ) -> Result<String> {
         trace!("localizing fixed");
+        let start = Instant::now();
+
         // get locales to check in order (e.g., 'de_DE' -> 'de', -> 'en_US' -> 'en')
         let locale = locale.unwrap_or(&self.default_locale);
         let mut locales = vec![];
@@ -71,10 +85,15 @@ impl LocalizationAdapter for FixedLocalizationAdapter {
 
         let Some(locale_messages) = locale_messages else {
             warn!(locales = ?locales, "cannot find locales");
+            metrics::adapter_duration::record(ADAPTER_TYPE, start);
             return Ok(key.to_string());
         };
 
         let Some(template) = locale_messages.get(key) else {
+            if self.warn_unknown_keys {
+                warn!(key = key, "cannot find key");
+            }
+            metrics::adapter_duration::record(ADAPTER_TYPE, start);
             return Ok(key.to_string());
         };
 
@@ -82,6 +101,7 @@ impl LocalizationAdapter for FixedLocalizationAdapter {
         for (param_key, param_val) in params {
             message = message.replace(param_key, param_val);
         }
+        metrics::adapter_duration::record(ADAPTER_TYPE, start);
         Ok(message)
     }
 }

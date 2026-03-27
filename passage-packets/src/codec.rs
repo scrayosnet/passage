@@ -1,6 +1,6 @@
 use crate::reader::{ReadPacket, ReadPacketExt};
 use crate::writer::{WritePacket, WritePacketExt};
-use crate::{Error, VarInt};
+use crate::{Error, VarInt, metrics};
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut, BlockSizeUser, InvalidLength};
 use bytes::{BufMut, Bytes};
@@ -69,12 +69,13 @@ macro_rules! match_packet {
 
         match_packet!(@dispatch
             __match_packet_id,
-            __match_packet_reader;
+            __match_packet_reader,
+            [];
             $($arms)*
         )
     }};
 
-    (@dispatch $id:expr, $reader:ident;
+    (@dispatch $id:expr, $reader:ident, [$($ids:expr,)*];
         $packet_bind:pat = $packet_type:ty => $packet_handler:expr,
         $($rest:tt)*
     ) => {{
@@ -82,14 +83,14 @@ macro_rules! match_packet {
             let $packet_bind = <$packet_type as $crate::reader::ReadPacket>::read_packet(&mut $reader);
             $packet_handler
         } else {
-            match_packet!(@dispatch $id, $reader; $($rest)*)
+            match_packet!(@dispatch $id, $reader, [$($ids,)* $id,]; $($rest)*)
         }
     }};
 
-    (@dispatch $id:expr, $reader:ident;
+    (@dispatch $id:expr, $reader:ident, [$($ids:expr,)*];
         $else_bind:pat => $else_handler:expr $(,)?
     ) => {{
-        let $else_bind = $id;
+        let $else_bind = ($id, vec![$($ids,)*]);
         $else_handler
     }};
 }
@@ -110,7 +111,7 @@ pub fn ciphers(shared_secret: &[u8]) -> Result<(Aes128Cfb8Enc, Aes128Cfb8Dec), I
 /// A [`PacketFrame`] represents a packet that has been read from the network as a frame following the
 /// [official packet format](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Packet_format).
 ///
-/// The frame can then be parsed into a packet using the [`PacketFrame::into_packet`] method. This
+/// The frame can then be parsed into a packet using the [`PacketFrame::try_into`] method. This
 /// mechanism allows the frame to remain oblivious to which packet it is until it is parsed.
 pub struct PacketFrame {
     /// The length of the packet in bytes, including the packet ID field.
@@ -126,9 +127,12 @@ pub struct PacketFrame {
 impl PacketFrame {
     /// Parses the [`PacketFrame`] into a [`ReadPacket`] by consuming the frame. If one of multiple
     /// possible packets should be parsed, use the [`match_packet`] macro instead.
-    pub fn into_packet<T: ReadPacket>(self) -> Result<T, Error> {
+    pub fn try_into<T: ReadPacket>(self) -> Result<T, Error> {
         if T::ID != self.id {
-            return Err(Error::IllegalPacketId(self.id));
+            return Err(Error::IllegalPacketId {
+                expected: vec![T::ID],
+                actual: self.id,
+            });
         }
         let mut reader = Cursor::new(&self.data);
         let packet = T::read_packet(&mut reader)?;
@@ -222,7 +226,10 @@ impl Decoder for PacketCodec {
         // In case the length is larger than the maximum packet size, return an error.
         tracing::Span::current().record("packet_length", length);
         if length > self.max_packet_size {
-            return Err(Error::IllegalPacketLength);
+            return Err(Error::IllegalPacketLength {
+                limit: self.max_packet_size,
+                length,
+            });
         }
 
         // In case the buffer is not large enough, reserve space for the rest of the packet. It needs
@@ -242,6 +249,8 @@ impl Decoder for PacketCodec {
         tracing::Span::current().record("packet_id", id);
         self.decrypted_until = self.decrypted_until.saturating_sub(length_len + length);
         let data = src.split_to(length_len + length).split_off(id_len).freeze();
+        metrics::packet_size::record_decoded(length as u64);
+        metrics::packet_bytes::add_decoded(length as u64);
         Ok(Some(PacketFrame { length, id, data }))
     }
 }
@@ -257,13 +266,14 @@ where
         // the packet length is not known yet.
         self.write_buffer.clear();
         let mut writer = (&mut self.write_buffer).writer();
-        writer.write_varint(T::ID as VarInt)?;
+        writer.write_varint(T::ID)?;
         item.write_packet(&mut writer)?;
 
         // Write the packet length, id, and data.
         let encrypted_until = dst.len();
         let mut writer = dst.writer();
-        writer.write_varint(self.write_buffer.len() as VarInt)?;
+        let packet_size = self.write_buffer.len();
+        writer.write_varint(packet_size as VarInt)?;
         writer.write_all(&self.write_buffer)?;
 
         // Encrypt all new bytes if the ciphers are set. The bytes are encrypted in place on the source
@@ -276,6 +286,8 @@ where
             }
         }
 
+        metrics::packet_size::record_encoded(packet_size as u64);
+        metrics::packet_bytes::add_encoded(packet_size as u64);
         Ok(())
     }
 }

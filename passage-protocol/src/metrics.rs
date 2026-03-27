@@ -22,51 +22,19 @@ fn exponential_buckets(start: f64, factor: f64, count: usize) -> Vec<f64> {
     (0..count).map(|i| start * factor.powi(i as i32)).collect()
 }
 
-pub(crate) mod request_duration {
-    use crate::metrics::{METER, exponential_buckets};
-    use opentelemetry::KeyValue;
-    use opentelemetry::metrics::Histogram;
-    use std::sync::LazyLock;
-    use tokio::time::Instant;
-
-    static INSTRUMENT: LazyLock<Histogram<u64>> = LazyLock::new(|| {
-        METER
-            .u64_histogram("request_duration")
-            .with_description("The time a request took to complete")
-            .with_unit("seconds")
-            .with_boundaries(exponential_buckets(0.1, 2.0, 10))
-            .build()
-    });
-
-    pub(crate) fn record(started: Instant, result: &'static str) {
-        INSTRUMENT.record(
-            started.elapsed().as_secs(),
-            &[KeyValue::new("result", result)],
-        )
-    }
+/// Generates linear histogram buckets.
+///
+/// # Arguments
+/// * `start` - The value of the first bucket
+/// * `width` - The width of each bucket
+/// * `count` - The number of buckets to generate
+fn linear_buckets(start: f64, width: f64, count: usize) -> Vec<f64> {
+    (0..count).map(|i| start + (i as f64 * width)).collect()
 }
 
-pub(crate) mod open_connections {
-    use crate::metrics::METER;
-    use opentelemetry::metrics::UpDownCounter;
-    use std::sync::LazyLock;
-
-    static INSTRUMENT: LazyLock<UpDownCounter<i64>> = LazyLock::new(|| {
-        METER
-            .i64_up_down_counter("open_connections")
-            .with_description("The number of currently open connections")
-            .build()
-    });
-
-    pub(crate) fn inc() {
-        INSTRUMENT.add(1, &[])
-    }
-
-    pub(crate) fn dec() {
-        INSTRUMENT.add(-1, &[])
-    }
-}
-
+/// The metric `rate_limiter_size` tracts the number of entries in the rate limiter. The rate limiter
+/// should automatically flush itself to keep the number of entries small. This metric allows maintainers
+/// to verify this behavior.
 pub(crate) mod rate_limiter_size {
     use crate::metrics::METER;
     use opentelemetry::metrics::Gauge;
@@ -79,7 +47,161 @@ pub(crate) mod rate_limiter_size {
             .build()
     });
 
+    /// Sets the rate limiter size.
     pub(crate) fn set(amount: u64) {
         INSTRUMENT.record(amount, &[])
+    }
+}
+
+/// The metric `listener_requests` tracks the number of requests accepted by the listener independent
+/// of the connection result. In contrary to the `connection_duration` metric, this metric
+/// tracks any incoming request, not only those that are handled by the protocol.
+///
+/// Attributes:
+/// - `decision`: `rejected` if the proxy protocol or rate limiter fails, otherwise `accepted`
+pub(crate) mod requests {
+    use crate::metrics::METER;
+    use opentelemetry::metrics::Counter;
+    use std::sync::LazyLock;
+
+    static INSTRUMENT: LazyLock<Counter<u64>> = LazyLock::new(|| {
+        METER
+            .u64_counter("listener_requests")
+            .with_description("The number of incoming requests")
+            .build()
+    });
+
+    /// Increments the counter as `accepted`.
+    pub(crate) fn accept() {
+        INSTRUMENT.add(1, &[opentelemetry::KeyValue::new("decision", "accepted")])
+    }
+
+    /// Increments the counter as `rejected`.
+    pub(crate) fn reject() {
+        INSTRUMENT.add(1, &[opentelemetry::KeyValue::new("decision", "rejected")])
+    }
+}
+
+/// The metric `connection_duration` tracks the time in seconds a connection takes to complete. In
+/// contrary to the `listener_requests` metric, this metric only tracks connections not rejected by
+/// the rate limiter (or proxy protocol).
+pub(crate) mod connection_duration {
+    use crate::metrics::{METER, exponential_buckets};
+    use opentelemetry::metrics::Histogram;
+    use std::sync::LazyLock;
+    use tokio::time::Instant;
+
+    static INSTRUMENT: LazyLock<Histogram<u64>> = LazyLock::new(|| {
+        METER
+            .u64_histogram("connection_duration")
+            .with_description("The time a connection took complete")
+            .with_unit("seconds")
+            .with_boundaries(exponential_buckets(0.1, 2.0, 10))
+            .build()
+    });
+
+    /// Records the number of seconds elapsed by the given `started` instant.
+    pub(crate) fn record(started: Instant) {
+        INSTRUMENT.record(started.elapsed().as_secs(), &[])
+    }
+}
+
+/// The metric `open_connections` tracks the number of currently open connections. It does not track
+/// requests previously rejected by the rate limiter or proxy protocol.
+pub(crate) mod open_connections {
+    use crate::metrics::METER;
+    use opentelemetry::metrics::UpDownCounter;
+    use std::sync::LazyLock;
+
+    static INSTRUMENT: LazyLock<UpDownCounter<i64>> = LazyLock::new(|| {
+        METER
+            .i64_up_down_counter("open_connections")
+            .with_description("The number of currently open connections")
+            .build()
+    });
+
+    /// Increments the counter.
+    pub(crate) fn inc() {
+        INSTRUMENT.add(1, &[])
+    }
+
+    /// Decrements the counter.
+    pub(crate) fn dec() {
+        INSTRUMENT.add(-1, &[])
+    }
+}
+
+/// The metric `client_locales` tracks the locals sent by the clients. Technically, a client may send
+/// this information multiple times resulting in multiple increments.
+///
+/// Attributes:
+/// - `locale`: The locale sent by the client (technically any value)
+pub(crate) mod client_locales {
+    use crate::metrics::METER;
+    use opentelemetry::KeyValue;
+    use opentelemetry::metrics::Counter;
+    use std::sync::LazyLock;
+
+    static INSTRUMENT: LazyLock<Counter<u64>> = LazyLock::new(|| {
+        METER
+            .u64_counter("client_locales")
+            .with_description("The number of clients using some locale")
+            .build()
+    });
+
+    /// Increments the counter for the given locale.
+    pub(crate) fn inc(locale: String) {
+        INSTRUMENT.add(1, &[KeyValue::new("locale", locale)])
+    }
+}
+
+/// The metric `client_view_distances` tracks the view distance sent by the clients. Technically, a client may send
+/// this information multiple times resulting in multiple increments.
+pub(crate) mod client_view_distances {
+    use crate::metrics::{METER, linear_buckets};
+    use opentelemetry::metrics::Histogram;
+    use std::sync::LazyLock;
+
+    static INSTRUMENT: LazyLock<Histogram<u64>> = LazyLock::new(|| {
+        METER
+            .u64_histogram("client_view_distances")
+            .with_description("The view distance of clients")
+            .with_unit("chunks")
+            .with_boundaries(linear_buckets(2.0, 1.0, 30))
+            .build()
+    });
+
+    /// Records the view distance.
+    pub(crate) fn record(distance: u64) {
+        INSTRUMENT.record(distance, &[])
+    }
+}
+
+/// The metric `handshake_states` tracks the number of connections handshake states
+///
+/// Attributes:
+/// - `state`: `status`, `login`, or `transfer`.
+pub(crate) mod handshake_states {
+    use crate::metrics::METER;
+    use opentelemetry::KeyValue;
+    use opentelemetry::metrics::Counter;
+    use passage_packets::State;
+    use std::sync::LazyLock;
+
+    static INSTRUMENT: LazyLock<Counter<u64>> = LazyLock::new(|| {
+        METER
+            .u64_counter("transfer_connections")
+            .with_description("The number of connections making status and transfer requests")
+            .build()
+    });
+
+    /// Increments the counter.
+    pub(crate) fn inc(state: State) {
+        let state = match state {
+            State::Status => "status",
+            State::Login => "login",
+            State::Transfer => "transfer",
+        };
+        INSTRUMENT.add(1, &[KeyValue::new("state", state)])
     }
 }

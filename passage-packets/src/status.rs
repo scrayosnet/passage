@@ -12,6 +12,7 @@ pub mod clientbound {
     use byteorder::BigEndian;
     #[cfg(test)]
     use fake::Dummy;
+    use serde::Serialize;
     use tracing::instrument;
 
     /// The [`StatusResponsePacket`].
@@ -25,6 +26,16 @@ pub mod clientbound {
     pub struct StatusResponsePacket {
         /// The JSON response body that contains all self-reported server metadata.
         pub body: String,
+    }
+
+    impl StatusResponsePacket {
+        /// Creates a new [`StatusResponsePacket`] from a serializable status. The status has to
+        /// conform to the packet body.
+        pub fn try_from<T: Serialize>(status: &T) -> Result<Self, Error> {
+            Ok(Self {
+                body: serde_json::to_string(status)?,
+            })
+        }
     }
 
     impl Packet for StatusResponsePacket {

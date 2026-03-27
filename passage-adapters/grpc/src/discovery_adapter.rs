@@ -1,10 +1,14 @@
 use crate::proto::TargetRequest;
 use crate::proto::discovery_client::DiscoveryClient;
 use passage_adapters::discovery::DiscoveryAdapter;
-use passage_adapters::{Error, Target};
+use passage_adapters::{Error, Result, Target, metrics};
 use std::fmt::{Debug, Formatter};
+use tokio::time::Instant;
 use tonic::transport::Channel;
 use tracing::instrument;
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "grpc_discovery_adapter";
 
 pub struct GrpcDiscoveryAdapter {
     client: DiscoveryClient<Channel>,
@@ -25,17 +29,16 @@ impl GrpcDiscoveryAdapter {
         Ok(Self {
             client: DiscoveryClient::connect(address).await.map_err(|err| {
                 Error::FailedInitialization {
-                    adapter_type: "grpc_target_selection",
+                    adapter_type: ADAPTER_TYPE,
                     cause: err.into(),
                 }
             })?,
         })
     }
-}
 
-impl DiscoveryAdapter for GrpcDiscoveryAdapter {
     #[instrument(skip_all)]
-    async fn discover(&self) -> passage_adapters::Result<Vec<Target>> {
+    async fn discover(&self) -> Result<Vec<Target>> {
+        let start = Instant::now();
         let request = tonic::Request::new(TargetRequest {});
         let response = self
             .client
@@ -43,15 +46,28 @@ impl DiscoveryAdapter for GrpcDiscoveryAdapter {
             .get_targets(request)
             .await
             .map_err(|err| Error::FailedFetch {
-                adapter_type: "grpc_target_selection",
+                adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })?;
 
-        response
+        let targets = response
             .into_inner()
             .targets
             .into_iter()
             .map(TryInto::try_into)
-            .collect::<_>()
+            .collect::<_>();
+
+        metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        targets
+    }
+}
+
+impl DiscoveryAdapter for GrpcDiscoveryAdapter {
+    #[instrument(skip_all)]
+    async fn discover(&self) -> Result<Vec<Target>> {
+        let start = Instant::now();
+        let targets = self.discover().await;
+        metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        targets
     }
 }

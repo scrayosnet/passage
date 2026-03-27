@@ -7,64 +7,21 @@ pub use fastnbt;
 
 pub mod codec;
 pub mod configuration;
+pub mod error;
 pub mod handshake;
 pub mod login;
+pub mod metrics;
 pub mod reader;
 pub mod status;
 pub mod writer;
+
+pub use crate::error::{Error, Result};
 
 pub type VerifyToken = [u8; 32];
 
 pub type VarInt = i32;
 
 pub type VarLong = i64;
-
-/// The internal error type for all errors related to the protocol communication.
-///
-/// This includes errors with the expected packets, packet contents or encoding of the exchanged fields. Errors of the
-/// underlying data layer (for Byte exchange) are wrapped from the underlying IO errors. Additionally, the internal
-/// timeout limits also are covered as errors.
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    /// An error occurred while reading or writing to the underlying byte stream.
-    #[error("error reading or writing data: {0}")]
-    Io(#[from] std::io::Error),
-
-    /// The received packets is of an invalid length that we cannot process.
-    #[error("illegal packets length")]
-    IllegalPacketLength,
-
-    /// The received value index cannot be mapped to an existing enum.
-    #[error("illegal enum value index for {kind}: {value}")]
-    IllegalEnumValue {
-        /// The enum kind which was parsed.
-        kind: &'static str,
-        /// The value that was received.
-        value: VarInt,
-    },
-
-    /// The received packets ID is not mapped to an expected packet.
-    #[error("illegal packets ID: {0}")]
-    IllegalPacketId(VarInt),
-
-    // TODO make to UTF8 string error
-    /// The JSON response of a packet is incorrectly encoded (not UTF-8).
-    #[error("invalid response body (invalid encoding)")]
-    InvalidEncoding,
-
-    // TODO try to remove? (pad with zeros?)
-    /// Some array conversion failed.
-    #[error("could not convert into array")]
-    ArrayConversionFailed,
-
-    /// Some `serde_json` error.
-    #[error("failed to parse json: {0}")]
-    Json(#[from] serde_json::error::Error),
-
-    /// Some fastnbt error.
-    #[error("failed to parse nbt: {0}")]
-    Nbt(#[from] fastnbt::error::Error),
-}
 
 /// State is the desired state that the connection should be in after the initial handshake.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

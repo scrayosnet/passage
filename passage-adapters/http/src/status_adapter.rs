@@ -1,14 +1,18 @@
 use crate::HTTP_CLIENT;
 use passage_adapters::status::StatusAdapter;
-use passage_adapters::{Error, Protocol, ServerStatus};
+use passage_adapters::{Error, Protocol, ServerStatus, metrics};
 use std::fmt::{Debug, Formatter};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::RwLock;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "http_status_adapter";
 
 pub struct HttpStatusAdapter {
     inner: Arc<RwLock<Option<ServerStatus>>>,
@@ -59,20 +63,20 @@ impl HttpStatusAdapter {
             .send()
             .await
             .map_err(|err| Error::FailedFetch {
-                adapter_type: "http_status",
+                adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })?
             // handle status codes
             .error_for_status()
             .map_err(|err| Error::FailedFetch {
-                adapter_type: "http_status",
+                adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })?
             // parse response
             .json()
             .await
             .map_err(|err| Error::FailedParse {
-                adapter_type: "http_status",
+                adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })
     }
@@ -91,6 +95,9 @@ impl StatusAdapter for HttpStatusAdapter {
         _server_addr: (&str, u16),
         _protocol: Protocol,
     ) -> Result<Option<ServerStatus>, Error> {
-        Ok(self.inner.read().await.clone())
+        let start = Instant::now();
+        let status = self.inner.read().await.clone();
+        metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        Ok(status)
     }
 }

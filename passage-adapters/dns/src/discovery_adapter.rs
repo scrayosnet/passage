@@ -1,16 +1,20 @@
 use crate::DnsError;
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
-use passage_adapters::Target;
 use passage_adapters::discovery::DiscoveryAdapter;
+use passage_adapters::{Target, metrics};
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
+
+/// The name of the adapter. It is primarily used for logging and metrics.
+const ADAPTER_TYPE: &str = "dns_discovery_adapter";
 
 /// The type of DNS record to query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +175,9 @@ impl Drop for DnsDiscoveryAdapter {
 
 impl DiscoveryAdapter for DnsDiscoveryAdapter {
     async fn discover(&self) -> passage_adapters::Result<Vec<Target>> {
-        Ok(self.inner.read().await.clone())
+        let start = Instant::now();
+        let servers = self.inner.read().await.clone();
+        metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        Ok(servers)
     }
 }
