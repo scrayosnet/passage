@@ -1,7 +1,7 @@
 use crate::config;
 use passage_adapters::authentication::fixed::FixedAuthenticationAdapter;
 use passage_adapters::authentication::{AuthenticationAdapter, Profile};
-use passage_adapters::{DisabledAuthenticationAdapter, Protocol};
+use passage_adapters::{DisabledAuthenticationAdapter, Protocol, Reason};
 use passage_adapters_http::MojangAdapter;
 use sentry::protocol::Uuid;
 use std::fmt::{Display, Formatter};
@@ -35,7 +35,7 @@ impl AuthenticationAdapter for DynAuthenticationAdapter {
         user: (&str, &Uuid),
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> passage_adapters::Result<Option<Profile>> {
+    ) -> passage_adapters::Result<Reason<Profile>> {
         match self {
             DynAuthenticationAdapter::Disabled(adapter) => {
                 adapter

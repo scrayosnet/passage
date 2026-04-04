@@ -1,5 +1,5 @@
 use crate::authentication::{AuthenticationAdapter, Profile};
-use crate::{Protocol, error::Result, metrics};
+use crate::{Protocol, Reason, ReasonExt, error::Result, metrics};
 use std::net::SocketAddr;
 use tokio::time::Instant;
 use tracing::trace;
@@ -29,9 +29,9 @@ impl AuthenticationAdapter for FixedAuthenticationAdapter {
         _user: (&str, &Uuid),
         _shared_secret: &[u8],
         _encoded_public: &[u8],
-    ) -> Result<Option<Profile>> {
+    ) -> Result<Reason<Profile>> {
         trace!("authenticating fixed profile");
         metrics::adapter_duration::record(ADAPTER_TYPE, Instant::now());
-        Ok(self.profile.clone())
+        Ok(self.profile.clone().reason(None))
     }
 }

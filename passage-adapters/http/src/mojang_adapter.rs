@@ -1,6 +1,6 @@
 use crate::HTTP_CLIENT;
 use passage_adapters::authentication::{AuthenticationAdapter, Profile, minecraft_hash};
-use passage_adapters::{Protocol, metrics};
+use passage_adapters::{Protocol, Reason, metrics};
 use std::fmt::{Debug, Formatter};
 use std::net::SocketAddr;
 use tokio::time::Instant;
@@ -28,7 +28,7 @@ impl MojangAdapter {
         user: (&str, &Uuid),
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> passage_adapters::Result<Option<Profile>> {
+    ) -> passage_adapters::Result<Reason<Profile>> {
         // calculate the minecraft hash for this secret, key and username
         let hash = minecraft_hash(&self.server_id, shared_secret, encoded_public);
 
@@ -53,7 +53,7 @@ impl MojangAdapter {
 
         // if the response is empty, then the client did not make an auth request
         if response.status() == 204 {
-            return Ok(None);
+            return Ok(Reason::None(None));
         }
 
         // parse the response profile
@@ -65,7 +65,7 @@ impl MojangAdapter {
                     adapter_type: "mojang",
                     cause: Box::new(err),
                 })?;
-        Ok(Some(profile))
+        Ok(Reason::Some(profile))
     }
 }
 
@@ -84,7 +84,7 @@ impl AuthenticationAdapter for MojangAdapter {
         user: (&str, &Uuid),
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> passage_adapters::Result<Option<Profile>> {
+    ) -> passage_adapters::Result<Reason<Profile>> {
         let start = Instant::now();
         let profile = self
             .authenticate(

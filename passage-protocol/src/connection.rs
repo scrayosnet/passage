@@ -11,7 +11,7 @@ use passage_adapters::authentication::{AuthenticationAdapter, Profile};
 use passage_adapters::filter::FilterAdapter;
 use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::{
-    Adapters, Protocol, ServerStatus, discovery::DiscoveryAdapter, status::StatusAdapter,
+    Adapters, Protocol, Reason, ServerStatus, discovery::DiscoveryAdapter, status::StatusAdapter,
     strategy::StrategyAdapter,
 };
 use passage_packets::codec::{PacketCodec, PacketFrame};
@@ -148,14 +148,14 @@ where
 
         // Handle profile not found.
         match profile {
-            Some(profile) => Ok(profile),
-            None => {
+            Reason::Some(profile) => Ok(profile),
+            Reason::None(key) => {
                 info!("profile not found, disconnecting");
                 let reason = self
                     .adapters
                     .localize(
                         self.client_locale.as_deref(),
-                        "disconnect_unauthenticated",
+                        key.as_deref().unwrap_or("disconnect_unauthenticated"),
                         &[],
                     )
                     .await?;

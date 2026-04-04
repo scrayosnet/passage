@@ -1,5 +1,5 @@
 use crate::authentication::{AuthenticationAdapter, Profile};
-use crate::{Protocol, error::Result, metrics};
+use crate::{Protocol, Reason, error::Result, metrics};
 use std::net::SocketAddr;
 use tokio::time::Instant;
 use tracing::trace;
@@ -27,11 +27,11 @@ impl AuthenticationAdapter for DisabledAuthenticationAdapter {
         (user_name, user_id): (&str, &Uuid),
         _shared_secret: &[u8],
         _encoded_public: &[u8],
-    ) -> Result<Option<Profile>> {
+    ) -> Result<Reason<Profile>> {
         trace!("skipping authentication");
         metrics::adapter_duration::record(ADAPTER_TYPE, Instant::now());
         // TODO profile may need skin information, maybe provide default
-        Ok(Some(Profile {
+        Ok(Reason::Some(Profile {
             id: *user_id,
             name: user_name.to_string(),
             properties: vec![],

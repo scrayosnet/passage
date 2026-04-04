@@ -4,7 +4,7 @@ use crate::filter::FilterAdapter;
 use crate::localization::LocalizationAdapter;
 use crate::status::StatusAdapter;
 use crate::strategy::StrategyAdapter;
-use crate::{Protocol, Result, ServerStatus, Target};
+use crate::{Protocol, Reason, Result, ServerStatus, Target};
 use std::fmt::{Debug, Display, Formatter};
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -238,7 +238,7 @@ where
         user: (&str, &Uuid),
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> Result<Option<Profile>> {
+    ) -> Result<Reason<Profile>> {
         self.authentication_adapter
             .authenticate(
                 client_addr,
