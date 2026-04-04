@@ -75,7 +75,7 @@ where
         server_addr: (&str, u16),
         protocol: Protocol,
         user: (&str, &Uuid),
-    ) -> Result<Option<Target>> {
+    ) -> Result<Reason<Target>> {
         let all_targets = self.discover().await?;
         let filtered_targets = self
             .filter(client_addr, server_addr, protocol, user, all_targets)
@@ -213,7 +213,7 @@ where
         protocol: Protocol,
         user: (&str, &Uuid),
         targets: Vec<Target>,
-    ) -> Result<Option<Target>> {
+    ) -> Result<Reason<Target>> {
         self.strategy_adapter
             .strategize(client_addr, server_addr, protocol, user, targets)
             .await

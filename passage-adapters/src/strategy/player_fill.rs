@@ -1,5 +1,5 @@
 use crate::strategy::StrategyAdapter;
-use crate::{Protocol, Target, error::Result, metrics};
+use crate::{Protocol, Reason, ReasonExt, Target, error::Result, metrics};
 use std::net::SocketAddr;
 use tokio::time::Instant;
 use uuid::Uuid;
@@ -28,7 +28,7 @@ impl StrategyAdapter for PlayerFillStrategyAdapter {
         _protocol: Protocol,
         _user: (&str, &Uuid),
         targets: Vec<Target>,
-    ) -> Result<Option<Target>> {
+    ) -> Result<Reason<Target>> {
         let start = Instant::now();
         let target = targets
             .iter()
@@ -45,6 +45,6 @@ impl StrategyAdapter for PlayerFillStrategyAdapter {
             .max_by_key(|(_, players)| *players)
             .map(|(target, _)| target.clone());
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
-        Ok(target)
+        Ok(target.reason(None))
     }
 }

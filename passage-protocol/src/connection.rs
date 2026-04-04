@@ -489,7 +489,8 @@ where
         let shutdown = self.shutdown.clone();
         let mut target_join = tokio::spawn(async move {
             tokio::select! {
-                _ = shutdown.cancelled() => Ok(None),
+                // TODO set timeout as reason
+                _ = shutdown.cancelled() => Ok(Reason::None(None)),
                 maybe_target = adapters.select(&client_address, (&server_address, server_port), protocol, (&user_name, &user_id)) => {
                     maybe_target
                 }
@@ -579,15 +580,22 @@ where
         };
 
         // disconnect if not target found
-        let Some(target) = target else {
-            info!("no transfer target found, disconnecting");
-            let reason = self
-                .adapters
-                .localize(self.client_locale.as_deref(), "disconnect_no_target", &[])
-                .await?;
-            self.send_packet(conf_out::DisconnectPacket { reason })
-                .await?;
-            return Err(Error::ConnectionClosed);
+        let target = match target {
+            Reason::Some(target) => target,
+            Reason::None(reason) => {
+                info!("no transfer target found, disconnecting");
+                let reason = self
+                    .adapters
+                    .localize(
+                        self.client_locale.as_deref(),
+                        reason.as_deref().unwrap_or("disconnect_no_target"),
+                        &[],
+                    )
+                    .await?;
+                self.send_packet(conf_out::DisconnectPacket { reason })
+                    .await?;
+                return Err(Error::ConnectionClosed);
+            }
         };
 
         // If the shared secret for the auth cookie is set, then we set a new auth cookie using the

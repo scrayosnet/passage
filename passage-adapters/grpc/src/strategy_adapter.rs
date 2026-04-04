@@ -1,7 +1,7 @@
 use crate::proto::strategy_client::StrategyClient;
 use crate::proto::{Address, SelectRequest};
 use passage_adapters::strategy::StrategyAdapter;
-use passage_adapters::{Error, Protocol, Target, metrics};
+use passage_adapters::{Error, Protocol, Reason, Target, metrics};
 use std::fmt::{Debug, Formatter};
 use std::net::SocketAddr;
 use tokio::time::Instant;
@@ -46,7 +46,7 @@ impl GrpcStrategyAdapter {
         protocol: Protocol,
         user: (&str, &Uuid),
         targets: Vec<Target>,
-    ) -> Result<Option<Target>, Error> {
+    ) -> Result<Reason<Target>, Error> {
         let request = tonic::Request::new(SelectRequest {
             client_address: Some(Address {
                 hostname: client_addr.ip().to_string(),
@@ -72,11 +72,10 @@ impl GrpcStrategyAdapter {
             })?;
 
         // return the result right away
-        response
-            .into_inner()
-            .target
-            .map(TryInto::try_into)
-            .transpose()
+        let Some(target) = response.into_inner().target else {
+            return Ok(Reason::None(None));
+        };
+        Ok(Reason::Some(target.try_into()?))
     }
 }
 
@@ -89,7 +88,7 @@ impl StrategyAdapter for GrpcStrategyAdapter {
         protocol: Protocol,
         user: (&str, &Uuid),
         targets: Vec<Target>,
-    ) -> Result<Option<Target>, Error> {
+    ) -> Result<Reason<Target>, Error> {
         let start = Instant::now();
         let target = self
             .strategize(client_addr, server_addr, protocol, user, targets)
