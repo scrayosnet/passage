@@ -4,22 +4,23 @@ package scrayosnet.passage.adapter;
 
 import "adapter/adapter.proto";
 
-service Strategy {
-    rpc SelectTarget(SelectRequest) returns (SelectResponse);
+service Authentication {
+    rpc Authenticate(AuthenticationRequest) returns (AuthenticationResponse);
 }
 
-message SelectRequest {
+message AuthenticationRequest {
     Address client_address = 1;
     Address server_address = 2;
     uint64 protocol = 3;
     string username = 4;
     string user_id = 5;
-    repeated Target targets = 6;
+    bytes shared_secret = 6;
+    bytes encoded_public = 7;
 }
 
-message SelectResponse {
+message AuthenticationResponse {
     oneof reason {
-        Target target = 1;
+        Profile profile = 1;
         string key = 2;
     }
 }

@@ -41,6 +41,28 @@ pub use status::fixed::FixedStatusAdapter;
 pub use strategy::any::AnyStrategyAdapter;
 pub use strategy::player_fill::PlayerFillStrategyAdapter;
 
+/// A [`Reason`] is an [`Option`] but with a localizable message key on the [`None`] side explaining
+/// why the [`Reason`] is [`None`].
+pub enum Reason<T> {
+    Some(T),
+    None(Option<String>),
+}
+
+pub trait ReasonExt<T> {
+    /// Converts into a [`Reason`] with a localizable message key on the [`None`] side explaining
+    /// why the [`Reason`] is [`None`] (if it is [`None`]).
+    fn reason(self, reason: Option<String>) -> Reason<T>;
+}
+
+impl<T> ReasonExt<T> for Option<T> {
+    fn reason(self, reason: Option<String>) -> Reason<T> {
+        match self {
+            Some(value) => Reason::Some(value),
+            None => Reason::None(reason),
+        }
+    }
+}
+
 /// The Minecraft protocol version type.
 pub type Protocol = i32;
 

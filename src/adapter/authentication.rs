@@ -1,7 +1,8 @@
 use crate::config;
 use passage_adapters::authentication::fixed::FixedAuthenticationAdapter;
 use passage_adapters::authentication::{AuthenticationAdapter, Profile};
-use passage_adapters::{DisabledAuthenticationAdapter, Protocol};
+use passage_adapters::{DisabledAuthenticationAdapter, Protocol, Reason};
+use passage_adapters_grpc::authentication_adapter::GrpcAuthenticationAdapter;
 use passage_adapters_http::MojangAdapter;
 use sentry::protocol::Uuid;
 use std::fmt::{Display, Formatter};
@@ -11,6 +12,8 @@ use std::net::SocketAddr;
 pub enum DynAuthenticationAdapter {
     Disabled(DisabledAuthenticationAdapter),
     Fixed(FixedAuthenticationAdapter),
+    #[cfg(feature = "adapters-grpc")]
+    Grpc(GrpcAuthenticationAdapter),
     #[cfg(feature = "adapters-http")]
     Mojang(MojangAdapter),
 }
@@ -20,6 +23,8 @@ impl Display for DynAuthenticationAdapter {
         match self {
             Self::Disabled(_) => write!(f, "disabled"),
             Self::Fixed(_) => write!(f, "fixed"),
+            #[cfg(feature = "adapters-grpc")]
+            Self::Grpc(_) => write!(f, "grpc"),
             #[cfg(feature = "adapters-http")]
             Self::Mojang(_) => write!(f, "mojang"),
         }
@@ -35,7 +40,7 @@ impl AuthenticationAdapter for DynAuthenticationAdapter {
         user: (&str, &Uuid),
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> passage_adapters::Result<Option<Profile>> {
+    ) -> passage_adapters::Result<Reason<Profile>> {
         match self {
             DynAuthenticationAdapter::Disabled(adapter) => {
                 adapter
@@ -50,6 +55,19 @@ impl AuthenticationAdapter for DynAuthenticationAdapter {
                     .await
             }
             DynAuthenticationAdapter::Fixed(adapter) => {
+                adapter
+                    .authenticate(
+                        client_addr,
+                        server_addr,
+                        protocol,
+                        user,
+                        shared_secret,
+                        encoded_public,
+                    )
+                    .await
+            }
+            #[cfg(feature = "adapters-grpc")]
+            DynAuthenticationAdapter::Grpc(adapter) => {
                 adapter
                     .authenticate(
                         client_addr,
@@ -91,6 +109,11 @@ impl DynAuthenticationAdapter {
             config::AuthenticationAdapter::Fixed(config) => {
                 let adapter = FixedAuthenticationAdapter::new(config.profile);
                 Ok(DynAuthenticationAdapter::Fixed(adapter))
+            }
+            #[cfg(feature = "adapters-grpc")]
+            config::AuthenticationAdapter::Grpc(config) => {
+                let adapter = GrpcAuthenticationAdapter::new(config.address).await?;
+                Ok(DynAuthenticationAdapter::Grpc(adapter))
             }
             #[cfg(feature = "adapters-http")]
             config::AuthenticationAdapter::Mojang(config) => {

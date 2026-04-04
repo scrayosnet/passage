@@ -1,14 +1,17 @@
 use crate::config::Config;
-use crate::cookie::{AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign, verify};
+use crate::cookie::{
+    AUTH_COOKIE_KEY, AuthCookie, CookieDecodeExt, CookieEncodeExt, SESSION_COOKIE_KEY,
+    SessionCookie,
+};
 pub(crate) use crate::error::Error;
 use crate::{crypto, metrics};
 use futures::{SinkExt, StreamExt};
 use opentelemetry::trace::TraceContextExt;
-use passage_adapters::authentication::AuthenticationAdapter;
+use passage_adapters::authentication::{AuthenticationAdapter, Profile};
 use passage_adapters::filter::FilterAdapter;
 use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::{
-    Adapters, Protocol, discovery::DiscoveryAdapter, status::StatusAdapter,
+    Adapters, Protocol, Reason, ServerStatus, discovery::DiscoveryAdapter, status::StatusAdapter,
     strategy::StrategyAdapter,
 };
 use passage_packets::codec::{PacketCodec, PacketFrame};
@@ -29,7 +32,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::Instant;
 use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, debug, field, instrument};
+use tracing::{Instrument, debug, field, info, instrument, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
@@ -50,6 +53,7 @@ pub struct Connection<S, Stat, Disc, Filt, Stra, Auth, Loca> {
     adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
     config: Config,
     client_address: SocketAddr,
+    shutdown: CancellationToken,
 
     // keep alive state
     keep_alive_id: Option<u64>,
@@ -73,12 +77,14 @@ where
         adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
         config: Config,
         client_address: SocketAddr,
+        shutdown: CancellationToken,
     ) -> Self {
         Self {
             stream: Framed::new(stream, PacketCodec::new(config.max_packet_length)),
             // adapters
             adapters,
             config,
+            shutdown,
             // keep alive state
             keep_alive_id: None,
             // client information
@@ -87,15 +93,92 @@ where
         }
     }
 
+    async fn get_status(
+        &self,
+        handshake: &hand_in::HandshakePacket,
+    ) -> Result<ServerStatus, Error> {
+        // Build a new status request future.
+        let status_future = async {
+            self.adapters
+                .status(
+                    &self.client_address,
+                    (&handshake.server_address, handshake.server_port),
+                    handshake.protocol_version,
+                )
+                .await
+        };
+
+        // Wait for the status adapter to complete. Stop if the connection is shutdown.
+        let shutdown = self.shutdown.clone();
+        let status = tokio::select! {
+            status = status_future => status?,
+            _ = shutdown.cancelled() => return Err(Error::ConnectionClosed),
+        };
+
+        // Handle status not found.
+        Ok(status.unwrap_or_default())
+    }
+
+    async fn get_profile(
+        &mut self,
+        handshake: &hand_in::HandshakePacket,
+        login_start: &login_in::LoginStartPacket,
+        shared_secret: &[u8],
+    ) -> Result<Profile, Error> {
+        // Build a new status request future.
+        let profile_future = async {
+            self.adapters
+                .authenticate(
+                    &self.client_address,
+                    (&handshake.server_address, handshake.server_port),
+                    handshake.protocol_version as Protocol,
+                    (&login_start.user_name, &login_start.user_id),
+                    shared_secret,
+                    &crypto::ENCODED_PUB,
+                )
+                .await
+        };
+
+        // Wait for the status adapter to complete. Stop if the connection is shutdown.
+        let shutdown = self.shutdown.clone();
+        let profile = tokio::select! {
+            profile = profile_future => profile?,
+            _ = shutdown.cancelled() => return Err(Error::ConnectionClosed),
+        };
+
+        // Handle profile not found.
+        match profile {
+            Reason::Some(profile) => Ok(profile),
+            Reason::None(key) => {
+                info!("profile not found, disconnecting");
+                let reason = self
+                    .adapters
+                    .localize(
+                        self.client_locale.as_deref(),
+                        key.as_deref().unwrap_or("disconnect_unauthenticated"),
+                        &[],
+                    )
+                    .await?;
+                self.send_packet(login_out::DisconnectPacket { reason })
+                    .await?;
+                Err(Error::ConnectionClosed)
+            }
+        }
+    }
+
     #[instrument(skip_all, fields(packet_length = field::Empty, packet_id = field::Empty))]
     async fn next_packet(&mut self) -> Result<PacketFrame, Error> {
-        let frame = self
-            .stream
-            .next()
-            .instrument(tracing::info_span!("read_packet", otel.kind = "server"))
-            .await
-            .ok_or_else(|| Error::ConnectionClosed)??;
+        // Wait for the next packet to arrive. Stop if the connection is shutdown.
+        let shutdown = self.shutdown.clone();
+        let frame = tokio::select! {
+            frame = self.stream.next().instrument(tracing::info_span!("read_packet", otel.kind = "server")) => frame,
+            _ = shutdown.cancelled() => return Err(Error::ConnectionClosed),
+        };
+
+        // Check if a packet was received, otherwise close the connection.
+        let frame = frame.ok_or_else(|| Error::ConnectionClosed)??;
         tracing::Span::current().record("packet_length", frame.length);
+        tracing::Span::current().record("packet_id", frame.id);
         Ok(frame)
     }
 
@@ -111,17 +194,19 @@ where
         Ok(())
     }
 
+    // TODO remove?
     #[instrument(skip_all)]
     async fn send_keep_alive(&mut self) -> Result<(), Error> {
         debug!("checking that keep-alive packet was received");
         if self.keep_alive_id.is_some() {
+            info!("keep-alive missed, disconnecting");
             let reason = self
                 .adapters
                 .localize(self.client_locale.as_deref(), "disconnect_timeout", &[])
                 .await?;
             self.send_packet(conf_out::DisconnectPacket { reason })
                 .await?;
-            return Err(Error::MissedKeepAlive);
+            return Err(Error::ConnectionClosed);
         }
         debug!("sending next keep-alive packet");
         let id = crypto::generate_keep_alive();
@@ -131,6 +216,7 @@ where
         Ok(())
     }
 
+    // TODO remove?
     fn handle_keep_alive(&mut self, id: u64) {
         if self.keep_alive_id == Some(id) {
             self.keep_alive_id = None;
@@ -160,7 +246,10 @@ where
         let packet = self.next_packet().await?;
         let handshake = match_packet! { packet,
             packet = hand_in::HandshakePacket => packet,
-            (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
+            (unexpected, _) => {
+                info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                return Err(Error::ConnectionClosed);
+            }
         }?;
         metrics::handshake_states::inc(handshake.next_state);
 
@@ -175,19 +264,14 @@ where
             let packet = self.next_packet().await?;
             let _ = match_packet! { packet,
                 packet = status_in::StatusRequestPacket => packet,
-                (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
+                (unexpected, _) => {
+                    info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                    return Err(Error::ConnectionClosed);
+                }
             }?;
 
             debug!("getting status from supplier");
-            let maybe_status = self
-                .adapters
-                .status(
-                    &self.client_address,
-                    (&handshake.server_address, handshake.server_port),
-                    handshake.protocol_version as Protocol,
-                )
-                .await;
-            let status = maybe_status?;
+            let status = self.get_status(&handshake).await?;
 
             debug!("sending status response packet");
             self.send_packet(status_out::StatusResponsePacket::try_from(&status)?)
@@ -197,7 +281,10 @@ where
             let packet = self.next_packet().await?;
             let ping = match_packet! { packet,
                 packet = status_in::PingPacket => packet,
-                (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
+                (unexpected, _) => {
+                    info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                    return Err(Error::ConnectionClosed);
+                }
             }?;
 
             debug!("sending pong packet");
@@ -221,7 +308,10 @@ where
         let packet = self.next_packet().await?;
         let mut login_start = match_packet! { packet,
             packet = login_in::LoginStartPacket => packet,
-            (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
+            (unexpected, _) => {
+                info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                return Err(Error::ConnectionClosed);
+            }
         }?;
 
         // check session
@@ -235,15 +325,14 @@ where
         let packet = self.next_packet().await?;
         let session_packet = match_packet! { packet,
             packet = login_in::CookieResponsePacket => packet,
-            (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
+            (unexpected, _) => {
+                info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                return Err(Error::ConnectionClosed);
+            }
         }?;
-        let session_cookie =
-            session_packet
-                .decode::<SessionCookie>()
-                .map_err(|err| Error::Cookie {
-                    cookie: "session",
-                    source: err,
-                })?;
+
+        debug!("decoding the session cookie");
+        let session_cookie = session_packet.decode::<SessionCookie>()?;
 
         // In case the client asked to be transferred, then we also request the Passage auth cookie.
         // The auth cookie contains (verified) information about the client session signed using some
@@ -274,30 +363,22 @@ where
                 let packet = self.next_packet().await?;
                 let cookie = match_packet! { packet,
                     packet = login_in::CookieResponsePacket => packet,
-                    (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
+                    (unexpected, _) => {
+                        info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                        return Err(Error::ConnectionClosed);
+                    }
                 }?;
-
-                let Some(signed) = cookie.payload else {
-                    debug!("no auth cookie received, skipping auth cookie");
-                    break 'transfer;
-                };
 
                 let Some(secret) = &self.config.auth_secret else {
                     debug!("no auth secret configured, skipping auth cookie");
                     break 'transfer;
                 };
 
-                let (ok, message) = verify(&signed, secret.as_bytes());
-                if !ok {
-                    debug!("invalid auth cookie signature received, skipping auth cookie");
+                let Some(cookie) = cookie.decode_verified::<AuthCookie>(secret.as_bytes())? else {
+                    debug!("decoding or verifying failed, skipping auth cookie");
                     break 'transfer;
-                }
+                };
 
-                let cookie =
-                    serde_json::from_slice::<AuthCookie>(message).map_err(|err| Error::Cookie {
-                        cookie: "auth",
-                        source: err,
-                    })?;
                 let expires_at = cookie.timestamp + self.config.auth_cookie_expiry;
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -343,7 +424,10 @@ where
         let packet = self.next_packet().await?;
         let encrypt = match_packet! { packet,
             packet = login_in::EncryptionResponsePacket => packet,
-            (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
+            (unexpected, _) => {
+                info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                return Err(Error::ConnectionClosed);
+            }
         }?;
 
         // decrypt the shared secret and verify the token
@@ -353,7 +437,8 @@ where
         // verify the token is correct
         debug!("verifying verify token");
         if !crypto::verify_token(verify_token, &decrypted_verify_token) {
-            return Err(Error::InvalidVerifyToken);
+            info!("received invalid verify token, closing connection");
+            return Err(Error::ConnectionClosed);
         }
 
         // If necessary, we now also make an authentication request using the authentication adapter.
@@ -368,31 +453,9 @@ where
         // handle authentication if not already authenticated by the token
         if should_authenticate {
             debug!("authenticating user");
-            let maybe_auth_response = self
-                .adapters
-                .authenticate(
-                    &self.client_address,
-                    (&handshake.server_address, handshake.server_port),
-                    handshake.protocol_version as Protocol,
-                    (&login_start.user_name, &login_start.user_id),
-                    &shared_secret,
-                    &crypto::ENCODED_PUB,
-                )
-                .await;
-            let auth_response = maybe_auth_response?;
-            let Some(profile) = auth_response else {
-                let reason = self
-                    .adapters
-                    .localize(
-                        self.client_locale.as_deref(),
-                        "disconnect_unauthenticated",
-                        &[],
-                    )
-                    .await?;
-                self.send_packet(login_out::DisconnectPacket { reason })
-                    .await?;
-                return Err(Error::Unauthenticated);
-            };
+            let profile = self
+                .get_profile(&handshake, &login_start, &shared_secret)
+                .await?;
 
             // update state for actual use info
             login_start.user_name = profile.name;
@@ -415,11 +478,7 @@ where
         // targets, a traget filtering which removes all targets the client should not transfer to,
         // and lastly, a targets strategy that selects a single target.
 
-        // create a cancellation token with a drop guard
-        let target_token = CancellationToken::new();
-        let _target_token_guard = target_token.clone().drop_guard();
-
-        // start the target selection task (stops using a stop token)
+        // start the target selection task
         let adapters = self.adapters.clone();
         let client_address = self.client_address;
         let server_address = handshake.server_address.clone();
@@ -427,9 +486,11 @@ where
         let protocol = handshake.protocol_version as Protocol;
         let user_name = login_start.user_name.clone();
         let user_id = login_start.user_id;
+        let shutdown = self.shutdown.clone();
         let mut target_join = tokio::spawn(async move {
             tokio::select! {
-                _ = target_token.cancelled() => Ok(None),
+                // TODO set timeout as reason
+                _ = shutdown.cancelled() => Ok(Reason::None(None)),
                 maybe_target = adapters.select(&client_address, (&server_address, server_port), protocol, (&user_name, &user_id)) => {
                     maybe_target
                 }
@@ -452,7 +513,10 @@ where
         let packet = self.next_packet().await?;
         let _ = match_packet! { packet,
             packet = login_in::LoginAcknowledgedPacket => packet,
-            (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
+            (unexpected, _) => {
+                info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                return Err(Error::ConnectionClosed);
+            }
         }?;
 
         // await the target from the target task
@@ -489,7 +553,10 @@ where
                         },
 
                         // Throw on any other packet
-                        (unexpected, expected) => return Err(Error::illegal_packet_id(expected, unexpected))
+                        (unexpected, _) => {
+                            info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                            return Err(Error::ConnectionClosed);
+                        }
                     }
                 },
 
@@ -501,8 +568,8 @@ where
 
                 // Await target selection to complete. This is only polled after the client
                 // information packet has been received at least once.
-                maybe_target = &mut target_join , if self.client_locale.is_some() => {
-                    let target = maybe_target
+                target = &mut target_join , if self.client_locale.is_some() => {
+                    let target = target
                         .map_err(|err| passage_adapters::Error::FailedFetch {
                             adapter_type: "adapters",
                             cause: Box::new(err),
@@ -513,16 +580,22 @@ where
         };
 
         // disconnect if not target found
-        let Some(target) = target else {
-            debug!("no transfer target found");
-            let reason = self
-                .adapters
-                .localize(self.client_locale.as_deref(), "disconnect_no_target", &[])
-                .await?;
-            debug!("sending disconnect packet");
-            self.send_packet(conf_out::DisconnectPacket { reason })
-                .await?;
-            return Err(Error::NoTargetFound);
+        let target = match target {
+            Reason::Some(target) => target,
+            Reason::None(reason) => {
+                info!("no transfer target found, disconnecting");
+                let reason = self
+                    .adapters
+                    .localize(
+                        self.client_locale.as_deref(),
+                        reason.as_deref().unwrap_or("disconnect_no_target"),
+                        &[],
+                    )
+                    .await?;
+                self.send_packet(conf_out::DisconnectPacket { reason })
+                    .await?;
+                return Err(Error::ConnectionClosed);
+            }
         };
 
         // If the shared secret for the auth cookie is set, then we set a new auth cookie using the
@@ -548,15 +621,11 @@ where
                 extra: Default::default(),
             };
 
-            let auth_payload = serde_json::to_vec(&cookie).map_err(|err| Error::Cookie {
-                cookie: "auth",
-                source: err,
-            })?;
             debug!("sending auth cookie packet");
-            self.send_packet(conf_out::StoreCookiePacket {
-                key: AUTH_COOKIE_KEY.to_string(),
-                payload: sign(&auth_payload, secret.as_bytes()),
-            })
+            self.send_packet(conf_out::StoreCookiePacket::encode_signed(
+                secret.as_bytes(),
+                &cookie,
+            )?)
             .await?;
         }
 
@@ -569,20 +638,16 @@ where
                 .span_context()
                 .trace_id()
                 .to_string();
-            self.send_packet(conf_out::StoreCookiePacket {
-                key: SESSION_COOKIE_KEY.to_string(),
-                payload: serde_json::to_vec(&SessionCookie {
-                    id: Uuid::new_v4(),
-                    server_address: handshake.server_address.clone(),
-                    server_port: handshake.server_port,
-                    trace_id: Some(trace_id),
-                })
-                .map_err(|err| Error::Cookie {
-                    cookie: "session",
-                    source: err,
-                })?,
-            })
-            .await?;
+
+            let cookie = SessionCookie {
+                id: Uuid::new_v4(),
+                server_address: handshake.server_address.clone(),
+                server_port: handshake.server_port,
+                trace_id: Some(trace_id),
+            };
+
+            self.send_packet(conf_out::StoreCookiePacket::encode(&cookie)?)
+                .await?;
         }
 
         // create a new transfer packet and send it

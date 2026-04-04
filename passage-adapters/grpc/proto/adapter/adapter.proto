@@ -17,3 +17,16 @@ message MetaEntry {
     string key = 1;
     string value = 2;
 }
+
+message Profile {
+    string id = 1;
+    string name = 2;
+    repeated ProfileProperty properties = 3;
+    repeated string profile_actions = 4;
+}
+
+message ProfileProperty {
+    string name = 1;
+    string value = 2;
+    optional string signature = 3;
+}

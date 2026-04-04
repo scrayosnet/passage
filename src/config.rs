@@ -546,6 +546,7 @@ pub struct GrpcStrategy {
 pub enum AuthenticationAdapter {
     Disabled,
     Fixed(FixedAuthentication),
+    Grpc(GrpcAuthentication),
     Mojang(MojangAuthentication),
 }
 
@@ -563,6 +564,14 @@ pub struct FixedAuthentication {
     pub profile: Option<Profile>,
 }
 
+/// [`GrpcAuthentication`] hold the gRPC authentication configuration.
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct GrpcAuthentication {
+    /// The address of the gRPC adapter server.
+    pub address: String,
+}
+
 /// [`MojangAuthentication`] hold the mojang authentication configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -577,6 +586,7 @@ pub struct MojangAuthentication {
 #[serde(rename_all = "snake_case")]
 pub enum LocalizationAdapter {
     Fixed(FixedLocalization),
+    Grpc(GrpcLocalization),
 }
 
 impl Default for LocalizationAdapter {
@@ -645,6 +655,14 @@ impl Default for FixedLocalization {
             },
         }
     }
+}
+
+/// [`GrpcLocalization`] hold the gRPC localization configuration.
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct GrpcLocalization {
+    /// The address of the gRPC adapter server.
+    pub address: String,
 }
 
 impl Config {
