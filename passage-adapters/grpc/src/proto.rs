@@ -27,17 +27,17 @@ impl From<&passage_adapters::Target> for Target {
 }
 
 impl TryFrom<Target> for passage_adapters::Target {
-    type Error = passage_adapters::Error;
+    type Error = Error;
 
     fn try_from(value: Target) -> Result<Self, Self::Error> {
         let Some(raw_addr) = value.address.clone() else {
-            return Err(passage_adapters::Error::FailedParse {
+            return Err(Error::FailedParse {
                 adapter_type: "grpc",
                 cause: Box::new(MissingFieldError { field: "address" }),
             });
         };
         let address = SocketAddr::from_str(&format!("{}:{}", raw_addr.hostname, raw_addr.port))
-            .map_err(|err| passage_adapters::Error::FailedParse {
+            .map_err(|err| Error::FailedParse {
                 adapter_type: "grpc",
                 cause: err.into(),
             })?;
@@ -51,6 +51,37 @@ impl TryFrom<Target> for passage_adapters::Target {
                 .map(|entry| (entry.key, entry.value))
                 .collect(),
         })
+    }
+}
+
+impl TryFrom<Profile> for passage_adapters::authentication::Profile {
+    type Error = Error;
+
+    fn try_from(value: Profile) -> Result<Self, Self::Error> {
+        let user_id = value
+            .id
+            .try_into()
+            .map_err(|err: uuid::Error| Error::FailedParse {
+                adapter_type: "grpc",
+                cause: err.into(),
+            })?;
+
+        Ok(Self {
+            id: user_id,
+            name: value.name,
+            properties: value.properties.into_iter().map(Into::into).collect(),
+            profile_actions: value.profile_actions,
+        })
+    }
+}
+
+impl From<ProfileProperty> for passage_adapters::authentication::ProfileProperty {
+    fn from(value: ProfileProperty) -> Self {
+        Self {
+            name: value.name,
+            value: value.value,
+            signature: value.signature,
+        }
     }
 }
 

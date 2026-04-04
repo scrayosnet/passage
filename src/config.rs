@@ -546,6 +546,7 @@ pub struct GrpcStrategy {
 pub enum AuthenticationAdapter {
     Disabled,
     Fixed(FixedAuthentication),
+    Grpc(GrpcAuthentication),
     Mojang(MojangAuthentication),
 }
 
@@ -561,6 +562,14 @@ impl Default for AuthenticationAdapter {
 pub struct FixedAuthentication {
     /// The fixed profile that should be used for authentication.
     pub profile: Option<Profile>,
+}
+
+/// [`GrpcAuthentication`] hold the gRPC authentication configuration.
+#[derive(Default, Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct GrpcAuthentication {
+    /// The address of the gRPC adapter server.
+    pub address: String,
 }
 
 /// [`MojangAuthentication`] hold the mojang authentication configuration.

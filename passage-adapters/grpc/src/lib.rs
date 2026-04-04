@@ -1,3 +1,4 @@
+pub mod authentication_adapter;
 mod discovery_adapter;
 pub mod error;
 mod proto;
