@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::connection::Connection;
-use crate::metrics;
 use crate::rate_limiter::RateLimiter;
+use crate::{Error, metrics};
 use passage_adapters::Adapters;
 use passage_adapters::authentication::AuthenticationAdapter;
 use passage_adapters::discovery::DiscoveryAdapter;
@@ -17,7 +17,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::select;
-use tokio::time::{Instant, timeout};
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{debug, info, instrument, warn};
@@ -72,7 +72,7 @@ where
                     break;
                 },
             };
-            self.handle(stream, addr).await;
+            self.handle(stream, addr, stop.child_token()).await;
         }
 
         // wait for all connections to finish
@@ -84,7 +84,7 @@ where
     }
 
     #[instrument(skip(self, stream))]
-    async fn handle(&mut self, stream: TcpStream, addr: SocketAddr) {
+    async fn handle(&mut self, stream: TcpStream, addr: SocketAddr, stop: CancellationToken) {
         let connection_start = Instant::now();
 
         let (mut stream, client_addr) = if let Some(proxy_config) = &self.config.proxy_protocol {
@@ -132,20 +132,43 @@ where
 
         let adapters = self.adapters.clone();
         let connection_config = self.config.clone();
-        let connection_timeout = Duration::from_secs(self.config.connection_timeout);
+        let shutdown = stop.child_token();
         metrics::requests::accept();
 
-        // create a new connection and run protocol
+        // Create a new shutdown timeout.
+        let connection_timeout = Duration::from_secs(self.config.connection_timeout);
+        let _shutdown = shutdown.clone();
+        self.tracker.spawn(async move {
+            select! {
+                _ = tokio::time::sleep(connection_timeout) => {
+                    _shutdown.cancel();
+                    debug!("connection timeout");
+                },
+                _ = _shutdown.cancelled() => {
+                    debug!("connection cancelled");
+                },
+            }
+        });
+
+        // Create a new connection and run protocol
         self.tracker.spawn(async move {
             metrics::open_connections::inc();
-            let mut connection =
-                Connection::new(&mut stream, adapters, connection_config, client_addr);
 
-            // TODO adapters are not cancellation safe. Therefore, the timeout is not ok
-            // handle the client connection (ignore connection closed by the client)
-            let timeout = timeout(connection_timeout, connection.listen()).await;
-            if let Ok(Err(err)) = timeout {
-                warn!(cause = err.to_string(), "failed to handle connection");
+            // Create the connection and wait for its completion.
+            let mut connection = Connection::new(
+                &mut stream,
+                adapters,
+                connection_config,
+                client_addr,
+                shutdown,
+            );
+            match connection.listen().await {
+                Ok(()) | Err(Error::ConnectionClosed) => {
+                    debug!("connection completed");
+                }
+                Err(err) => {
+                    warn!(cause = err.to_string(), "failed to handle connection");
+                }
             }
 
             // flush connection and shutdown

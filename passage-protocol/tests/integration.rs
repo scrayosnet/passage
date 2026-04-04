@@ -33,6 +33,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncWriteExt};
 use tokio_util::codec::Framed;
+use tokio_util::sync::CancellationToken;
 use uuid::uuid;
 
 trait PacketStreamExt {
@@ -93,7 +94,14 @@ async fn simulate_handshake() {
     ));
 
     // build connection
-    let mut server = Connection::new(server_stream, adapters, Config::default(), client_address);
+    let shutdown = CancellationToken::new();
+    let mut server = Connection::new(
+        server_stream,
+        adapters,
+        Config::default(),
+        client_address,
+        shutdown,
+    );
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
@@ -140,7 +148,14 @@ async fn simulate_status() {
     ));
 
     // build connection
-    let mut server = Connection::new(server_stream, adapters, Config::default(), client_address);
+    let shutdown = CancellationToken::new();
+    let mut server = Connection::new(
+        server_stream,
+        adapters,
+        Config::default(),
+        client_address,
+        shutdown,
+    );
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
@@ -167,7 +182,10 @@ async fn simulate_status() {
         .next_packet()
         .await
         .expect("status response packet read failed: parse error");
-    assert_eq!(status_response_packet.body, "null");
+    assert_eq!(
+        status_response_packet.body,
+        "{\"version\":{\"name\":\"\",\"protocol\":0},\"players\":null,\"description\":null,\"favicon\":null,\"enforcesSecureChat\":null}"
+    );
 
     client_stream
         .send(status_in::PingPacket { payload: 42 })
@@ -207,18 +225,20 @@ async fn simulate_transfer_no_configuration() {
     ));
 
     // build connection
+    let shutdown = CancellationToken::new();
     let mut server = Connection::new(
         server_stream,
         adapters,
         Config::default().with_auth_secret(Some(auth_secret.to_string())),
         client_address,
+        shutdown,
     );
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
         let result = server.listen().await;
         match result {
-            Err(Error::NoTargetFound) => {}
+            Err(Error::ConnectionClosed) => {}
             other => panic!("expected no target found, got {:?}", other),
         }
     });
@@ -376,18 +396,20 @@ async fn simulate_slow_transfer_no_configuration() {
     ));
 
     // build connection
+    let shutdown = CancellationToken::new();
     let mut server = Connection::new(
         server_stream,
         adapters,
         Config::default().with_auth_secret(Some(auth_secret.to_string())),
         client_address,
+        shutdown,
     );
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
         let result = server.listen().await;
         match result {
-            Err(Error::NoTargetFound) => {}
+            Err(Error::ConnectionClosed) => {}
             other => panic!("expected no target found, got {:?}", other),
         }
     });
@@ -567,13 +589,20 @@ async fn simulate_login_no_configuration() {
     ));
 
     // build connection
-    let mut server = Connection::new(server_stream, adapters, Config::default(), client_address);
+    let shutdown = CancellationToken::new();
+    let mut server = Connection::new(
+        server_stream,
+        adapters,
+        Config::default(),
+        client_address,
+        shutdown,
+    );
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
         let result = server.listen().await;
         match result {
-            Err(Error::NoTargetFound) => {}
+            Err(Error::ConnectionClosed) => {}
             other => panic!("expected no target found, got {:?}", other),
         }
     });
@@ -702,18 +731,20 @@ async fn sends_keep_alive() {
     ));
 
     // build connection
+    let shutdown = CancellationToken::new();
     let mut server = Connection::new(
         server_stream,
         adapters,
         Config::default().with_auth_secret(Some(auth_secret.to_string())),
         client_address,
+        shutdown,
     );
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
         let result = server.listen().await;
         match result {
-            Err(Error::NoTargetFound) => {}
+            Err(Error::ConnectionClosed) => {}
             other => panic!("expected no target found, got {:?}", other),
         }
     });
@@ -877,18 +908,20 @@ async fn no_respond_keep_alive() {
     ));
 
     // build connection
+    let shutdown = CancellationToken::new();
     let mut server = Connection::new(
         server_stream,
         adapters,
         Config::default().with_auth_secret(Some(auth_secret.to_string())),
         client_address,
+        shutdown,
     );
 
     // start the server in its own thread
     let server = tokio::spawn(async move {
         let res = server.listen().await;
         match res {
-            Err(Error::MissedKeepAlive) => {}
+            Err(Error::ConnectionClosed) => {}
             other => panic!("expected missed keep alive, got {:?}", other),
         }
     });
