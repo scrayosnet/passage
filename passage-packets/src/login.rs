@@ -244,7 +244,6 @@ pub mod serverbound {
     use crate::writer::{Write, WritePacket, WritePacketExt};
     #[cfg(test)]
     use fake::Dummy;
-    use serde::Deserialize;
     use tracing::instrument;
 
     /// The [`LoginStartPacket`].
@@ -383,16 +382,6 @@ pub mod serverbound {
     pub struct CookieResponsePacket {
         pub key: String,
         pub payload: Option<Vec<u8>>,
-    }
-
-    impl CookieResponsePacket {
-        /// Decodes the payload into the provided type. Returns `None` if the payload is empty.
-        pub fn decode<'a, T: Deserialize<'a>>(&'a self) -> Result<Option<T>, serde_json::Error> {
-            let Some(payload) = &self.payload else {
-                return Ok(None);
-            };
-            serde_json::from_slice(payload)
-        }
     }
 
     impl Packet for CookieResponsePacket {

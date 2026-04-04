@@ -1,5 +1,8 @@
 use crate::config::Config;
-use crate::cookie::{AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign, verify};
+use crate::cookie::{
+    AUTH_COOKIE_KEY, AuthCookie, CookieDecodeExt, CookieEncodeExt, SESSION_COOKIE_KEY,
+    SessionCookie,
+};
 pub(crate) use crate::error::Error;
 use crate::{crypto, metrics};
 use futures::{SinkExt, StreamExt};
@@ -327,13 +330,9 @@ where
                 return Err(Error::ConnectionClosed);
             }
         }?;
-        let session_cookie =
-            session_packet
-                .decode::<SessionCookie>()
-                .map_err(|err| Error::Cookie {
-                    cookie: "session",
-                    source: err,
-                })?;
+
+        debug!("decoding the session cookie");
+        let session_cookie = session_packet.decode::<SessionCookie>()?;
 
         // In case the client asked to be transferred, then we also request the Passage auth cookie.
         // The auth cookie contains (verified) information about the client session signed using some
@@ -370,27 +369,16 @@ where
                     }
                 }?;
 
-                let Some(signed) = cookie.payload else {
-                    debug!("no auth cookie received, skipping auth cookie");
-                    break 'transfer;
-                };
-
                 let Some(secret) = &self.config.auth_secret else {
                     debug!("no auth secret configured, skipping auth cookie");
                     break 'transfer;
                 };
 
-                let (ok, message) = verify(&signed, secret.as_bytes());
-                if !ok {
-                    debug!("invalid auth cookie signature received, skipping auth cookie");
+                let Some(cookie) = cookie.decode_verified::<AuthCookie>(secret.as_bytes())? else {
+                    debug!("decoding or verifying failed, skipping auth cookie");
                     break 'transfer;
-                }
+                };
 
-                let cookie =
-                    serde_json::from_slice::<AuthCookie>(message).map_err(|err| Error::Cookie {
-                        cookie: "auth",
-                        source: err,
-                    })?;
                 let expires_at = cookie.timestamp + self.config.auth_cookie_expiry;
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -625,15 +613,11 @@ where
                 extra: Default::default(),
             };
 
-            let auth_payload = serde_json::to_vec(&cookie).map_err(|err| Error::Cookie {
-                cookie: "auth",
-                source: err,
-            })?;
             debug!("sending auth cookie packet");
-            self.send_packet(conf_out::StoreCookiePacket {
-                key: AUTH_COOKIE_KEY.to_string(),
-                payload: sign(&auth_payload, secret.as_bytes()),
-            })
+            self.send_packet(conf_out::StoreCookiePacket::encode_signed(
+                secret.as_bytes(),
+                &cookie,
+            )?)
             .await?;
         }
 
@@ -646,20 +630,16 @@ where
                 .span_context()
                 .trace_id()
                 .to_string();
-            self.send_packet(conf_out::StoreCookiePacket {
-                key: SESSION_COOKIE_KEY.to_string(),
-                payload: serde_json::to_vec(&SessionCookie {
-                    id: Uuid::new_v4(),
-                    server_address: handshake.server_address.clone(),
-                    server_port: handshake.server_port,
-                    trace_id: Some(trace_id),
-                })
-                .map_err(|err| Error::Cookie {
-                    cookie: "session",
-                    source: err,
-                })?,
-            })
-            .await?;
+
+            let cookie = SessionCookie {
+                id: Uuid::new_v4(),
+                server_address: handshake.server_address.clone(),
+                server_port: handshake.server_port,
+                trace_id: Some(trace_id),
+            };
+
+            self.send_packet(conf_out::StoreCookiePacket::encode(&cookie)?)
+                .await?;
         }
 
         // create a new transfer packet and send it
