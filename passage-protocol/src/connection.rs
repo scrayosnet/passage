@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::cookie::{
-    AUTH_COOKIE_KEY, AuthCookie, CookieDecodeExt, CookieEncodeExt, SESSION_COOKIE_KEY,
-    SessionCookie,
+    AuthCookie, CookieDecodeExt, CookieEncodeExt, SessionCookie, AUTH_COOKIE_KEY,
+    SESSION_COOKIE_KEY,
 };
 pub(crate) use crate::error::Error;
 use crate::{crypto, metrics};
@@ -11,8 +11,8 @@ use passage_adapters::authentication::{AuthenticationAdapter, Profile};
 use passage_adapters::filter::FilterAdapter;
 use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::{
-    Adapters, Protocol, Reason, ServerStatus, discovery::DiscoveryAdapter, status::StatusAdapter,
-    strategy::StrategyAdapter,
+    discovery::DiscoveryAdapter, status::StatusAdapter, strategy::StrategyAdapter, Adapters, Protocol, Reason,
+    ServerStatus,
 };
 use passage_packets::codec::{PacketCodec, PacketFrame};
 use passage_packets::configuration::clientbound as conf_out;
@@ -22,7 +22,7 @@ use passage_packets::login::clientbound as login_out;
 use passage_packets::login::serverbound as login_in;
 use passage_packets::status::clientbound as status_out;
 use passage_packets::status::serverbound as status_in;
-use passage_packets::{State, VarInt, match_packet, writer::WritePacket};
+use passage_packets::{match_packet, writer::WritePacket, State, VarInt};
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::ops::Add;
@@ -32,7 +32,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::Instant;
 use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, debug, field, info, instrument, warn};
+use tracing::{debug, field, info, instrument, warn, Instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
@@ -46,19 +46,30 @@ pub const DEFAULT_AUTH_COOKIE_EXPIRY: u64 = 6 * 60 * 60;
 /// such that at most one keep-alive packet is in transit at any point.
 pub const KEEP_ALIVE_INTERVAL: u64 = 16;
 
+/// A connection wraps a packet stream and implements the Minecraft (Java) protocol. The connection
+/// is automatically closed at the next appropriate instant once the cancellation token has been canceled.
 pub struct Connection<S, Stat, Disc, Filt, Stra, Auth, Loca> {
+    /// The packet stream. This is used to send and receive packets.
     stream: Framed<S, PacketCodec>,
 
-    // adapters
+    /// The adapters bundle. This is used to get the server status, the user profile, and the target server.
     adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
+
+    /// The static configuration of all Passage connections.
     config: Config,
+
+    /// The address of the client. This is passed on to the adapters.
     client_address: SocketAddr,
+
+    /// The shutdown token. When the cancellation token is canceled, the connection is closed. Depending
+    /// on the time at which the token is canceled, an appropriate disconnect message is sent to the client.
     shutdown: CancellationToken,
 
-    // keep alive state
+    /// The ID of the last keep-alive packet sent. This is used to detect if a keep-alive packet is
+    /// answered before the next is sent.
     keep_alive_id: Option<u64>,
 
-    // client information
+    /// The locale of the client. This is used to localize the disconnect reason.
     client_locale: Option<String>,
 }
 
@@ -72,6 +83,9 @@ where
     Auth: AuthenticationAdapter + 'static,
     Loca: LocalizationAdapter + 'static,
 {
+    /// Creates a new [`Connection`]. The stream is wrapped in a [`Framed`] with [`PacketCodec`] which
+    /// encodes and decodes packets. Any stream prefixes, such as a proxy protocol, has to be handled
+    /// beforehand.
     pub fn new(
         stream: S,
         adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
@@ -81,18 +95,19 @@ where
     ) -> Self {
         Self {
             stream: Framed::new(stream, PacketCodec::new(config.max_packet_length)),
-            // adapters
             adapters,
             config,
             shutdown,
-            // keep alive state
-            keep_alive_id: None,
-            // client information
             client_address,
+            keep_alive_id: None,
             client_locale: None,
         }
     }
 
+    /// Gets the server status from the [`StatusAdapter`]. If the status is not found, then the
+    /// [`Error::ConnectionClosed`] error is returned. If the adapter errors, the connection is closed.
+    /// If the adapter gives no status, then a default status is sent.
+    #[instrument(skip_all)]
     async fn get_status(
         &self,
         handshake: &hand_in::HandshakePacket,
@@ -108,7 +123,8 @@ where
                 .await
         };
 
-        // Wait for the status adapter to complete. Stop if the connection is shutdown.
+        // Wait for the status adapter to complete. Stop if the connection is shutdown. At this point,
+        // we cannot send any disconnect packet.
         let shutdown = self.shutdown.clone();
         let status = tokio::select! {
             status = status_future => status?,
@@ -119,6 +135,10 @@ where
         Ok(status.unwrap_or_default())
     }
 
+    /// Gets the user profile from the [`AuthenticationAdapter`]. If the adapter errors, the connection
+    /// is closed. If the adapter gives no profile, then a disconnect packet is sent and the connection
+    /// is closed.
+    #[instrument(skip_all)]
     async fn get_profile(
         &mut self,
         handshake: &hand_in::HandshakePacket,
@@ -143,7 +163,7 @@ where
         let shutdown = self.shutdown.clone();
         let profile = tokio::select! {
             profile = profile_future => profile?,
-            _ = shutdown.cancelled() => return Err(Error::ConnectionClosed),
+            _ = shutdown.cancelled() => Reason::None(Some("disconnect_timeout".to_string())),
         };
 
         // Handle profile not found.
@@ -166,12 +186,15 @@ where
         }
     }
 
+    /// Awaits the next packet from the stream or for the cancellation token to be canceled. If the
+    /// cancellation token is canceled, then the connection is closed.
     #[instrument(skip_all, fields(packet_length = field::Empty, packet_id = field::Empty))]
     async fn next_packet(&mut self) -> Result<PacketFrame, Error> {
         // Wait for the next packet to arrive. Stop if the connection is shutdown.
         let shutdown = self.shutdown.clone();
         let frame = tokio::select! {
             frame = self.stream.next().instrument(tracing::info_span!("read_packet", otel.kind = "server")) => frame,
+            // TODO could send a disconnect packet in the login and configuration phase.
             _ = shutdown.cancelled() => return Err(Error::ConnectionClosed),
         };
 
@@ -247,7 +270,7 @@ where
         let handshake = match_packet! { packet,
             packet = hand_in::HandshakePacket => packet,
             (unexpected, _) => {
-                info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                info!(unexpected = ?unexpected, "expected andshake packet, closing connection");
                 return Err(Error::ConnectionClosed);
             }
         }?;
@@ -265,7 +288,7 @@ where
             let _ = match_packet! { packet,
                 packet = status_in::StatusRequestPacket => packet,
                 (unexpected, _) => {
-                    info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                    info!(unexpected = ?unexpected, "expected status packet, closing connection");
                     return Err(Error::ConnectionClosed);
                 }
             }?;
@@ -282,7 +305,7 @@ where
             let ping = match_packet! { packet,
                 packet = status_in::PingPacket => packet,
                 (unexpected, _) => {
-                    info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                    info!(unexpected = ?unexpected, "expected ping packet, closing connection");
                     return Err(Error::ConnectionClosed);
                 }
             }?;
@@ -309,7 +332,7 @@ where
         let mut login_start = match_packet! { packet,
             packet = login_in::LoginStartPacket => packet,
             (unexpected, _) => {
-                info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                info!(unexpected = ?unexpected, "expected login start packet, closing connection");
                 return Err(Error::ConnectionClosed);
             }
         }?;
@@ -326,7 +349,7 @@ where
         let session_packet = match_packet! { packet,
             packet = login_in::CookieResponsePacket => packet,
             (unexpected, _) => {
-                info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                info!(unexpected = ?unexpected, "expected session packet, closing connection");
                 return Err(Error::ConnectionClosed);
             }
         }?;
@@ -364,7 +387,7 @@ where
                 let cookie = match_packet! { packet,
                     packet = login_in::CookieResponsePacket => packet,
                     (unexpected, _) => {
-                        info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                        info!(unexpected = ?unexpected, "expected auth packet, closing connection");
                         return Err(Error::ConnectionClosed);
                     }
                 }?;
@@ -425,7 +448,7 @@ where
         let encrypt = match_packet! { packet,
             packet = login_in::EncryptionResponsePacket => packet,
             (unexpected, _) => {
-                info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                info!(unexpected = ?unexpected, "expected encryption packet, closing connection");
                 return Err(Error::ConnectionClosed);
             }
         }?;
@@ -489,8 +512,7 @@ where
         let shutdown = self.shutdown.clone();
         let mut target_join = tokio::spawn(async move {
             tokio::select! {
-                // TODO set timeout as reason
-                _ = shutdown.cancelled() => Ok(Reason::None(None)),
+                _ = shutdown.cancelled() => Ok(Reason::None(Some("disconnect_timeout".to_string()))),
                 maybe_target = adapters.select(&client_address, (&server_address, server_port), protocol, (&user_name, &user_id)) => {
                     maybe_target
                 }
@@ -514,7 +536,7 @@ where
         let _ = match_packet! { packet,
             packet = login_in::LoginAcknowledgedPacket => packet,
             (unexpected, _) => {
-                info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                info!(unexpected = ?unexpected, "expected login ack. packet, closing connection");
                 return Err(Error::ConnectionClosed);
             }
         }?;
@@ -554,7 +576,7 @@ where
 
                         // Throw on any other packet
                         (unexpected, _) => {
-                            info!(unexpected = ?unexpected, "received unexpected packet, closing connection");
+                            info!(unexpected = ?unexpected, "expected client packets, closing connection");
                             return Err(Error::ConnectionClosed);
                         }
                     }
