@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::cookie::{
-    AuthCookie, CookieDecodeExt, CookieEncodeExt, SessionCookie, AUTH_COOKIE_KEY,
-    SESSION_COOKIE_KEY,
+    AUTH_COOKIE_KEY, AuthCookie, CookieDecodeExt, CookieEncodeExt, SESSION_COOKIE_KEY,
+    SessionCookie,
 };
 pub(crate) use crate::error::Error;
 use crate::{crypto, metrics};
@@ -11,8 +11,8 @@ use passage_adapters::authentication::{AuthenticationAdapter, Profile};
 use passage_adapters::filter::FilterAdapter;
 use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::{
-    discovery::DiscoveryAdapter, status::StatusAdapter, strategy::StrategyAdapter, Adapters, Protocol, Reason,
-    ServerStatus,
+    Adapters, Protocol, Reason, ServerStatus, discovery::DiscoveryAdapter, status::StatusAdapter,
+    strategy::StrategyAdapter,
 };
 use passage_packets::codec::{PacketCodec, PacketFrame};
 use passage_packets::configuration::clientbound as conf_out;
@@ -22,7 +22,7 @@ use passage_packets::login::clientbound as login_out;
 use passage_packets::login::serverbound as login_in;
 use passage_packets::status::clientbound as status_out;
 use passage_packets::status::serverbound as status_in;
-use passage_packets::{match_packet, writer::WritePacket, State, VarInt};
+use passage_packets::{State, VarInt, match_packet, writer::WritePacket};
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::ops::Add;
@@ -32,7 +32,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::Instant;
 use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, field, info, instrument, warn, Instrument};
+use tracing::{Instrument, debug, field, info, instrument, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
