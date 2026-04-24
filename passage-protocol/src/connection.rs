@@ -270,7 +270,7 @@ where
         let handshake = match_packet! { packet,
             packet = hand_in::HandshakePacket => packet,
             (unexpected, _) => {
-                info!(unexpected = ?unexpected, "expected andshake packet, closing connection");
+                info!(unexpected = ?unexpected, "expected handshake packet, closing connection");
                 return Err(Error::ConnectionClosed);
             }
         }?;
