@@ -1,10 +1,10 @@
 use crate::DnsError;
+use hickory_resolver::Resolver;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::net::runtime::TokioRuntimeProvider;
 use hickory_resolver::proto::rr::RData::SRV;
-use hickory_resolver::Resolver;
 use passage_adapters::discovery::DiscoveryAdapter;
-use passage_adapters::{metrics, Target};
+use passage_adapters::{Target, metrics};
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::net::SocketAddr;
