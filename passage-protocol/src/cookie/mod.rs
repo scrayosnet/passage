@@ -1,4 +1,4 @@
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use passage_packets::configuration::clientbound::StoreCookiePacket;
 use passage_packets::login::serverbound::CookieResponsePacket;
 use serde::{Deserialize, Serialize};
