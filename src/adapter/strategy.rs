@@ -1,6 +1,6 @@
 use crate::config;
 use passage_adapters::strategy::StrategyAdapter;
-use passage_adapters::{AnyStrategyAdapter, PlayerFillStrategyAdapter, Protocol, Target};
+use passage_adapters::{AnyStrategyAdapter, PlayerFillStrategyAdapter, Protocol, Reason, Target};
 #[cfg(feature = "adapters-grpc")]
 use passage_adapters_grpc::GrpcStrategyAdapter;
 use sentry::protocol::Uuid;
@@ -34,7 +34,7 @@ impl StrategyAdapter for DynStrategyAdapter {
         protocol: Protocol,
         user: (&str, &Uuid),
         targets: Vec<Target>,
-    ) -> passage_adapters::Result<Option<Target>> {
+    ) -> passage_adapters::Result<Reason<Target>> {
         match self {
             DynStrategyAdapter::Any(adapter) => {
                 adapter

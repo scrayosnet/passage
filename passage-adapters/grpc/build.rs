@@ -6,7 +6,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile_protos(
             &[
                 "proto/adapter/adapter.proto",
+                "proto/adapter/authentication.proto",
                 "proto/adapter/discovery.proto",
+                "proto/adapter/localization.proto",
                 "proto/adapter/status.proto",
                 "proto/adapter/strategy.proto",
             ],

@@ -1,6 +1,8 @@
 use crate::DnsError;
-use hickory_resolver::TokioAsyncResolver;
-use hickory_resolver::config::{ResolverConfig, ResolverOpts};
+use hickory_resolver::Resolver;
+use hickory_resolver::config::ResolverConfig;
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
+use hickory_resolver::proto::rr::RData::SRV;
 use passage_adapters::discovery::DiscoveryAdapter;
 use passage_adapters::{Target, metrics};
 use std::collections::HashMap;
@@ -58,8 +60,12 @@ impl DnsDiscoveryAdapter {
         let token = CancellationToken::new();
 
         // create DNS resolver
-        let resolver =
-            TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
+        let resolver = Resolver::builder_with_config(
+            ResolverConfig::default(),
+            TokioRuntimeProvider::default(),
+        )
+        .build()
+        .map_err(|err| DnsError::BuildFailed { cause: err })?;
 
         // start background refresh task
         let _inner = Arc::clone(&inner);
@@ -101,7 +107,7 @@ impl DnsDiscoveryAdapter {
 
     /// Queries SRV records and returns targets.
     async fn query_srv(
-        resolver: &TokioAsyncResolver,
+        resolver: &Resolver<TokioRuntimeProvider>,
         domain: &str,
     ) -> Result<Vec<Target>, DnsError> {
         let response = resolver
@@ -111,9 +117,10 @@ impl DnsDiscoveryAdapter {
 
         let mut targets = Vec::new();
 
-        for srv in response.iter() {
-            let target_name = srv.target().to_utf8();
-            let port = srv.port();
+        for srv in response.answers() {
+            let SRV(srv) = &srv.data else { continue };
+            let target_name = srv.target.to_utf8();
+            let port = srv.port;
 
             // Resolve the target hostname to IP addresses
             let lookup = resolver
@@ -129,8 +136,8 @@ impl DnsDiscoveryAdapter {
                     identifier: identifier.clone(),
                     address,
                     meta: HashMap::from([
-                        ("priority".to_string(), srv.priority().to_string()),
-                        ("weight".to_string(), srv.weight().to_string()),
+                        ("priority".to_string(), srv.priority.to_string()),
+                        ("weight".to_string(), srv.weight.to_string()),
                     ]),
                 });
             }
@@ -141,7 +148,7 @@ impl DnsDiscoveryAdapter {
 
     /// Queries A/AAAA records and returns targets.
     async fn query_a(
-        resolver: &TokioAsyncResolver,
+        resolver: &Resolver<TokioRuntimeProvider>,
         domain: &str,
         port: u16,
     ) -> Result<Vec<Target>, DnsError> {

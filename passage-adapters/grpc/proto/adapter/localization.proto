@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package scrayosnet.passage.adapter;
+
+import "adapter/adapter.proto";
+
+service Localization {
+    rpc Localize(LocalizationRequest) returns (LocalizationResponse);
+}
+
+message LocalizationRequest {
+    optional string locale = 1;
+    string key = 2;
+    map<string, string> params = 3;
+}
+
+message LocalizationResponse {
+    string message = 1;
+}

@@ -1,5 +1,5 @@
 use crate::strategy::StrategyAdapter;
-use crate::{Protocol, Target, error::Result, metrics};
+use crate::{Protocol, Reason, ReasonExt, Target, error::Result, metrics};
 use std::net::SocketAddr;
 use tokio::time::Instant;
 use tracing::trace;
@@ -26,9 +26,9 @@ impl StrategyAdapter for AnyStrategyAdapter {
         _protocol: Protocol,
         _user: (&str, &Uuid),
         targets: Vec<Target>,
-    ) -> Result<Option<Target>> {
+    ) -> Result<Reason<Target>> {
         trace!(len = targets.len(), "selecting any target");
         metrics::adapter_duration::record(ADAPTER_TYPE, Instant::now());
-        Ok(targets.first().cloned())
+        Ok(targets.first().cloned().reason(None))
     }
 }
