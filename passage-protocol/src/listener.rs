@@ -2,13 +2,10 @@ use crate::config::Config;
 use crate::connection::Connection;
 use crate::rate_limiter::RateLimiter;
 use crate::{Error, metrics};
-use passage_adapters::Adapters;
 use passage_adapters::authentication::AuthenticationAdapter;
-use passage_adapters::discovery::DiscoveryAdapter;
-use passage_adapters::filter::FilterAdapter;
 use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::status::StatusAdapter;
-use passage_adapters::strategy::StrategyAdapter;
+use passage_adapters::{Adapters, DiscoveryActionAdapter};
 pub use proxy_header::ParseConfig;
 use proxy_header::io::ProxiedStream;
 use std::net::{IpAddr, SocketAddr};
@@ -23,24 +20,22 @@ use tokio_util::task::TaskTracker;
 use tracing::{debug, info, instrument, warn};
 
 // the server listener
-pub struct Listener<Stat, Disc, Filt, Stra, Auth, Loca> {
-    adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
+pub struct Listener<Stat, Disc, Auth, Loca> {
+    adapters: Arc<Adapters<Stat, Disc, Auth, Loca>>,
     tracker: TaskTracker,
     rate_limiter: Option<RateLimiter<IpAddr>>,
     config: Config,
 }
 
-impl<Stat, Disc, Filt, Stra, Auth, Loca> Listener<Stat, Disc, Filt, Stra, Auth, Loca>
+impl<Stat, Disc, Auth, Loca> Listener<Stat, Disc, Auth, Loca>
 where
     Stat: StatusAdapter + 'static,
-    Disc: DiscoveryAdapter + 'static,
-    Filt: FilterAdapter + 'static,
-    Stra: StrategyAdapter + 'static,
+    Disc: DiscoveryActionAdapter + 'static,
     Auth: AuthenticationAdapter + 'static,
     Loca: LocalizationAdapter + 'static,
 {
     pub fn new(
-        adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
+        adapters: Arc<Adapters<Stat, Disc, Auth, Loca>>,
         rate_limiter: Option<RateLimiter<IpAddr>>,
         config: Config,
     ) -> Self {

@@ -7,12 +7,12 @@ pub(crate) use crate::error::Error;
 use crate::{crypto, metrics};
 use futures::{SinkExt, StreamExt};
 use opentelemetry::trace::TraceContextExt;
+use passage_adapters::Error::Rejected;
 use passage_adapters::authentication::{AuthenticationAdapter, Profile};
-use passage_adapters::filter::FilterAdapter;
 use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::{
-    Adapters, Protocol, Reason, ServerStatus, discovery::DiscoveryAdapter, status::StatusAdapter,
-    strategy::StrategyAdapter,
+    Adapters, Client, DiscoveryActionAdapter, Player, Protocol, ServerStatus, reject_reason,
+    status::StatusAdapter,
 };
 use passage_packets::codec::{PacketCodec, PacketFrame};
 use passage_packets::configuration::clientbound as conf_out;
@@ -48,12 +48,12 @@ pub const KEEP_ALIVE_INTERVAL: u64 = 16;
 
 /// A connection wraps a packet stream and implements the Minecraft (Java) protocol. The connection
 /// is automatically closed at the next appropriate instant once the cancellation token has been canceled.
-pub struct Connection<S, Stat, Disc, Filt, Stra, Auth, Loca> {
+pub struct Connection<S, Stat, Disc, Auth, Loca> {
     /// The packet stream. This is used to send and receive packets.
     stream: Framed<S, PacketCodec>,
 
     /// The adapters bundle. This is used to get the server status, the user profile, and the target server.
-    adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
+    adapters: Arc<Adapters<Stat, Disc, Auth, Loca>>,
 
     /// The static configuration of all Passage connections.
     config: Config,
@@ -73,13 +73,11 @@ pub struct Connection<S, Stat, Disc, Filt, Stra, Auth, Loca> {
     client_locale: Option<String>,
 }
 
-impl<S, Stat, Disc, Filt, Stra, Auth, Loca> Connection<S, Stat, Disc, Filt, Stra, Auth, Loca>
+impl<S, Stat, Disc, Auth, Loca> Connection<S, Stat, Disc, Auth, Loca>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
     Stat: StatusAdapter + 'static,
-    Disc: DiscoveryAdapter + 'static,
-    Filt: FilterAdapter + 'static,
-    Stra: StrategyAdapter + 'static,
+    Disc: DiscoveryActionAdapter + 'static,
     Auth: AuthenticationAdapter + 'static,
     Loca: LocalizationAdapter + 'static,
 {
@@ -88,7 +86,7 @@ where
     /// beforehand.
     pub fn new(
         stream: S,
-        adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
+        adapters: Arc<Adapters<Stat, Disc, Auth, Loca>>,
         config: Config,
         client_address: SocketAddr,
         shutdown: CancellationToken,
@@ -108,20 +106,9 @@ where
     /// [`Error::ConnectionClosed`] error is returned. If the adapter errors, the connection is closed.
     /// If the adapter gives no status, then a default status is sent.
     #[instrument(skip_all)]
-    async fn get_status(
-        &self,
-        handshake: &hand_in::HandshakePacket,
-    ) -> Result<ServerStatus, Error> {
+    async fn get_status(&self, client: &Client) -> Result<ServerStatus, Error> {
         // Build a new status request future.
-        let status_future = async {
-            self.adapters
-                .status(
-                    &self.client_address,
-                    (&handshake.server_address, handshake.server_port),
-                    handshake.protocol_version,
-                )
-                .await
-        };
+        let status_future = async { self.adapters.status(client).await };
 
         // Wait for the status adapter to complete. Stop if the connection is shutdown. At this point,
         // we cannot send any disconnect packet.
@@ -141,41 +128,34 @@ where
     #[instrument(skip_all)]
     async fn get_profile(
         &mut self,
-        handshake: &hand_in::HandshakePacket,
-        login_start: &login_in::LoginStartPacket,
+        client: &Client,
+        player: &Player,
         shared_secret: &[u8],
     ) -> Result<Profile, Error> {
         // Build a new status request future.
         let profile_future = async {
             self.adapters
-                .authenticate(
-                    &self.client_address,
-                    (&handshake.server_address, handshake.server_port),
-                    handshake.protocol_version as Protocol,
-                    (&login_start.user_name, &login_start.user_id),
-                    shared_secret,
-                    &crypto::ENCODED_PUB,
-                )
+                .authenticate(client, player, shared_secret, &crypto::ENCODED_PUB)
                 .await
         };
 
         // Wait for the status adapter to complete. Stop if the connection is shutdown.
         let shutdown = self.shutdown.clone();
         let profile = tokio::select! {
-            profile = profile_future => profile?,
-            _ = shutdown.cancelled() => Reason::None(Some("disconnect_timeout".to_string())),
+            profile = profile_future => profile,
+            _ = shutdown.cancelled() => Err(reject_reason("adapters", "disconnect_timeout")),
         };
 
         // Handle profile not found.
         match profile {
-            Reason::Some(profile) => Ok(profile),
-            Reason::None(key) => {
+            Ok(profile) => Ok(profile),
+            Err(Rejected { reason, .. }) => {
                 info!("profile not found, disconnecting");
                 let reason = self
                     .adapters
                     .localize(
                         self.client_locale.as_deref(),
-                        key.as_deref().unwrap_or("disconnect_unauthenticated"),
+                        reason.as_deref().unwrap_or("disconnect_unauthenticated"),
                         &[],
                     )
                     .await?;
@@ -183,6 +163,7 @@ where
                     .await?;
                 Err(Error::ConnectionClosed)
             }
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -275,6 +256,11 @@ where
             }
         }?;
         metrics::handshake_states::inc(handshake.next_state);
+        let client = Client {
+            protocol_version: handshake.protocol_version,
+            server_address: handshake.server_address,
+            server_port: handshake.server_port,
+        };
 
         // When the client asks for the server status, then it sends the status request packet next.
         // We then use the status adapter to get the server status based on the client and server
@@ -294,7 +280,7 @@ where
             }?;
 
             debug!("getting status from supplier");
-            let status = self.get_status(&handshake).await?;
+            let status = self.get_status(&client).await?;
 
             debug!("sending status response packet");
             self.send_packet(status_out::StatusResponsePacket::try_from(&status)?)
@@ -336,6 +322,10 @@ where
                 return Err(Error::ConnectionClosed);
             }
         }?;
+        let mut player = Player {
+            name: login_start.user_name,
+            id: login_start.user_id,
+        };
 
         // check session
         debug!("sending session cookie request packet");
@@ -476,20 +466,18 @@ where
         // handle authentication if not already authenticated by the token
         if should_authenticate {
             debug!("authenticating user");
-            let profile = self
-                .get_profile(&handshake, &login_start, &shared_secret)
-                .await?;
+            let profile = self.get_profile(&client, &player, &shared_secret).await?;
 
             // update state for actual use info
-            login_start.user_name = profile.name;
-            login_start.user_id = profile.id;
+            player.name = profile.name;
+            player.id = profile.id;
             profile_properties = profile.properties;
         }
 
         debug!("sending login success packet");
         self.send_packet(login_out::LoginSuccessPacket {
-            user_name: login_start.user_name.clone(),
-            user_id: login_start.user_id,
+            user_name: player.name.clone(),
+            user_id: player.id,
         })
         .await?;
 
@@ -503,17 +491,13 @@ where
 
         // start the target selection task
         let adapters = self.adapters.clone();
-        let client_address = self.client_address;
-        let server_address = handshake.server_address.clone();
-        let server_port = handshake.server_port;
-        let protocol = handshake.protocol_version as Protocol;
-        let user_name = login_start.user_name.clone();
-        let user_id = login_start.user_id;
+        let _client = client.clone();
+        let _player = player.clone();
         let shutdown = self.shutdown.clone();
         let mut target_join = tokio::spawn(async move {
             tokio::select! {
-                _ = shutdown.cancelled() => Ok(Reason::None(Some("disconnect_timeout".to_string()))),
-                maybe_target = adapters.select(&client_address, (&server_address, server_port), protocol, (&user_name, &user_id)) => {
+                _ = shutdown.cancelled() => Err(reject_reason("adapters", "disconnect_timeout")),
+                maybe_target = adapters.select(&_client, &_player) => {
                     maybe_target
                 }
             }
@@ -591,11 +575,12 @@ where
                 // Await target selection to complete. This is only polled after the client
                 // information packet has been received at least once.
                 target = &mut target_join , if self.client_locale.is_some() => {
+                    // TODO handle rejected error!
                     let target = target
                         .map_err(|err| passage_adapters::Error::FailedFetch {
                             adapter_type: "adapters",
                             cause: Box::new(err),
-                        })??;
+                        })?;
                     break target
                 },
             }
@@ -603,8 +588,8 @@ where
 
         // disconnect if not target found
         let target = match target {
-            Reason::Some(target) => target,
-            Reason::None(reason) => {
+            Ok(target) => target,
+            Err(Rejected { reason, .. }) => {
                 info!("no transfer target found, disconnecting");
                 let reason = self
                     .adapters
@@ -618,6 +603,7 @@ where
                     .await?;
                 return Err(Error::ConnectionClosed);
             }
+            Err(err) => return Err(err.into()),
         };
 
         // If the shared secret for the auth cookie is set, then we set a new auth cookie using the
@@ -636,8 +622,8 @@ where
                     .duration_since(UNIX_EPOCH)
                     .expect("time error")
                     .as_secs(),
-                user_name: login_start.user_name.clone(),
-                user_id: login_start.user_id,
+                user_name: player.name.clone(),
+                user_id: player.id,
                 target: Some(target.identifier.clone()),
                 profile_properties,
                 extra: Default::default(),
@@ -663,8 +649,8 @@ where
 
             let cookie = SessionCookie {
                 id: Uuid::new_v4(),
-                server_address: handshake.server_address.clone(),
-                server_port: handshake.server_port,
+                server_address: client.server_address.clone(),
+                server_port: client.server_port,
                 trace_id: Some(trace_id),
             };
 

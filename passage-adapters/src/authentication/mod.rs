@@ -1,13 +1,22 @@
 pub mod disabled;
 pub mod fixed;
 
-use crate::{Protocol, Reason, error::Result};
+use crate::{Client, Player, error::Result};
 use num_bigint::BigInt;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::fmt::Debug;
-use std::net::SocketAddr;
 use uuid::Uuid;
+
+pub trait AuthenticationAdapter: Debug + Send + Sync {
+    fn authenticate(
+        &self,
+        client: &Client,
+        player: &Player,
+        shared_secret: &[u8],
+        encoded_public: &[u8],
+    ) -> impl Future<Output = Result<Profile>> + Send;
+}
 
 /// Represents a single Minecraft user profile with all current properties.
 ///
@@ -52,18 +61,6 @@ pub struct ProfileProperty {
     /// The base64 encoded signature of the profile property.
     /// Only provided if `?unsigned=false` is appended to url
     pub signature: Option<String>,
-}
-
-pub trait AuthenticationAdapter: Debug + Send + Sync {
-    fn authenticate(
-        &self,
-        client_addr: &SocketAddr,
-        server_addr: (&str, u16),
-        protocol: Protocol,
-        user: (&str, &Uuid),
-        shared_secret: &[u8],
-        encoded_public: &[u8],
-    ) -> impl Future<Output = Result<Reason<Profile>>> + Send;
 }
 
 /// Creates hash for the Minecraft protocol.

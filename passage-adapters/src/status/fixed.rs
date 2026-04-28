@@ -1,6 +1,5 @@
 use crate::status::StatusAdapter;
-use crate::{Protocol, ServerStatus, error::Result, metrics};
-use std::net::SocketAddr;
+use crate::{Client, Protocol, ServerStatus, error::Result, metrics};
 use tokio::time::Instant;
 use tracing::trace;
 
@@ -33,12 +32,7 @@ impl FixedStatusAdapter {
 
 impl StatusAdapter for FixedStatusAdapter {
     #[tracing::instrument(skip_all)]
-    async fn status(
-        &self,
-        _client_addr: &SocketAddr,
-        _server_addr: (&str, u16),
-        protocol: Protocol,
-    ) -> Result<Option<ServerStatus>> {
+    async fn status(&self, client: &Client) -> Result<Option<ServerStatus>> {
         trace!(has_status = self.status.is_some(), "passing fixed status");
         let start = Instant::now();
 
@@ -50,8 +44,10 @@ impl StatusAdapter for FixedStatusAdapter {
 
         // set protocol version
         stat.version.protocol = self.preferred_version;
-        if self.min_version <= protocol && protocol <= self.max_version {
-            stat.version.protocol = protocol;
+        if self.min_version <= client.protocol_version
+            && client.protocol_version <= self.max_version
+        {
+            stat.version.protocol = client.protocol_version;
         }
 
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
