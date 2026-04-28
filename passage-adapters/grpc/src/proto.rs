@@ -1,5 +1,7 @@
 use crate::error::MissingFieldError;
-use passage_adapters::{Error, ServerPlayer, ServerPlayers, ServerStatus, ServerVersion};
+use passage_adapters::{
+    Client, Error, Player, ServerPlayer, ServerPlayers, ServerStatus, ServerVersion,
+};
 use serde_json::value::RawValue;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
@@ -22,6 +24,7 @@ impl From<&passage_adapters::Target> for Target {
                     value: v.clone(),
                 })
                 .collect(),
+            priority: value.priority as u32,
         }
     }
 }
@@ -45,6 +48,7 @@ impl TryFrom<Target> for passage_adapters::Target {
         Ok(Self {
             identifier: value.identifier,
             address,
+            priority: value.priority as u16,
             meta: value
                 .meta
                 .into_iter()
@@ -170,5 +174,30 @@ impl TryFrom<Address> for SocketAddr {
                 cause: err.into(),
             })?,
         ))
+    }
+}
+
+impl From<Client> for ClientInfo {
+    fn from(value: Client) -> Self {
+        Self {
+            client_address: Some(Address {
+                hostname: value.address.ip().to_string(),
+                port: u32::from(value.address.port()),
+            }),
+            server_address: Some(Address {
+                hostname: value.server_address.clone(),
+                port: u32::from(value.server_port),
+            }),
+            protocol_version: value.protocol_version as u64,
+        }
+    }
+}
+
+impl From<Player> for PlayerInfo {
+    fn from(value: Player) -> Self {
+        Self {
+            name: value.name,
+            id: value.id.to_string(),
+        }
     }
 }

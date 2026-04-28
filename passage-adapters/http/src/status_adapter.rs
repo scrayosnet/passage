@@ -1,8 +1,7 @@
 use crate::HTTP_CLIENT;
 use passage_adapters::status::StatusAdapter;
-use passage_adapters::{Error, Protocol, ServerStatus, metrics};
+use passage_adapters::{Client, Error, ServerStatus, metrics};
 use std::fmt::{Debug, Formatter};
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::select;
@@ -89,12 +88,7 @@ impl Drop for HttpStatusAdapter {
 }
 
 impl StatusAdapter for HttpStatusAdapter {
-    async fn status(
-        &self,
-        _client_addr: &SocketAddr,
-        _server_addr: (&str, u16),
-        _protocol: Protocol,
-    ) -> Result<Option<ServerStatus>, Error> {
+    async fn status(&self, _client: &Client) -> Result<Option<ServerStatus>, Error> {
         let start = Instant::now();
         let status = self.inner.read().await.clone();
         metrics::adapter_duration::record(ADAPTER_TYPE, start);

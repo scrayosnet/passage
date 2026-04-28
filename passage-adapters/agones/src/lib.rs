@@ -111,6 +111,7 @@ impl TryFrom<GameServer> for Target {
         Ok(Self {
             identifier,
             address,
+            priority: 0,
             meta,
         })
     }

@@ -51,6 +51,9 @@ pub struct Client {
 
     /// The pretended server port.
     pub server_port: u16,
+
+    /// The address by which the client connected.
+    pub address: SocketAddr,
 }
 
 /// Contains the player information.

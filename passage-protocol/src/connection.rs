@@ -260,6 +260,7 @@ where
             protocol_version: handshake.protocol_version,
             server_address: handshake.server_address,
             server_port: handshake.server_port,
+            address: self.client_address,
         };
 
         // When the client asks for the server status, then it sends the status request packet next.

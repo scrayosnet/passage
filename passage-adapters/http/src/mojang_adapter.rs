@@ -1,10 +1,8 @@
 use crate::HTTP_CLIENT;
 use passage_adapters::authentication::{AuthenticationAdapter, Profile, minecraft_hash};
-use passage_adapters::{Protocol, Reason, metrics};
+use passage_adapters::{Client, Player, metrics, reject};
 use std::fmt::{Debug, Formatter};
-use std::net::SocketAddr;
 use tokio::time::Instant;
-use uuid::Uuid;
 
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "mojang_authentication_adapter";
@@ -22,18 +20,15 @@ impl MojangAdapter {
 
     async fn authenticate(
         &self,
-        _client_addr: &SocketAddr,
-        _server_addr: (&str, u16),
-        _protocol: Protocol,
-        user: (&str, &Uuid),
+        player: &Player,
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> passage_adapters::Result<Reason<Profile>> {
+    ) -> passage_adapters::Result<Profile> {
         // calculate the minecraft hash for this secret, key and username
         let hash = minecraft_hash(&self.server_id, shared_secret, encoded_public);
 
         // issue a request to the Mojang authentication endpoint
-        let username = user.0;
+        let username = &player.name;
         let url = format!(
             "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}"
         );
@@ -53,7 +48,7 @@ impl MojangAdapter {
 
         // if the response is empty, then the client did not make an auth request
         if response.status() == 204 {
-            return Ok(Reason::None(None));
+            return Err(reject(ADAPTER_TYPE));
         }
 
         // parse the response profile
@@ -65,7 +60,7 @@ impl MojangAdapter {
                     adapter_type: "mojang",
                     cause: Box::new(err),
                 })?;
-        Ok(Reason::Some(profile))
+        Ok(profile)
     }
 }
 
@@ -78,23 +73,14 @@ impl Debug for MojangAdapter {
 impl AuthenticationAdapter for MojangAdapter {
     async fn authenticate(
         &self,
-        client_addr: &SocketAddr,
-        server_addr: (&str, u16),
-        protocol: Protocol,
-        user: (&str, &Uuid),
+        _client: &Client,
+        player: &Player,
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> passage_adapters::Result<Reason<Profile>> {
+    ) -> passage_adapters::Result<Profile> {
         let start = Instant::now();
         let profile = self
-            .authenticate(
-                client_addr,
-                server_addr,
-                protocol,
-                user,
-                shared_secret,
-                encoded_public,
-            )
+            .authenticate(player, shared_secret, encoded_public)
             .await;
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
         profile

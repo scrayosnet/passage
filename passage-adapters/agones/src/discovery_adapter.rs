@@ -120,7 +120,10 @@ impl Drop for AgonesDiscoveryAdapter {
 }
 
 impl DiscoveryAdapter for AgonesDiscoveryAdapter {
-    async fn discover(&self) -> passage_adapters::Result<Vec<Target>> {
+    async fn discover(
+        &self,
+        _client: &passage_adapters::Client,
+    ) -> passage_adapters::Result<Vec<Target>> {
         let start = Instant::now();
         let servers = self.inner.read().await.clone();
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
