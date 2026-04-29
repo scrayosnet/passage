@@ -12,8 +12,7 @@ use passage_adapters::Error::Rejected;
 use passage_adapters::authentication::{AuthenticationAdapter, Profile};
 use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::{
-    Adapters, Client, DiscoveryActionAdapter, Player, Protocol, ServerStatus, reject_reason,
-    status::StatusAdapter,
+    Client, DiscoveryActionAdapter, Player, ServerStatus, reject_reason, status::StatusAdapter,
 };
 use passage_packets::codec::{PacketCodec, PacketFrame};
 use passage_packets::configuration::clientbound as conf_out;
@@ -27,7 +26,6 @@ use passage_packets::{State, VarInt, match_packet, writer::WritePacket};
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::ops::Add;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::Instant;

@@ -7,7 +7,7 @@ use passage_adapters::{
     PlayerAllowFilterAdapter, PlayerBlockFilterAdapter, PlayerFillStrategyAdapter, Target,
 };
 #[cfg(feature = "adapters-agones")]
-use passage_adapters_agones::{watcher_config, AgonesDiscoveryAdapter};
+use passage_adapters_agones::{AgonesDiscoveryAdapter, watcher_config};
 #[cfg(feature = "adapters-dns")]
 use passage_adapters_dns::{DnsDiscoveryAdapter, RecordType};
 #[cfg(feature = "adapters-grpc")]

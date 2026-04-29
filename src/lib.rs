@@ -19,7 +19,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
+use tracing::debug;
 
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
 ///
@@ -45,7 +45,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
             localization_adapter: DynLocalizationAdapter::from_config(route.localization).await?,
         }));
     }
-    info!(routes = ?routes, "build routes");
+    debug!(routes = ?routes, "build routes");
 
     // initialize the rate limiter
     let rate_limiter = config.rate_limiter.map(|config| {

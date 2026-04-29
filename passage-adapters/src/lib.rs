@@ -76,6 +76,7 @@ pub struct Target {
     pub address: SocketAddr,
 
     /// The target's priority, lower values are preferred.
+    #[serde(default)]
     pub priority: u16,
 
     /// Any metadata attached to the target that may be used by the adapters.
