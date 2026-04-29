@@ -1,43 +1,51 @@
 # Server rund on minecraft default port
 address: "0.0.0.0:25565"
 
-# Each request may take up to 120 seconds
+# The global timeout and rate limiter configuration. By default, allowing 60 requests per minute where
+# each request may take up to 120 seconds to complete. Otherwise, the client will be timed out.
 timeout: 120
-
-# Rate limiter configuration allowing 60 requests per minute
 rate_limiter:
   duration: 60
   limit: 60
 
-adapters:
-  # HTTP status adapter caching for 30 seconds
+# The set of routes that Passage handles. The route hostname is matched unsing a regex and may contain
+# appropriate wildcards.
+routes:
+- hostname: "mc.example.net"
+  # The status adapter used for getting the server status.
   status:
-    http:
-      address: "https://example.com/status"
-      cache_duration: 30
-
-  # Agones discovery adapter selecting nameservers in "minecraft" namespace
+    type: http
+    address: "https://example.net/status"
+    cache_duration: 30
+  # The authentication used to authenticate the client. By default, it uses the standard Mojang API.
+  authentication:
+    type: mojang
+    server_id: ""
+  # The discovery adapter used to find the server to connect to.
   discovery:
-    agones:
-      namespace: "minecraft"
-      label_selector: null
-      field_selector: null
-
-  # Single fixed filter adapter that, for the 'mc.example.net' hostname, returns only servers with 'online' status
-  filter:
-  - hostname: "mc.example.net"
-    fixed:
+    type: dns
+    domain: "servers.example.net"
+    # Any custom actions that further influence the discovery. At the end, the first server in
+    # the list of discovered servers is selected. The actions may filter or reorder the servers
+    # such that a different server is selected. They may also be used for other purposes such as
+    # sending notifications. The name is optional for improved logging.
+    actions:
+    # Next, the servers are filtered to only include those that are online.
+    - type: filter
+      name: "server-filter"
       rules:
       - op: "equals"
         field: "status"
         value: "online"
-
-  # gRPC strategy adapter
-  strategy:
-    grpc:
-      address: "strategy-adapter.default.svc.cluster.local:50053"
-
-  # Mojang authentication adapter
-  authentication:
-    mojang:
-      server_id: ""
+    # Next, the servers are passed to an gRPC adapter that may alter the servers in any way. This
+    # could further filter the servers, inject additional information, or reorder them.
+    - type: grpc
+      name: "example-interceptor"
+      address: "127.0.0.1:50051"
+    # Lastly, the servers are sorted such that the fullest server with space remaining is selected.
+    # In case there are multiple such servers, it selects a random one. This allows for incremental
+    # ordering of servers.
+    - type: player_fill
+      name: "player-fill-strategy"
+    - type: random
+      name: "random-strategy"

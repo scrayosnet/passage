@@ -33,7 +33,16 @@ impl PlayerFillStrategyAdapter {
         // Compare by player count, get the target with the most players first.
         let players_a = self.get_players(a).unwrap_or(0);
         let players_b = self.get_players(b).unwrap_or(0);
-        players_a.cmp(&players_b).reverse()
+        let full_a = players_a >= self.max_players;
+        let full_b = players_b >= self.max_players;
+        match (full_a, full_b) {
+            // If both serves are full, then they get the same priority.
+            (true, true) => Equal,
+            // If both aren't full, get the one with the most players.
+            (false, false) => players_a.cmp(&players_b).reverse(),
+            // If one server is full, get the one with the fewest players (over the max).
+            _ => players_a.cmp(&players_b),
+        }
     }
 }
 

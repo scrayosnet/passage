@@ -6,7 +6,7 @@ pub mod config;
 pub mod metrics;
 
 use crate::adapter::authentication::DynAuthenticationAdapter;
-use crate::adapter::discovery::DynDiscoveryAdapter;
+use crate::adapter::discovery::DynDiscoveryActionAdapter;
 use crate::adapter::filter::DynFilterAdapters;
 use crate::adapter::localization::DynLocalizationAdapter;
 use crate::adapter::status::DynStatusAdapter;
@@ -37,9 +37,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     debug!("building adapters");
     let adapters = Adapters::new(
         DynStatusAdapter::from_config(config.adapters.status).await?,
-        DynDiscoveryAdapter::from_config(config.adapters.discovery).await?,
-        DynFilterAdapters::from_config(config.adapters.filter).await?,
-        DynStrategyAdapter::from_config(config.adapters.strategy).await?,
+        DynDiscoveryActionAdapter::from_config(config.adapters.discovery).await?,
         DynAuthenticationAdapter::from_config(config.adapters.authentication).await?,
         DynLocalizationAdapter::from_config(config.adapters.localization).await?,
     );

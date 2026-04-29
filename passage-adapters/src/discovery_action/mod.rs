@@ -1,7 +1,6 @@
 use crate::{Client, DiscoveryAdapter, Player, Target, error::Result};
 use std::fmt::Debug;
 
-pub mod full_filter;
 pub mod meta_filter;
 pub mod player_allow_filter;
 pub mod player_block_filter;
