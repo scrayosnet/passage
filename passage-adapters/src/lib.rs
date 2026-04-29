@@ -6,7 +6,6 @@ use serde_json::value::RawValue;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
-pub mod adapters;
 pub mod authentication;
 pub mod discovery;
 pub mod discovery_action;
@@ -26,7 +25,6 @@ pub use localization::LocalizationAdapter;
 pub use status::StatusAdapter;
 
 // reexport adapters
-pub use adapters::Adapters;
 pub use authentication::disabled::DisabledAuthenticationAdapter;
 pub use authentication::fixed::FixedAuthenticationAdapter;
 pub use discovery::fixed::FixedDiscoveryAdapter;
