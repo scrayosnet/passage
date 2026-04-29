@@ -1,13 +1,12 @@
 use crate::config;
 use passage_adapters::status::StatusAdapter;
-use passage_adapters::{FixedStatusAdapter, Protocol, ServerStatus, ServerVersion};
+use passage_adapters::{Client, FixedStatusAdapter, ServerStatus, ServerVersion};
 #[cfg(feature = "adapters-grpc")]
 use passage_adapters_grpc::GrpcStatusAdapter;
 #[cfg(feature = "adapters-http")]
 use passage_adapters_http::HttpStatusAdapter;
 use serde_json::value::RawValue;
 use std::fmt::{Display, Formatter};
-use std::net::SocketAddr;
 
 #[derive(Debug)]
 pub enum DynStatusAdapter {
@@ -31,24 +30,13 @@ impl Display for DynStatusAdapter {
 }
 
 impl StatusAdapter for DynStatusAdapter {
-    async fn status(
-        &self,
-        client_addr: &SocketAddr,
-        server_addr: (&str, u16),
-        protocol: Protocol,
-    ) -> passage_adapters::Result<Option<ServerStatus>> {
+    async fn status(&self, client: &Client) -> passage_adapters::Result<Option<ServerStatus>> {
         match self {
-            DynStatusAdapter::Fixed(adapter) => {
-                adapter.status(client_addr, server_addr, protocol).await
-            }
+            DynStatusAdapter::Fixed(adapter) => adapter.status(client).await,
             #[cfg(feature = "adapters-grpc")]
-            DynStatusAdapter::Grpc(adapter) => {
-                adapter.status(client_addr, server_addr, protocol).await
-            }
+            DynStatusAdapter::Grpc(adapter) => adapter.status(client).await,
             #[cfg(feature = "adapters-http")]
-            DynStatusAdapter::Http(adapter) => {
-                adapter.status(client_addr, server_addr, protocol).await
-            }
+            DynStatusAdapter::Http(adapter) => adapter.status(client).await,
         }
     }
 }

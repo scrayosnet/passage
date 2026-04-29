@@ -7,7 +7,7 @@ use passage_adapters::{
     PlayerAllowFilterAdapter, PlayerBlockFilterAdapter, PlayerFillStrategyAdapter, Target,
 };
 #[cfg(feature = "adapters-agones")]
-use passage_adapters_agones::{AgonesDiscoveryAdapter, watcher_config};
+use passage_adapters_agones::{watcher_config, AgonesDiscoveryAdapter};
 #[cfg(feature = "adapters-dns")]
 use passage_adapters_dns::{DnsDiscoveryAdapter, RecordType};
 #[cfg(feature = "adapters-grpc")]
@@ -105,8 +105,10 @@ impl DynDiscoveryActionAdapter {
             }
             #[cfg(feature = "adapters-agones")]
             conf::AgonesDiscovery(config) => {
-                let mut watch = watcher_config::Config::default();
-                watch.label_selector = config.label_selector;
+                let watch = watcher_config::Config {
+                    label_selector: config.label_selector,
+                    ..Default::default()
+                };
                 let adapter = AgonesDiscoveryAdapter::new(config.namespace, watch).await?;
                 Ok(AgonesDiscovery(adapter))
             }

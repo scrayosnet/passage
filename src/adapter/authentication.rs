@@ -1,12 +1,10 @@
 use crate::config;
 use passage_adapters::authentication::fixed::FixedAuthenticationAdapter;
 use passage_adapters::authentication::{AuthenticationAdapter, Profile};
-use passage_adapters::{DisabledAuthenticationAdapter, Protocol, Reason};
+use passage_adapters::{Client, DisabledAuthenticationAdapter, Player};
 use passage_adapters_grpc::authentication_adapter::GrpcAuthenticationAdapter;
 use passage_adapters_http::MojangAdapter;
-use sentry::protocol::Uuid;
 use std::fmt::{Display, Formatter};
-use std::net::SocketAddr;
 
 #[derive(Debug)]
 pub enum DynAuthenticationAdapter {
@@ -34,62 +32,32 @@ impl Display for DynAuthenticationAdapter {
 impl AuthenticationAdapter for DynAuthenticationAdapter {
     async fn authenticate(
         &self,
-        client_addr: &SocketAddr,
-        server_addr: (&str, u16),
-        protocol: Protocol,
-        user: (&str, &Uuid),
+        client: &Client,
+        player: &Player,
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> passage_adapters::Result<Reason<Profile>> {
+    ) -> passage_adapters::Result<Profile> {
         match self {
             DynAuthenticationAdapter::Disabled(adapter) => {
                 adapter
-                    .authenticate(
-                        client_addr,
-                        server_addr,
-                        protocol,
-                        user,
-                        shared_secret,
-                        encoded_public,
-                    )
+                    .authenticate(client, player, shared_secret, encoded_public)
                     .await
             }
             DynAuthenticationAdapter::Fixed(adapter) => {
                 adapter
-                    .authenticate(
-                        client_addr,
-                        server_addr,
-                        protocol,
-                        user,
-                        shared_secret,
-                        encoded_public,
-                    )
+                    .authenticate(client, player, shared_secret, encoded_public)
                     .await
             }
             #[cfg(feature = "adapters-grpc")]
             DynAuthenticationAdapter::Grpc(adapter) => {
                 adapter
-                    .authenticate(
-                        client_addr,
-                        server_addr,
-                        protocol,
-                        user,
-                        shared_secret,
-                        encoded_public,
-                    )
+                    .authenticate(client, player, shared_secret, encoded_public)
                     .await
             }
             #[cfg(feature = "adapters-http")]
             DynAuthenticationAdapter::Mojang(adapter) => {
                 adapter
-                    .authenticate(
-                        client_addr,
-                        server_addr,
-                        protocol,
-                        user,
-                        shared_secret,
-                        encoded_public,
-                    )
+                    .authenticate(client, player, shared_secret, encoded_public)
                     .await
             }
         }
