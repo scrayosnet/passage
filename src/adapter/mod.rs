@@ -3,10 +3,8 @@ use uuid::Uuid;
 
 pub mod authentication;
 pub mod discovery;
-pub mod filter;
 pub mod localization;
 pub mod status;
-pub mod strategy;
 
 pub(crate) fn opt_to_regex(s: Option<String>) -> Result<Option<Regex>, regex::Error> {
     if let Some(s) = s {

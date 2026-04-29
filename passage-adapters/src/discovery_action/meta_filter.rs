@@ -1,9 +1,6 @@
-use crate::filter::FilterAdapter;
-use crate::{Protocol, Target, error::Result, metrics};
-use std::net::SocketAddr;
+use crate::discovery_action::DiscoveryActionAdapter;
+use crate::{Client, Player, Target, error::Result, metrics};
 use tokio::time::Instant;
-use tracing::trace;
-use uuid::Uuid;
 
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "meta_filter_adapter";
@@ -90,32 +87,18 @@ impl MetaFilterAdapter {
     }
 }
 
-impl FilterAdapter for MetaFilterAdapter {
+impl DiscoveryActionAdapter for MetaFilterAdapter {
     #[tracing::instrument(skip_all)]
-    async fn filter(
+    async fn apply(
         &self,
-        _client_addr: &SocketAddr,
-        _server_addr: (&str, u16),
-        _protocol: Protocol,
-        _user: (&str, &Uuid),
-        targets: Vec<Target>,
-    ) -> Result<Vec<Target>> {
-        trace!(
-            len = targets.len(),
-            rules = self.rules.len(),
-            "filtering targets"
-        );
-
-        // apply filters
+        _client: &Client,
+        _player: &Player,
+        targets: &mut Vec<Target>,
+    ) -> Result<()> {
         let start = Instant::now();
-        let filtered: Vec<Target> = targets
-            .into_iter()
-            .filter(|target| self.matches_filters(target))
-            .collect();
-
-        trace!(filtered_len = filtered.len(), "filtering complete");
+        targets.retain(|target| self.matches_filters(target));
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
-        Ok(filtered)
+        Ok(())
     }
 }
 
@@ -127,6 +110,7 @@ mod tests {
         Target {
             identifier: id.to_string(),
             address: "127.0.0.1:8080".parse().unwrap(),
+            priority: 1,
             meta: meta
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))

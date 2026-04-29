@@ -2756,7 +2756,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -2792,6 +2791,7 @@ dependencies = [
  "passage-packets",
  "proxy-header",
  "rand 0.10.1",
+ "regex",
  "rsa",
  "serde",
  "serde_json",

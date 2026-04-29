@@ -4,7 +4,7 @@ use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::net::runtime::TokioRuntimeProvider;
 use hickory_resolver::proto::rr::RData::SRV;
 use passage_adapters::discovery::DiscoveryAdapter;
-use passage_adapters::{Target, metrics};
+use passage_adapters::{Client, Target, metrics};
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::net::SocketAddr;
@@ -135,6 +135,7 @@ impl DnsDiscoveryAdapter {
                 targets.push(Target {
                     identifier: identifier.clone(),
                     address,
+                    priority: 0,
                     meta: HashMap::from([
                         ("priority".to_string(), srv.priority.to_string()),
                         ("weight".to_string(), srv.weight.to_string()),
@@ -166,6 +167,7 @@ impl DnsDiscoveryAdapter {
             targets.push(Target {
                 identifier: identifier.clone(),
                 address,
+                priority: 0,
                 meta: HashMap::from([]),
             });
         }
@@ -181,7 +183,7 @@ impl Drop for DnsDiscoveryAdapter {
 }
 
 impl DiscoveryAdapter for DnsDiscoveryAdapter {
-    async fn discover(&self) -> passage_adapters::Result<Vec<Target>> {
+    async fn discover(&self, _client: &Client) -> passage_adapters::Result<Vec<Target>> {
         let start = Instant::now();
         let servers = self.inner.read().await.clone();
         metrics::adapter_duration::record(ADAPTER_TYPE, start);

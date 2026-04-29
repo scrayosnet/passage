@@ -6,15 +6,13 @@ use serde_json::value::RawValue;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
-pub mod adapters;
 pub mod authentication;
 pub mod discovery;
+pub mod discovery_action;
 pub mod error;
-pub mod filter;
 pub mod localization;
 pub mod metrics;
 pub mod status;
-pub mod strategy;
 
 // reexport errors types
 pub use error::*;
@@ -22,49 +20,49 @@ pub use error::*;
 // reexport adapter types
 pub use authentication::AuthenticationAdapter;
 pub use discovery::DiscoveryAdapter;
-pub use filter::FilterAdapter;
+pub use discovery_action::DiscoveryActionAdapter;
 pub use localization::LocalizationAdapter;
 pub use status::StatusAdapter;
-pub use strategy::StrategyAdapter;
 
 // reexport adapters
-pub use adapters::Adapters;
 pub use authentication::disabled::DisabledAuthenticationAdapter;
 pub use authentication::fixed::FixedAuthenticationAdapter;
 pub use discovery::fixed::FixedDiscoveryAdapter;
-pub use filter::meta::MetaFilterAdapter;
-pub use filter::option::OptionFilterAdapter;
-pub use filter::player_allow::PlayerAllowFilterAdapter;
-pub use filter::player_block::PlayerBlockFilterAdapter;
+pub use discovery_action::meta_filter::MetaFilterAdapter;
+pub use discovery_action::player_allow_filter::PlayerAllowFilterAdapter;
+pub use discovery_action::player_block_filter::PlayerBlockFilterAdapter;
+pub use discovery_action::player_fill_strategy::PlayerFillStrategyAdapter;
 pub use localization::fixed::FixedLocalizationAdapter;
 pub use status::fixed::FixedStatusAdapter;
-pub use strategy::any::AnyStrategyAdapter;
-pub use strategy::player_fill::PlayerFillStrategyAdapter;
-
-/// A [`Reason`] is an [`Option`] but with a localizable message key on the [`None`] side explaining
-/// why the [`Reason`] is [`None`].
-pub enum Reason<T> {
-    Some(T),
-    None(Option<String>),
-}
-
-pub trait ReasonExt<T> {
-    /// Converts into a [`Reason`] with a localizable message key on the [`None`] side explaining
-    /// why the [`Reason`] is [`None`] (if it is [`None`]).
-    fn reason(self, reason: Option<String>) -> Reason<T>;
-}
-
-impl<T> ReasonExt<T> for Option<T> {
-    fn reason(self, reason: Option<String>) -> Reason<T> {
-        match self {
-            Some(value) => Reason::Some(value),
-            None => Reason::None(reason),
-        }
-    }
-}
 
 /// The Minecraft protocol version type.
 pub type Protocol = i32;
+
+/// Contains the client information sent to the server on the initial handshake.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Client {
+    /// The pretended protocol version.
+    pub protocol_version: Protocol,
+
+    /// The pretended server address.
+    pub server_address: String,
+
+    /// The pretended server port.
+    pub server_port: u16,
+
+    /// The address by which the client connected.
+    pub address: SocketAddr,
+}
+
+/// Contains the player information.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Player {
+    /// The name of the player.
+    pub name: String,
+
+    /// The id of the player.
+    pub id: uuid::Uuid,
+}
 
 /// A target gameserver that can be connected to.
 #[derive(Debug, Clone, Deserialize)]
@@ -74,6 +72,10 @@ pub struct Target {
 
     /// The target's address.
     pub address: SocketAddr,
+
+    /// The target's priority, lower values are preferred.
+    #[serde(default)]
+    pub priority: u16,
 
     /// Any metadata attached to the target that may be used by the adapters.
     #[serde(default)]

@@ -1,5 +1,5 @@
 use crate::discovery::DiscoveryAdapter;
-use crate::{Target, error::Result, metrics};
+use crate::{Client, Target, error::Result, metrics};
 use tokio::time::Instant;
 use tracing::trace;
 
@@ -19,7 +19,7 @@ impl FixedDiscoveryAdapter {
 
 impl DiscoveryAdapter for FixedDiscoveryAdapter {
     #[tracing::instrument(skip_all)]
-    async fn discover(&self) -> Result<Vec<Target>> {
+    async fn discover(&self, _client: &Client) -> Result<Vec<Target>> {
         trace!(len = self.targets.len(), "passing fixed targets");
         metrics::adapter_duration::record(ADAPTER_TYPE, Instant::now());
         Ok(self.targets.clone())

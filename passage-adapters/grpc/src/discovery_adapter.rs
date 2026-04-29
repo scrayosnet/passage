@@ -1,7 +1,7 @@
 use crate::proto::TargetRequest;
 use crate::proto::discovery_client::DiscoveryClient;
 use passage_adapters::discovery::DiscoveryAdapter;
-use passage_adapters::{Error, Result, Target, metrics};
+use passage_adapters::{Client, Error, Result, Target, metrics};
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
 use tonic::transport::Channel;
@@ -37,9 +37,11 @@ impl GrpcDiscoveryAdapter {
     }
 
     #[instrument(skip_all)]
-    async fn discover(&self) -> Result<Vec<Target>> {
+    async fn discover(&self, client: &Client) -> Result<Vec<Target>> {
         let start = Instant::now();
-        let request = tonic::Request::new(TargetRequest {});
+        let request = tonic::Request::new(TargetRequest {
+            client: Some(client.clone().into()),
+        });
         let response = self
             .client
             .clone()
@@ -64,9 +66,9 @@ impl GrpcDiscoveryAdapter {
 
 impl DiscoveryAdapter for GrpcDiscoveryAdapter {
     #[instrument(skip_all)]
-    async fn discover(&self) -> Result<Vec<Target>> {
+    async fn discover(&self, client: &Client) -> Result<Vec<Target>> {
         let start = Instant::now();
-        let targets = self.discover().await;
+        let targets = self.discover(client).await;
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
         targets
     }

@@ -1,7 +1,5 @@
-use crate::filter::FilterAdapter;
-use crate::{Protocol, Target, error::Result, metrics};
+use crate::{Client, DiscoveryActionAdapter, Player, Target, error::Result, metrics};
 use regex::Regex;
-use std::net::SocketAddr;
 use tokio::time::Instant;
 use tracing::trace;
 use uuid::Uuid;
@@ -35,16 +33,14 @@ impl PlayerBlockFilterAdapter {
     }
 }
 
-impl FilterAdapter for PlayerBlockFilterAdapter {
+impl DiscoveryActionAdapter for PlayerBlockFilterAdapter {
     #[tracing::instrument(skip_all)]
-    async fn filter(
+    async fn apply(
         &self,
-        _client_addr: &SocketAddr,
-        _server_addr: (&str, u16),
-        _protocol: Protocol,
-        (username, user_id): (&str, &Uuid),
-        targets: Vec<Target>,
-    ) -> Result<Vec<Target>> {
+        _client: &Client,
+        player: &Player,
+        targets: &mut Vec<Target>,
+    ) -> Result<()> {
         trace!(
             usernames = self.usernames.is_some(),
             username = self.username.is_some(),
@@ -56,31 +52,34 @@ impl FilterAdapter for PlayerBlockFilterAdapter {
         // check usernames
         if let Some(items) = &self.usernames {
             trace!("filtering block usernames");
-            if items.iter().any(|item| item == username) {
+            if items.iter().any(|item| item == &player.name) {
                 metrics::adapter_duration::record(ADAPTER_TYPE, start);
-                return Ok(vec![]);
+                targets.clear();
+                return Ok(());
             }
         }
 
         // check username
         if let Some(item) = &self.username {
             trace!("filtering block username");
-            if item.is_match(username) {
+            if item.is_match(&player.name) {
                 metrics::adapter_duration::record(ADAPTER_TYPE, start);
-                return Ok(vec![]);
+                targets.clear();
+                return Ok(());
             }
         }
 
         // check ids
         if let Some(items) = &self.ids {
             trace!("filtering block ids");
-            if items.iter().any(|item| item == user_id) {
+            if items.iter().any(|item| item == &player.id) {
                 metrics::adapter_duration::record(ADAPTER_TYPE, start);
-                return Ok(vec![]);
+                targets.clear();
+                return Ok(());
             }
         }
 
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
-        Ok(targets)
+        Ok(())
     }
 }

@@ -2,8 +2,8 @@ use futures::{SinkExt, StreamExt};
 use passage_adapters::authentication::Profile;
 use passage_adapters::discovery::DiscoveryAdapter;
 use passage_adapters::{
-    Adapters, AnyStrategyAdapter, FixedAuthenticationAdapter, FixedDiscoveryAdapter,
-    FixedLocalizationAdapter, FixedStatusAdapter, MetaFilterAdapter, Target,
+    Client, FixedAuthenticationAdapter, FixedDiscoveryAdapter, FixedLocalizationAdapter,
+    FixedStatusAdapter, Target,
 };
 use passage_packets::codec::PacketCodec;
 use passage_packets::configuration::clientbound as conf_out;
@@ -21,9 +21,11 @@ use passage_protocol::connection::{Connection, KEEP_ALIVE_INTERVAL};
 use passage_protocol::cookie::{
     AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign,
 };
+use passage_protocol::routes::Route;
 use proxy_header::ParseConfig;
 use proxy_header::io::ProxiedStream;
 use rand::rngs::SysRng;
+use regex::Regex;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::rand_core::UnwrapErr;
 use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
@@ -70,7 +72,7 @@ impl SlowDiscoveryAdapter {
 }
 
 impl DiscoveryAdapter for SlowDiscoveryAdapter {
-    async fn discover(&self) -> passage_adapters::Result<Vec<Target>> {
+    async fn discover(&self, _client: &Client) -> passage_adapters::Result<Vec<Target>> {
         tokio::time::sleep(self.duration).await;
         Ok(vec![])
     }
@@ -84,20 +86,19 @@ async fn simulate_handshake() {
     let mut client_stream = Framed::new(client_stream, PacketCodec::new(1_000));
 
     // build supplier
-    let adapters = Arc::new(Adapters::new(
-        FixedStatusAdapter::default(),
-        FixedDiscoveryAdapter::new(vec![]),
-        Vec::<MetaFilterAdapter>::new(),
-        AnyStrategyAdapter::new(),
-        FixedAuthenticationAdapter::default(),
-        FixedLocalizationAdapter::default(),
-    ));
+    let routes = vec![Arc::new(Route {
+        hostname: Regex::new(".*").expect("valid regex"),
+        status_adapter: FixedStatusAdapter::default(),
+        discovery_adapter: FixedDiscoveryAdapter::new(vec![]),
+        authentication_adapter: FixedAuthenticationAdapter::default(),
+        localization_adapter: FixedLocalizationAdapter::default(),
+    })];
 
     // build connection
     let shutdown = CancellationToken::new();
     let mut server = Connection::new(
         server_stream,
-        adapters,
+        routes.into(),
         Config::default(),
         client_address,
         shutdown,
@@ -138,20 +139,19 @@ async fn simulate_status() {
     let mut client_stream = Framed::new(client_stream, PacketCodec::new(1_000));
 
     // build supplier
-    let adapters = Arc::new(Adapters::new(
-        FixedStatusAdapter::default(),
-        FixedDiscoveryAdapter::new(vec![]),
-        Vec::<MetaFilterAdapter>::new(),
-        AnyStrategyAdapter::new(),
-        FixedAuthenticationAdapter::default(),
-        FixedLocalizationAdapter::default(),
-    ));
+    let routes = vec![Arc::new(Route {
+        hostname: Regex::new(".*").expect("valid regex"),
+        status_adapter: FixedStatusAdapter::default(),
+        discovery_adapter: FixedDiscoveryAdapter::new(vec![]),
+        authentication_adapter: FixedAuthenticationAdapter::default(),
+        localization_adapter: FixedLocalizationAdapter::default(),
+    })];
 
     // build connection
     let shutdown = CancellationToken::new();
     let mut server = Connection::new(
         server_stream,
-        adapters,
+        routes.into(),
         Config::default(),
         client_address,
         shutdown,
@@ -215,20 +215,19 @@ async fn simulate_transfer_no_configuration() {
     let mut client_stream = Framed::new(client_stream, PacketCodec::new(1_000));
 
     // build supplier
-    let adapters = Arc::new(Adapters::new(
-        FixedStatusAdapter::default(),
-        FixedDiscoveryAdapter::new(vec![]),
-        Vec::<MetaFilterAdapter>::new(),
-        AnyStrategyAdapter::new(),
-        FixedAuthenticationAdapter::default(),
-        FixedLocalizationAdapter::default(),
-    ));
+    let routes = vec![Arc::new(Route {
+        hostname: Regex::new(".*").expect("valid regex"),
+        status_adapter: FixedStatusAdapter::default(),
+        discovery_adapter: FixedDiscoveryAdapter::new(vec![]),
+        authentication_adapter: FixedAuthenticationAdapter::default(),
+        localization_adapter: FixedLocalizationAdapter::default(),
+    })];
 
     // build connection
     let shutdown = CancellationToken::new();
     let mut server = Connection::new(
         server_stream,
-        adapters,
+        routes.into(),
         Config::default().with_auth_secret(Some(auth_secret.to_string())),
         client_address,
         shutdown,
@@ -386,20 +385,19 @@ async fn simulate_slow_transfer_no_configuration() {
     let mut client_stream = Framed::new(client_stream, PacketCodec::new(1_000));
 
     // build supplier
-    let adapters = Arc::new(Adapters::new(
-        FixedStatusAdapter::default(),
-        SlowDiscoveryAdapter::new(2 * KEEP_ALIVE_INTERVAL + 1),
-        Vec::<MetaFilterAdapter>::new(),
-        AnyStrategyAdapter::new(),
-        FixedAuthenticationAdapter::default(),
-        FixedLocalizationAdapter::default(),
-    ));
+    let routes = vec![Arc::new(Route {
+        hostname: Regex::new(".*").expect("valid regex"),
+        status_adapter: FixedStatusAdapter::default(),
+        discovery_adapter: SlowDiscoveryAdapter::new(2 * KEEP_ALIVE_INTERVAL + 1),
+        authentication_adapter: FixedAuthenticationAdapter::default(),
+        localization_adapter: FixedLocalizationAdapter::default(),
+    })];
 
     // build connection
     let shutdown = CancellationToken::new();
     let mut server = Connection::new(
         server_stream,
-        adapters,
+        routes.into(),
         Config::default().with_auth_secret(Some(auth_secret.to_string())),
         client_address,
         shutdown,
@@ -579,20 +577,19 @@ async fn simulate_login_no_configuration() {
     let mut client_stream = Framed::new(client_stream, PacketCodec::new(1_000));
 
     // build supplier
-    let adapters = Arc::new(Adapters::new(
-        FixedStatusAdapter::default(),
-        FixedDiscoveryAdapter::new(vec![]),
-        Vec::<MetaFilterAdapter>::new(),
-        AnyStrategyAdapter::new(),
-        FixedAuthenticationAdapter::new(Some(profile)),
-        FixedLocalizationAdapter::default(),
-    ));
+    let routes = vec![Arc::new(Route {
+        hostname: Regex::new(".*").expect("valid regex"),
+        status_adapter: FixedStatusAdapter::default(),
+        discovery_adapter: FixedDiscoveryAdapter::new(vec![]),
+        authentication_adapter: FixedAuthenticationAdapter::new(Some(profile)),
+        localization_adapter: FixedLocalizationAdapter::default(),
+    })];
 
     // build connection
     let shutdown = CancellationToken::new();
     let mut server = Connection::new(
         server_stream,
-        adapters,
+        routes.into(),
         Config::default(),
         client_address,
         shutdown,
@@ -721,20 +718,19 @@ async fn sends_keep_alive() {
     let mut client_stream = Framed::new(client_stream, PacketCodec::new(1_000));
 
     // build supplier
-    let adapters = Arc::new(Adapters::new(
-        FixedStatusAdapter::default(),
-        FixedDiscoveryAdapter::new(vec![]),
-        Vec::<MetaFilterAdapter>::new(),
-        AnyStrategyAdapter::new(),
-        FixedAuthenticationAdapter::default(),
-        FixedLocalizationAdapter::default(),
-    ));
+    let routes = vec![Arc::new(Route {
+        hostname: Regex::new(".*").expect("valid regex"),
+        status_adapter: FixedStatusAdapter::default(),
+        discovery_adapter: FixedDiscoveryAdapter::new(vec![]),
+        authentication_adapter: FixedAuthenticationAdapter::default(),
+        localization_adapter: FixedLocalizationAdapter::default(),
+    })];
 
     // build connection
     let shutdown = CancellationToken::new();
     let mut server = Connection::new(
         server_stream,
-        adapters,
+        routes.into(),
         Config::default().with_auth_secret(Some(auth_secret.to_string())),
         client_address,
         shutdown,
@@ -898,20 +894,19 @@ async fn no_respond_keep_alive() {
     let mut client_stream = Framed::new(client_stream, PacketCodec::new(1_000));
 
     // build supplier
-    let adapters = Arc::new(Adapters::new(
-        FixedStatusAdapter::default(),
-        FixedDiscoveryAdapter::new(vec![]),
-        Vec::<MetaFilterAdapter>::new(),
-        AnyStrategyAdapter::new(),
-        FixedAuthenticationAdapter::default(),
-        FixedLocalizationAdapter::default(),
-    ));
+    let routes = vec![Arc::new(Route {
+        hostname: Regex::new(".*").expect("valid regex"),
+        status_adapter: FixedStatusAdapter::default(),
+        discovery_adapter: FixedDiscoveryAdapter::new(vec![]),
+        authentication_adapter: FixedAuthenticationAdapter::default(),
+        localization_adapter: FixedLocalizationAdapter::default(),
+    })];
 
     // build connection
     let shutdown = CancellationToken::new();
     let mut server = Connection::new(
         server_stream,
-        adapters,
+        routes.into(),
         Config::default().with_auth_secret(Some(auth_secret.to_string())),
         client_address,
         shutdown,
