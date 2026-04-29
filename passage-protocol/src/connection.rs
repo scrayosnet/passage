@@ -4,7 +4,7 @@ use crate::cookie::{
     SessionCookie,
 };
 pub(crate) use crate::error::Error;
-use crate::routes::Routes;
+use crate::routes::{Route, Routes};
 use crate::{crypto, metrics};
 use futures::{SinkExt, StreamExt};
 use opentelemetry::trace::TraceContextExt;
@@ -109,11 +109,11 @@ where
     #[instrument(skip_all)]
     async fn get_status(
         &self,
-        adapters: &Arc<Adapters<Stat, Disc, Auth, Loca>>,
+        route: &Route<Stat, Disc, Auth, Loca>,
         client: &Client,
     ) -> Result<ServerStatus, Error> {
         // Build a new status request future.
-        let status_future = async { adapters.status(client).await };
+        let status_future = async { route.status(client).await };
 
         // Wait for the status adapter to complete. Stop if the connection is shutdown. At this point,
         // we cannot send any disconnect packet.
@@ -133,14 +133,14 @@ where
     #[instrument(skip_all)]
     async fn get_profile(
         &mut self,
-        adapters: &Arc<Adapters<Stat, Disc, Auth, Loca>>,
+        route: &Route<Stat, Disc, Auth, Loca>,
         client: &Client,
         player: &Player,
         shared_secret: &[u8],
     ) -> Result<Profile, Error> {
         // Build a new status request future.
         let profile_future = async {
-            adapters
+            route
                 .authenticate(client, player, shared_secret, &crypto::ENCODED_PUB)
                 .await
         };
@@ -157,7 +157,7 @@ where
             Ok(profile) => Ok(profile),
             Err(Rejected { reason, .. }) => {
                 info!("profile not found, disconnecting");
-                let reason = adapters
+                let reason = route
                     .localize(
                         self.client_locale.as_deref(),
                         reason.as_deref().unwrap_or("disconnect_unauthenticated"),
@@ -206,12 +206,12 @@ where
     #[instrument(skip_all)]
     async fn send_keep_alive(
         &mut self,
-        adapters: &Arc<Adapters<Stat, Disc, Auth, Loca>>,
+        route: &Route<Stat, Disc, Auth, Loca>,
     ) -> Result<(), Error> {
         debug!("checking that keep-alive packet was received");
         if self.keep_alive_id.is_some() {
             info!("keep-alive missed, disconnecting");
-            let reason = adapters
+            let reason = route
                 .localize(self.client_locale.as_deref(), "disconnect_timeout", &[])
                 .await?;
             self.send_packet(conf_out::DisconnectPacket { reason })
@@ -274,8 +274,8 @@ where
             .routes
             .iter()
             .find(|route| route.hostname.is_match(&client.server_address))
-            .ok_or_else(|| Error::NoRouteFound)?;
-        let adapters = route.adapters.clone();
+            .ok_or_else(|| Error::NoRouteFound)?
+            .clone();
         debug!(name = route.to_string(), "found matching route");
 
         // When the client asks for the server status, then it sends the status request packet next.
@@ -296,7 +296,7 @@ where
             }?;
 
             debug!("getting status from supplier");
-            let status = self.get_status(&adapters, &client).await?;
+            let status = self.get_status(&route, &client).await?;
 
             debug!("sending status response packet");
             self.send_packet(status_out::StatusResponsePacket::try_from(&status)?)
@@ -483,7 +483,7 @@ where
         if should_authenticate {
             debug!("authenticating user");
             let profile = self
-                .get_profile(&adapters, &client, &player, &shared_secret)
+                .get_profile(&route, &client, &player, &shared_secret)
                 .await?;
 
             // update state for actual use info
@@ -508,7 +508,7 @@ where
         // and lastly, a targets strategy that selects a single target.
 
         // start the target selection task
-        let _adapters = adapters.clone();
+        let _adapters = route.clone();
         let _client = client.clone();
         let _player = player.clone();
         let shutdown = self.shutdown.clone();
@@ -586,7 +586,7 @@ where
 
                 // Send periodic keep alive
                 _ = interval.tick() => {
-                    self.send_keep_alive(&adapters).await?;
+                    self.send_keep_alive(&route).await?;
                     continue;
                 },
 
@@ -609,7 +609,7 @@ where
             Ok(target) => target,
             Err(Rejected { reason, .. }) => {
                 info!("no transfer target found, disconnecting");
-                let reason = adapters
+                let reason = route
                     .localize(
                         self.client_locale.as_deref(),
                         reason.as_deref().unwrap_or("disconnect_no_target"),

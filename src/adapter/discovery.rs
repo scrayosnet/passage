@@ -1,3 +1,4 @@
+use crate::adapter::{opt_to_regex, opt_vec_to_uuid};
 use crate::config;
 use crate::config::DnsDiscoveryRecordType;
 use passage_adapters::discovery_action::meta_filter::{FilterOperation, FilterRule};
@@ -84,7 +85,7 @@ impl DynDiscoveryActionAdapter {
         config: config::DiscoveryAdapter,
     ) -> Result<Vec<Self>, Box<dyn std::error::Error>> {
         let mut adapters = Vec::with_capacity(config.actions.len() + 1);
-        adapters.push(Self::action_from_config(config.adapter)?);
+        adapters.push(Self::action_from_config(config.adapter).await?);
         for action in config.actions {
             adapters.push(Self::action_from_config(action).await?);
         }
@@ -138,24 +139,16 @@ impl DynDiscoveryActionAdapter {
             conf::PlayerAllowFilter(config) => {
                 let adapter = PlayerAllowFilterAdapter::new(
                     config.usernames,
-                    config
-                        .username
-                        .map(|value| regex::Regex::new(&value).unwrap()),
-                    config
-                        .ids
-                        .map(|value| value.into_iter().map(uuid::Uuid::parse_str).collect()),
+                    opt_to_regex(config.username)?,
+                    opt_vec_to_uuid(config.ids)?,
                 );
                 Ok(PlayerAllowFilter(adapter))
             }
             conf::PlayerBlockFilter(config) => {
                 let adapter = PlayerBlockFilterAdapter::new(
                     config.usernames,
-                    config
-                        .username
-                        .map(|value| regex::Regex::new(&value).unwrap()),
-                    config
-                        .ids
-                        .map(|value| value.into_iter().map(uuid::Uuid::parse_str).collect()),
+                    opt_to_regex(config.username)?,
+                    opt_vec_to_uuid(config.ids)?,
                 );
                 Ok(PlayerBlockFilter(adapter))
             }

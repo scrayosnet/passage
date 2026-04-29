@@ -104,8 +104,8 @@ pub struct Config {
     #[serde(alias = "authsecret")]
     pub auth_secret: Option<String>,
 
-    /// The adapter configuration.
-    pub adapters: Routes,
+    /// The routes' configuration.
+    pub routes: Vec<Routes>,
 }
 
 impl Default for Config {
@@ -119,7 +119,7 @@ impl Default for Config {
             rate_limiter: None,
             proxy_protocol: None,
             auth_secret: None,
-            adapters: Routes::default(),
+            routes: Default::default(),
             max_packet_length: DEFAULT_MAX_PACKET_LENGTH as usize,
             auth_cookie_expiry: DEFAULT_AUTH_COOKIE_EXPIRY,
         }
