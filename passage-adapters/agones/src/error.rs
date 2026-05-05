@@ -5,6 +5,9 @@ pub enum GameServerError {
     #[error("server has no identifier")]
     NoName,
 
+    #[error("server has no address")]
+    NoAddress,
+
     #[error("server {identifier} has no status")]
     NotStatus {
         /// The identifier of the server.

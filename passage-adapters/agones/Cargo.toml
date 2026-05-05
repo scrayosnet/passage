@@ -25,6 +25,8 @@ serde_json = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true, features = ["sync", "macros"] }
 tokio-util = { workspace = true, features = ["rt"] }
+tracing-opentelemetry = { workspace = true }
+opentelemetry = { workspace = true }
 
 kube = { workspace = true, default-features = false, features = ["runtime", "derive", "rustls-tls", "aws-lc-rs"] }
 k8s-openapi = { workspace = true, features = ["latest", "default"] }

@@ -1,28 +1,30 @@
-use crate::{GameServer, META_STATE};
-use futures_util::{StreamExt, TryStreamExt};
-use kube::runtime::watcher::Config;
-use kube::runtime::{WatchStreamExt, watcher};
+use crate::template::{Template, TemplateValues};
+use crate::{GameServerAllocation, GameServerAllocationSpec};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::{Api, Client};
+use opentelemetry::trace::TraceContextExt;
 use passage_adapters::discovery::DiscoveryAdapter;
 use passage_adapters::{Error, Target, metrics};
+use serde_json::Value;
 use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::time::Instant;
-use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::warn;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "agones_discovery_adapter";
 
-// re-export watcher for configuration config
-pub mod watcher_config {
-    pub use kube::runtime::watcher::*;
+pub struct AgonesDiscoveryAdapterConfig {
+    pub namespace: Option<String>,
+    pub selectors: Vec<Template>,
+    pub priorities: Vec<Template>,
+    pub scheduling: Option<String>,
+    pub metadata: Option<Template>,
 }
 
 pub struct AgonesDiscoveryAdapter {
-    inner: Arc<RwLock<Vec<Target>>>,
-    token: CancellationToken,
+    config: AgonesDiscoveryAdapterConfig,
+    api: Api<GameServerAllocation>,
 }
 
 impl Debug for AgonesDiscoveryAdapter {
@@ -32,100 +34,113 @@ impl Debug for AgonesDiscoveryAdapter {
 }
 
 impl AgonesDiscoveryAdapter {
-    pub async fn new(namespace: Option<String>, watch_config: Config) -> Result<Self, Error> {
-        let inner: Arc<RwLock<Vec<Target>>> = Arc::new(RwLock::new(Vec::new()));
-        let token = CancellationToken::new();
-
-        // get stream with of game servers
+    pub async fn new(config: AgonesDiscoveryAdapterConfig) -> Result<Self, Error> {
+        // Build the client from the default config.
         let client = Client::try_default()
             .await
             .map_err(|err| Error::FailedInitialization {
                 adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })?;
-        let servers: Api<GameServer> = if let Some(namespace) = namespace {
-            Api::namespaced(client.clone(), &namespace)
+
+        // Build the client with the optional namespace.
+        let api: Api<GameServerAllocation> = if let Some(namespace) = &config.namespace {
+            Api::namespaced(client, namespace)
         } else {
-            Api::all(client.clone())
+            Api::all(client)
         };
 
-        // create the watch stream
-        let mut stream = watcher(servers, watch_config)
-            .default_backoff()
-            .applied_objects()
-            .boxed();
-
-        // start listener
-        let _inner = Arc::clone(&inner);
-        let _token = token.clone();
-        tokio::spawn(async move {
-            info!("starting game server watcher");
-            loop {
-                // get next server update
-                let maybe_server = tokio::select! {
-                    biased;
-                    _ = _token.cancelled() => break,
-                    maybe_server = stream.try_next() => maybe_server,
-                };
-
-                let server = match maybe_server {
-                    Ok(Some(server)) => server,
-                    // TODO is this the right thing to do? Should try to restart or return adapter errors.
-                    Ok(None) => break,
-                    Err(err) => {
-                        warn!(err = ?err, "error while watching game servers");
-                        continue;
-                    }
-                };
-
-                // map to target
-                let target: Target = match server.try_into() {
-                    Ok(target) => target,
-                    Err(err) => {
-                        warn!(err = ?err, "error while converting game server to target");
-                        continue;
-                    }
-                };
-
-                // if ready, replace or push
-                let mut inner = _inner.write().await;
-                let state = target.meta.get(META_STATE).cloned().unwrap_or_default();
-                if state == "Ready" || state == "Allocated" {
-                    info!(uid = target.identifier, "adding game server to cache");
-                    let found = inner.iter_mut().find(|i| i.identifier == target.identifier);
-                    match found {
-                        Some(found) => *found = target,
-                        None => inner.push(target),
-                    }
-                    continue;
-                }
-
-                // remove
-                info!(uid = target.identifier, "removing game server from cache");
-                let found = inner.iter().position(|i| i.identifier == target.identifier);
-                if let Some(found) = found {
-                    inner.swap_remove(found);
-                }
-            }
-        });
-
-        Ok(Self { inner, token })
+        Ok(Self { config, api })
     }
-}
 
-impl Drop for AgonesDiscoveryAdapter {
-    fn drop(&mut self) {
-        self.token.cancel();
+    pub async fn allocate(
+        &self,
+        client: &passage_adapters::Client,
+    ) -> Result<Option<Target>, Error> {
+        // Build the allocation request.
+        let trace_id = tracing::Span::current()
+            .context()
+            .span()
+            .span_context()
+            .trace_id()
+            .to_string();
+        #[rustfmt::skip]
+        let template_values = TemplateValues::from([
+            ("{{ .Client.ProtocolVersion }}".to_string(), Value::String(client.protocol_version.to_string())),
+            ("{{ .Client.ServerAddress }}".to_string(), Value::String(client.server_address.to_string())),
+            ("{{ .Client.ServerPort }}".to_string(), Value::String(client.server_port.to_string())),
+            ("{{ .Client.Address }}".to_string(), Value::String(client.address.to_string())),
+            ("{{ .Request.TraceId }}".to_string(), Value::String(trace_id)),
+        ]);
+        let selectors = self
+            .config
+            .selectors
+            .iter()
+            .map(|selector| selector.template(&template_values))
+            .collect();
+        let priorities = self
+            .config
+            .priorities
+            .iter()
+            .map(|selector| selector.template(&template_values))
+            .collect();
+        let metadata = self
+            .config
+            .metadata
+            .as_ref()
+            .map(|selector| selector.template(&template_values));
+        let allocation = GameServerAllocation {
+            metadata: ObjectMeta::default(),
+            spec: GameServerAllocationSpec {
+                selectors: Some(selectors),
+                priorities: Some(priorities),
+                scheduling: self.config.scheduling.clone(),
+                metadata,
+            },
+            status: None,
+        };
+
+        // Make the allocation request.
+        let result = self
+            .api
+            .create(&kube::api::PostParams::default(), &allocation)
+            .await
+            .map_err(|err| Error::FailedFetch {
+                adapter_type: ADAPTER_TYPE,
+                cause: Box::new(err),
+            })?; // TODO retry with backoff and jitter
+        let Some(status) = &result.status else {
+            warn!("Agones allocation returned no allocation status");
+            return Ok(None);
+        };
+
+        // Convert the allocation (if any) into a target.
+        let target = match status.state.as_deref() {
+            Some("Allocated") => {
+                let target = result.try_into().map_err(|err| Error::FailedParse {
+                    adapter_type: ADAPTER_TYPE,
+                    cause: Box::new(err),
+                })?;
+                Some(target)
+            }
+            Some("UnAllocated") => None, // TODO retry with backoff and jitter
+            state => {
+                warn!(state = ?state, "Agones allocation returned unsupported state");
+                None
+            }
+        };
+        Ok(target)
     }
 }
 
 impl DiscoveryAdapter for AgonesDiscoveryAdapter {
     async fn discover(
         &self,
-        _client: &passage_adapters::Client,
+        client: &passage_adapters::Client,
     ) -> passage_adapters::Result<Vec<Target>> {
         let start = Instant::now();
-        let servers = self.inner.read().await.clone();
+        // TODO handle errors with backoff
+        let servers = self.allocate(client).await?.into_iter().collect();
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
         Ok(servers)
     }
