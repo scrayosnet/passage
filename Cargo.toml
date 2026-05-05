@@ -66,6 +66,8 @@ hickory-resolver = { version = "0.26" }
 bytes = { version = "1.11" }
 byteorder = { version = "1.5" }
 sysinfo = { version = "0.38" }
+testcontainers = { version = "0.27.3" }
+testcontainers-modules = { version = "0.15.0" }
 
 [package]
 name = "passage"

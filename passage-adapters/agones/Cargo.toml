@@ -33,5 +33,9 @@ k8s-openapi = { workspace = true, features = ["latest", "default"] }
 schemars = { workspace = true, features = ["default"] }
 futures-util = { workspace = true, features = ["default"] }
 
+[dev-dependencies]
+testcontainers = { workspace = true }
+testcontainers-modules = { workspace = true, features = ["k3s"] }
+
 [package.metadata.cargo-machete]
 ignored = ["k8s-openapi"]

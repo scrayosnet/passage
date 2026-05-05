@@ -14,6 +14,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "agones_discovery_adapter";
 
+#[derive(Debug, Clone, Default)]
 pub struct AgonesDiscoveryAdapterConfig {
     pub namespace: Option<String>,
     pub selectors: Vec<Template>,
@@ -22,6 +23,7 @@ pub struct AgonesDiscoveryAdapterConfig {
     pub metadata: Option<Template>,
 }
 
+#[derive(Clone)]
 pub struct AgonesDiscoveryAdapter {
     config: AgonesDiscoveryAdapterConfig,
     api: Api<GameServerAllocation>,
@@ -34,15 +36,10 @@ impl Debug for AgonesDiscoveryAdapter {
 }
 
 impl AgonesDiscoveryAdapter {
-    pub async fn new(config: AgonesDiscoveryAdapterConfig) -> Result<Self, Error> {
-        // Build the client from the default config.
-        let client = Client::try_default()
-            .await
-            .map_err(|err| Error::FailedInitialization {
-                adapter_type: ADAPTER_TYPE,
-                cause: err.into(),
-            })?;
-
+    pub async fn new_with_client(
+        client: Client,
+        config: AgonesDiscoveryAdapterConfig,
+    ) -> Result<Self, Error> {
         // Build the client with the optional namespace.
         let api: Api<GameServerAllocation> = if let Some(namespace) = &config.namespace {
             Api::namespaced(client, namespace)
@@ -51,6 +48,17 @@ impl AgonesDiscoveryAdapter {
         };
 
         Ok(Self { config, api })
+    }
+
+    pub async fn new(config: AgonesDiscoveryAdapterConfig) -> Result<Self, Error> {
+        // Build the client from the default config.
+        let client = Client::try_default()
+            .await
+            .map_err(|err| Error::FailedInitialization {
+                adapter_type: ADAPTER_TYPE,
+                cause: err.into(),
+            })?;
+        Self::new_with_client(client, config).await
     }
 
     pub async fn allocate(
