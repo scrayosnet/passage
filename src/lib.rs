@@ -6,21 +6,20 @@ pub mod config;
 pub mod metrics;
 
 use crate::adapter::authentication::DynAuthenticationAdapter;
-use crate::adapter::discovery::DynDiscoveryAdapter;
-use crate::adapter::filter::DynFilterAdapters;
+use crate::adapter::discovery::DynDiscoveryActionAdapter;
 use crate::adapter::localization::DynLocalizationAdapter;
 use crate::adapter::status::DynStatusAdapter;
-use crate::adapter::strategy::DynStrategyAdapter;
 use crate::config::Config;
-use passage_adapters::Adapters;
 use passage_protocol::config::{Config as ListenerConfig, ProxyProtocol};
 use passage_protocol::listener::Listener;
 use passage_protocol::rate_limiter::RateLimiter;
+use passage_protocol::routes::Route;
+use regex::Regex;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
+use tracing::debug;
 
 /// Initializes the Minecraft tcp server and creates all necessary resources for the operation.
 ///
@@ -34,16 +33,19 @@ use tracing::{debug, info};
 /// properly initialized.
 pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // initialize the adapters
-    debug!("building adapters");
-    let adapters = Adapters::new(
-        DynStatusAdapter::from_config(config.adapters.status).await?,
-        DynDiscoveryAdapter::from_config(config.adapters.discovery).await?,
-        DynFilterAdapters::from_config(config.adapters.filter).await?,
-        DynStrategyAdapter::from_config(config.adapters.strategy).await?,
-        DynAuthenticationAdapter::from_config(config.adapters.authentication).await?,
-        DynLocalizationAdapter::from_config(config.adapters.localization).await?,
-    );
-    info!(adapters = %adapters, "build adapters");
+    debug!("building routes");
+    let mut routes = vec![];
+    for route in config.routes {
+        routes.push(Arc::new(Route {
+            hostname: Regex::new(&route.hostname)?,
+            status_adapter: DynStatusAdapter::from_config(route.status).await?,
+            discovery_adapter: DynDiscoveryActionAdapter::from_config(route.discovery).await?,
+            authentication_adapter: DynAuthenticationAdapter::from_config(route.authentication)
+                .await?,
+            localization_adapter: DynLocalizationAdapter::from_config(route.localization).await?,
+        }));
+    }
+    debug!(routes = ?routes, "build routes");
 
     // initialize the rate limiter
     let rate_limiter = config.rate_limiter.map(|config| {
@@ -78,7 +80,7 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         }),
         connection_timeout: config.timeout,
     };
-    let mut listener = Listener::new(Arc::new(adapters), rate_limiter, listener_config);
+    let mut listener = Listener::new(routes.into(), rate_limiter, listener_config);
 
     debug!("starting listener");
     listener.listen(config.address, stop_token.clone()).await?;

@@ -1,8 +1,7 @@
 use crate::proto::status_client::StatusClient;
 use crate::proto::{Address, StatusRequest};
-use passage_adapters::{Error, Protocol, Result, ServerStatus, metrics, status::StatusAdapter};
+use passage_adapters::{Client, Error, Result, ServerStatus, metrics, status::StatusAdapter};
 use std::fmt::{Debug, Formatter};
-use std::net::SocketAddr;
 use tokio::time::Instant;
 use tonic::transport::Channel;
 use tracing::instrument;
@@ -37,22 +36,17 @@ impl GrpcStatusAdapter {
     }
 
     #[instrument(skip_all)]
-    async fn status(
-        &self,
-        client_addr: &SocketAddr,
-        server_addr: (&str, u16),
-        protocol: Protocol,
-    ) -> Result<Option<ServerStatus>> {
+    async fn status(&self, client: &Client) -> Result<Option<ServerStatus>> {
         let request = tonic::Request::new(StatusRequest {
             client_address: Some(Address {
-                hostname: client_addr.ip().to_string(),
-                port: u32::from(client_addr.port()),
+                hostname: client.address.ip().to_string(),
+                port: u32::from(client.address.port()),
             }),
             server_address: Some(Address {
-                hostname: server_addr.0.to_string(),
-                port: u32::from(server_addr.1),
+                hostname: client.server_address.to_string(),
+                port: u32::from(client.server_port),
             }),
-            protocol: protocol as u64,
+            protocol: client.protocol_version as u64,
         });
 
         self.client
@@ -72,14 +66,9 @@ impl GrpcStatusAdapter {
 
 impl StatusAdapter for GrpcStatusAdapter {
     #[instrument(skip_all)]
-    async fn status(
-        &self,
-        client_addr: &SocketAddr,
-        server_addr: (&str, u16),
-        protocol: Protocol,
-    ) -> Result<Option<ServerStatus>> {
+    async fn status(&self, client: &Client) -> Result<Option<ServerStatus>> {
         let start = Instant::now();
-        let status = self.status(client_addr, server_addr, protocol).await;
+        let status = self.status(client).await;
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
         status
     }

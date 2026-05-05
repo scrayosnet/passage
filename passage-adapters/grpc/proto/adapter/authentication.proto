@@ -9,13 +9,10 @@ service Authentication {
 }
 
 message AuthenticationRequest {
-    Address client_address = 1;
-    Address server_address = 2;
-    uint64 protocol = 3;
-    string username = 4;
-    string user_id = 5;
-    bytes shared_secret = 6;
-    bytes encoded_public = 7;
+    ClientInfo client = 1;
+    PlayerInfo player = 2;
+    bytes shared_secret = 3;
+    bytes encoded_public = 4;
 }
 
 message AuthenticationResponse {

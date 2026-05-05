@@ -4,6 +4,10 @@ pub enum Error {
     #[error("The connection was closed (by the client)")]
     ConnectionClosed,
 
+    /// No matching route was found.
+    #[error("No matching route was found")]
+    NoRouteFound,
+
     /// An error occurred during the invocation or communication of an adapter.
     #[error(transparent)]
     Adapter(#[from] passage_adapters::Error),

@@ -6,5 +6,6 @@ pub mod error;
 pub mod listener;
 pub mod metrics;
 pub mod rate_limiter;
+pub mod routes;
 
 pub use error::*;

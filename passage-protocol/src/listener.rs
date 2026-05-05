@@ -1,18 +1,15 @@
 use crate::config::Config;
 use crate::connection::Connection;
 use crate::rate_limiter::RateLimiter;
+use crate::routes::Routes;
 use crate::{Error, metrics};
-use passage_adapters::Adapters;
+use passage_adapters::DiscoveryActionAdapter;
 use passage_adapters::authentication::AuthenticationAdapter;
-use passage_adapters::discovery::DiscoveryAdapter;
-use passage_adapters::filter::FilterAdapter;
 use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::status::StatusAdapter;
-use passage_adapters::strategy::StrategyAdapter;
 pub use proxy_header::ParseConfig;
 use proxy_header::io::ProxiedStream;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
@@ -23,29 +20,27 @@ use tokio_util::task::TaskTracker;
 use tracing::{debug, info, instrument, warn};
 
 // the server listener
-pub struct Listener<Stat, Disc, Filt, Stra, Auth, Loca> {
-    adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
+pub struct Listener<Stat, Disc, Auth, Loca> {
+    routes: Routes<Stat, Disc, Auth, Loca>,
     tracker: TaskTracker,
     rate_limiter: Option<RateLimiter<IpAddr>>,
     config: Config,
 }
 
-impl<Stat, Disc, Filt, Stra, Auth, Loca> Listener<Stat, Disc, Filt, Stra, Auth, Loca>
+impl<Stat, Disc, Auth, Loca> Listener<Stat, Disc, Auth, Loca>
 where
     Stat: StatusAdapter + 'static,
-    Disc: DiscoveryAdapter + 'static,
-    Filt: FilterAdapter + 'static,
-    Stra: StrategyAdapter + 'static,
+    Disc: DiscoveryActionAdapter + 'static,
     Auth: AuthenticationAdapter + 'static,
     Loca: LocalizationAdapter + 'static,
 {
     pub fn new(
-        adapters: Arc<Adapters<Stat, Disc, Filt, Stra, Auth, Loca>>,
+        routes: Routes<Stat, Disc, Auth, Loca>,
         rate_limiter: Option<RateLimiter<IpAddr>>,
         config: Config,
     ) -> Self {
         Self {
-            adapters,
+            routes,
             tracker: TaskTracker::new(),
             rate_limiter,
             config,
@@ -130,7 +125,7 @@ where
             return;
         }
 
-        let adapters = self.adapters.clone();
+        let routes = self.routes.clone();
         let connection_config = self.config.clone();
         let shutdown = stop.child_token();
         metrics::requests::accept();
@@ -157,7 +152,7 @@ where
             // Create the connection and wait for its completion.
             let mut connection = Connection::new(
                 &mut stream,
-                adapters,
+                routes,
                 connection_config,
                 client_addr,
                 shutdown,

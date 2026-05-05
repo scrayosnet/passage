@@ -10,6 +10,7 @@ pub enum Error {
     FailedInitialization {
         /// The type of adapter that failed.
         adapter_type: &'static str,
+
         /// The cause of the error.
         #[source]
         cause: Box<dyn std::error::Error + Send + Sync>,
@@ -20,6 +21,7 @@ pub enum Error {
     FailedFetch {
         /// The type of adapter that failed.
         adapter_type: &'static str,
+
         /// The cause of the error.
         #[source]
         cause: Box<dyn std::error::Error + Send + Sync>,
@@ -30,19 +32,35 @@ pub enum Error {
     FailedParse {
         /// The type of adapter that failed.
         adapter_type: &'static str,
+
         /// The cause of the error.
         #[source]
         cause: Box<dyn std::error::Error + Send + Sync>,
     },
 
-    /// The adapter is currently unavailable.
-    #[error("adapter is currently unavailable")]
-    AdapterUnavailable {
+    /// The adapter rejected the request because for some reason.
+    #[error("request rejected {adapter_type}: {reason:?}")]
+    Rejected {
         /// The type of adapter that failed.
         adapter_type: &'static str,
-        /// The cause of the error.
-        reason: &'static str,
+
+        /// The reason for the rejection. This is a localizable message key.
+        reason: Option<String>,
     },
+}
+
+pub fn reject(adapter_type: &'static str) -> Error {
+    Error::Rejected {
+        adapter_type,
+        reason: None,
+    }
+}
+
+pub fn reject_reason(adapter_type: &'static str, reason: impl Into<String>) -> Error {
+    Error::Rejected {
+        adapter_type,
+        reason: Some(reason.into()),
+    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

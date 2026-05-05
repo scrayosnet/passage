@@ -6,6 +6,7 @@ message Target {
     string identifier = 1;
     Address address = 2;
     repeated MetaEntry meta = 3;
+    uint32 priority = 4;
 }
 
 message Address {
@@ -29,4 +30,15 @@ message ProfileProperty {
     string name = 1;
     string value = 2;
     optional string signature = 3;
+}
+
+message ClientInfo {
+    Address client_address = 1;
+    Address server_address = 2;
+    uint64 protocol_version = 3;
+}
+
+message PlayerInfo {
+    string name = 1;
+    string id = 2;
 }

@@ -74,12 +74,15 @@ pub struct Config {
     pub timeout: u64,
 
     /// The max packet size in bytes accepted by the server.
+    #[serde(alias = "maxpacketlength")]
     pub max_packet_length: usize,
 
     /// The number of seconds until an auth cookie expires.
+    #[serde(alias = "authcookieexpiry")]
     pub auth_cookie_expiry: u64,
 
     /// The interval in seconds at which the system observer should be run.
+    #[serde(alias = "systemobserverinterval")]
     pub system_observer_interval: Option<u64>,
 
     /// The sentry configuration (disabled if empty).
@@ -101,8 +104,8 @@ pub struct Config {
     #[serde(alias = "authsecret")]
     pub auth_secret: Option<String>,
 
-    /// The adapter configuration.
-    pub adapters: Adapters,
+    /// The routes' configuration.
+    pub routes: Vec<Routes>,
 }
 
 impl Default for Config {
@@ -116,7 +119,7 @@ impl Default for Config {
             rate_limiter: None,
             proxy_protocol: None,
             auth_secret: None,
-            adapters: Adapters::default(),
+            routes: Default::default(),
             max_packet_length: DEFAULT_MAX_PACKET_LENGTH as usize,
             auth_cookie_expiry: DEFAULT_AUTH_COOKIE_EXPIRY,
         }
@@ -207,32 +210,30 @@ impl Default for ProxyProtocol {
     }
 }
 
-/// [`Adapters`] holds the adapter configurations.
+/// [`Routes`] holds the adapter configurations.
 #[derive(Default, Debug, Clone, Deserialize)]
 #[serde(default)]
-pub struct Adapters {
+pub struct Routes {
+    /// The hostname the route should serve. Has to be a valid regex.
+    #[serde(alias = "servername")]
+    pub hostname: String,
+
     /// The status (ping) adapter configuration.
     pub status: StatusAdapter,
-
-    /// The discovery adapter configuration.
-    pub discovery: DiscoveryAdapter,
-
-    /// The (option) filter adapter configuration.
-    pub filter: Vec<OptionFilterAdapter>,
-
-    /// The strategy adapter configuration.
-    pub strategy: StrategyAdapter,
 
     /// The authentication adapter configuration.
     pub authentication: AuthenticationAdapter,
 
     /// The localization adapter configuration.
     pub localization: LocalizationAdapter,
+
+    /// The discovery adapter configuration.
+    pub discovery: DiscoveryAdapter,
 }
 
 /// [`StatusAdapter`] hold the status adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum StatusAdapter {
     Fixed(FixedStatus),
     Grpc(GrpcStatus),
@@ -319,19 +320,43 @@ impl Default for HttpStatus {
     }
 }
 
-/// [`DiscoveryAdapter`] hold the discovery adapter configuration.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DiscoveryAdapter {
-    Fixed(FixedDiscovery),
-    Agones(AgonesDiscovery),
-    Grpc(GrpcDiscovery),
-    Dns(DnsDiscovery),
+/// [`DiscoveryAdapter`] hold the discovery (adapter) configuration.
+#[derive(Default, Debug, Clone, Deserialize)]
+pub struct DiscoveryAdapter {
+    /// The discovery adapter configuration to get the initial targets.
+    #[serde(flatten)]
+    pub adapter: DiscoveryActionAdapter,
+
+    /// Any action to be applied to the discovered targets.
+    pub actions: Vec<DiscoveryActionAdapter>,
 }
 
-impl Default for DiscoveryAdapter {
+/// [`DiscoveryActionAdapter`] hold the discovery action adapter configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DiscoveryActionAdapter {
+    #[serde(alias = "fixeddiscovery")]
+    FixedDiscovery(FixedDiscovery),
+    #[serde(alias = "agonesdiscovery")]
+    AgonesDiscovery(AgonesDiscovery),
+    #[serde(alias = "grpcdiscovery")]
+    GrpcDiscovery(GrpcDiscovery),
+    #[serde(alias = "dnsdiscovery")]
+    DnsDiscovery(DnsDiscovery),
+    Grpc(GrpcDiscoveryAction),
+    #[serde(alias = "filter")]
+    MetaFilter(MetaFilter),
+    #[serde(alias = "playerallowfilter")]
+    PlayerAllowFilter(PlayerAllowFilter),
+    #[serde(alias = "playerblockfilter")]
+    PlayerBlockFilter(PlayerBlockFilter),
+    #[serde(alias = "playerfillfilter")]
+    PlayerFillStrategy(PlayerFillStrategy),
+}
+
+impl Default for DiscoveryActionAdapter {
     fn default() -> Self {
-        Self::Fixed(FixedDiscovery::default())
+        Self::FixedDiscovery(FixedDiscovery::default())
     }
 }
 
@@ -350,10 +375,12 @@ pub struct AgonesDiscovery {
     /// The namespace to apply to the watcher.
     pub namespace: Option<String>,
 
-    /// The label selector to apply to the watcher.
+    /// The label discovery_action to apply to the watcher.
+    #[serde(alias = "labelselector")]
     pub label_selector: Option<String>,
 
-    /// The field selector to apply to the watcher.
+    /// The field discovery_action to apply to the watcher.
+    #[serde(alias = "fieldselector")]
     pub field_selector: Option<String>,
 }
 
@@ -374,7 +401,7 @@ pub struct ARecordType {
 
 /// [`DnsDiscoveryRecordType`] hold the DNS discovery adapter record configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum DnsDiscoveryRecordType {
     Srv,
     A(ARecordType),
@@ -403,36 +430,6 @@ impl Default for DnsDiscovery {
             refresh_interval: 30,
             record_type: DnsDiscoveryRecordType::Srv,
         }
-    }
-}
-
-/// [`OptionFilterAdapter`] holds a filter adapter configuration that may be applied conditionally.
-#[derive(Debug, Clone, Deserialize)]
-pub struct OptionFilterAdapter {
-    /// The hostname to apply the filter on. If empty, the filter will be applied to all targets.
-    #[serde(default)]
-    pub hostname: Option<String>,
-
-    /// The actual filter to apply if the above conditions are met.
-    #[serde(flatten)]
-    pub filter: FilterAdapter,
-}
-
-/// [`FilterAdapter`] hold the filter adapter configuration.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FilterAdapter {
-    #[serde(alias = "fixed")]
-    Meta(MetaFilter),
-    #[serde(alias = "playerallow")]
-    PlayerAllow(PlayerAllowFilter),
-    #[serde(alias = "playerblock")]
-    PlayerBlock(PlayerBlockFilter),
-}
-
-impl Default for FilterAdapter {
-    fn default() -> Self {
-        Self::Meta(MetaFilter::default())
     }
 }
 
@@ -504,23 +501,6 @@ pub struct PlayerBlockFilter {
     pub ids: Option<Vec<String>>,
 }
 
-/// [`StrategyAdapter`] hold the strategy adapter configuration.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StrategyAdapter {
-    #[serde(alias = "fixed")]
-    Any,
-    #[serde(alias = "playerfill")]
-    PlayerFill(PlayerFillStrategy),
-    Grpc(GrpcStrategy),
-}
-
-impl Default for StrategyAdapter {
-    fn default() -> Self {
-        Self::Any
-    }
-}
-
 /// [`PlayerFillStrategy`] hold the player fill strategy configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -529,20 +509,21 @@ pub struct PlayerFillStrategy {
     pub field: String,
 
     /// The number of players that will be filled at maximum.
+    #[serde(alias = "maxplayers")]
     pub max_players: u32,
 }
 
-/// [`GrpcStrategy`] hold the gRPC strategy configuration.
+/// [`GrpcDiscoveryAction`] hold the gRPC discovery action configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
 #[serde(default)]
-pub struct GrpcStrategy {
+pub struct GrpcDiscoveryAction {
     /// The address of the gRPC adapter server.
     pub address: String,
 }
 
 /// [`AuthenticationAdapter`] hold the authentication adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum AuthenticationAdapter {
     Disabled,
     Fixed(FixedAuthentication),
@@ -583,7 +564,7 @@ pub struct MojangAuthentication {
 
 /// [`LocalizationAdapter`] hold the localization adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum LocalizationAdapter {
     Fixed(FixedLocalization),
     Grpc(GrpcLocalization),
@@ -607,6 +588,7 @@ pub struct FixedLocalization {
     pub messages: HashMap<String, HashMap<String, String>>,
 
     /// Whether to warn about unknown keys.
+    #[serde(alias = "warnunknownkeys")]
     pub warn_unknown_keys: bool,
 }
 

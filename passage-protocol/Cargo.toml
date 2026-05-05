@@ -36,6 +36,7 @@ sha2 = { workspace = true }
 hmac = { workspace = true }
 cfb8 = { workspace = true }
 futures = { workspace = true }
+regex = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
