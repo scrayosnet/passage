@@ -1,5 +1,6 @@
 use common::K3sContainer;
 use passage_adapters::Client;
+use passage_adapters_agones::template::Template;
 use passage_adapters_agones::{AgonesDiscoveryAdapter, AgonesDiscoveryAdapterConfig};
 use std::net::SocketAddr;
 
@@ -12,7 +13,10 @@ pub async fn test() {
 
     // Create the adapter instance.
     let config = AgonesDiscoveryAdapterConfig {
-        // TODO add config
+        namespace: Some("default".to_string()),
+        selectors: vec![Template::new(serde_json::json!({
+            "matchLabels": { "agones.dev/fleet": "green-fleet" }
+        }))],
         ..Default::default()
     };
     let adapter = AgonesDiscoveryAdapter::new_with_client(k3s.client, config)
