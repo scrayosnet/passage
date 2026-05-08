@@ -68,6 +68,8 @@ byteorder = { version = "1.5" }
 sysinfo = { version = "0.38" }
 testcontainers = { version = "0.27.3" }
 testcontainers-modules = { version = "0.15.0" }
+serde_yml = { version = "0.0.12" }
+envtest = { version = "0.2.0" }
 
 [package]
 name = "passage"
