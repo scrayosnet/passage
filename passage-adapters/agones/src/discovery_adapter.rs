@@ -4,7 +4,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::{Api, Client};
 use opentelemetry::trace::TraceContextExt;
 use passage_adapters::discovery::DiscoveryAdapter;
-use passage_adapters::{metrics, Error, Target};
+use passage_adapters::{Error, Target, metrics};
 use serde_json::Value;
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
@@ -107,9 +107,6 @@ impl AgonesDiscoveryAdapter {
             },
             status: None,
         };
-
-        let str = serde_json::to_string(&allocation).expect("Failed to serialize");
-        println!("allocation: {str}");
 
         // Make the allocation request.
         let result = self

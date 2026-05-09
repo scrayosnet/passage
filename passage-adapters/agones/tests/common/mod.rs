@@ -1,13 +1,13 @@
-use futures_util::StreamExt;
-use k8s_openapi::api::core::v1::Namespace;
-use kube::api::PostParams;
+pub mod k3s;
+
+use crate::common::k3s::{K3s, KUBE_SECURE_PORT};
 use kube::config::Kubeconfig;
-use kube::{Api, Client, Config};
+use kube::{Client, Config};
 use std::env::temp_dir;
-use testcontainers::core::ExecCommand;
+use std::error::Error;
+use testcontainers::core::{ExecCommand, ExecResult};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, ImageExt};
-use testcontainers_modules::k3s::{K3s, KUBE_SECURE_PORT};
 
 // TODO download file at compile time or add to sources
 const AGONES_INSTALL_URL: &str = "https://raw.githubusercontent.com/googleforgames/agones/release-1.57.0/install/yaml/install.yaml";
@@ -41,112 +41,134 @@ impl K3sContainer {
             .image()
             .read_kube_config()
             .expect("Failed to read kubeconfig file.")
-            .replace(&format!(":{}", KUBE_SECURE_PORT.as_u16()), &format!(":{kube_port}"));
-        let kube_conf = Kubeconfig::from_yaml(&kube_conf_str)
-            .expect("Failed to parse kube config");
+            .replace(
+                &format!(":{}", KUBE_SECURE_PORT.as_u16()),
+                &format!(":{kube_port}"),
+            );
+        let kube_conf = Kubeconfig::from_yaml(&kube_conf_str).expect("Failed to parse kube config");
         let config = Config::from_custom_kubeconfig(kube_conf, &Default::default())
             .await
             .expect("Failed to create Kubernetes client.");
 
         // Install all required CRDs.
         let client = Client::try_from(config.clone()).expect("Failed to create Kubernetes client.");
-        instance
-            .exec(ExecCommand::new(["kubectl", "create", "namespace", "agones-system"]))
-            .await
-            .expect("Failed to install Agones CRDs");
-        instance
-            .exec(ExecCommand::new([
-                "kubectl", "wait", "--for=jsonpath={.status.phase}=Active",
-                "--timeout=120s", "namespace/agones-system"
-            ]))
-            .await
-            .expect("Failed to wait for gameserver to be ready");
-        println!("Agones namespace created.");
 
         instance
-            .exec(ExecCommand::new(["kubectl", "apply", "--server-side", "-f", AGONES_INSTALL_URL]))
+            .exec(ExecCommand::new([
+                "kubectl",
+                "create",
+                "namespace",
+                "agones-system",
+            ]))
+            .await
+            .expect("Failed to create Agones namespace")
+            .until_exit_code()
+            .await
+            .expect("Failed to create Agones namespace");
+
+        instance
+            .exec(ExecCommand::new([
+                "kubectl",
+                "apply",
+                "--server-side",
+                "-f",
+                AGONES_INSTALL_URL,
+            ]))
+            .await
+            .expect("Failed to install Agones CRDs")
+            .until_exit_code()
             .await
             .expect("Failed to install Agones CRDs");
+
+        // TODO maybe remove?
         instance
             .exec(ExecCommand::new([
-                "kubectl", "wait", "--for=condition=available",
-                "--timeout=120s", "deployment/agones-controller",
-                "-n", "agones-system",
+                "kubectl",
+                "wait",
+                "--for=condition=established",
+                "--timeout=120s",
+                "crd/gameservers.agones.dev",
             ]))
             .await
+            .expect("Failed to wait for gameserver to be ready")
+            .until_exit_code()
+            .await
             .expect("Failed to wait for gameserver to be ready");
+
         instance
             .exec(ExecCommand::new([
-                "kubectl", "wait", "--for=condition=established",
-                "--timeout=120s", "crd/gameservers.agones.dev"
+                "kubectl",
+                "wait",
+                "--for=condition=Available",
+                "--timeout=120s",
+                "deployment",
+                "agones-controller",
+                "-n",
+                "agones-system",
             ]))
             .await
-            .expect("Failed to wait for gameserver to be ready");
-        instance
-            .exec(ExecCommand::new([
-                "kubectl", "wait", "--for=condition=established",
-                "--timeout=120s", "crd/fleets.agones.dev"
-            ]))
+            .expect("Failed to wait for endpoints to be ready")
+            .until_exit_code()
             .await
-            .expect("Failed to wait for gameserver to be ready");
-        instance
-            .exec(ExecCommand::new([
-                "kubectl", "wait", "--for=condition=established",
-                "--timeout=120s", "crd/gameserversets.agones.dev"
-            ]))
-            .await
-            .expect("Failed to wait for gameserver to be ready");
-        instance
-            .exec(ExecCommand::new([
-                "kubectl", "wait", "--for=jsonpath='{.subsets[*].addresses[0].ip}'",
-                "endpoints/agones-controller-service",
-                "-n", "agones-system",
-            ]))
-            .await
-            .expect("Failed to wait for gameserver to be ready");
+            .expect("Failed to wait for endpoints to be ready");
 
         // Create a gameserver to test with.
-        let status = instance
-            .exec(ExecCommand::new(["kubectl", "create", "-f", AGONES_EXAMPLE_GAMESERVER]))
-            .await
-            .expect("Failed to create Agones gameserver")
-            .exit_code()
-            .await
-            .expect("Failed to create Agones gameserver");
-        println!("status {:?}", status);
+        static TRIES: usize = 10;
+        for i in 0..TRIES {
+            let ready = instance
+                .exec(ExecCommand::new([
+                    "kubectl",
+                    "create",
+                    "-f",
+                    AGONES_EXAMPLE_GAMESERVER,
+                ]))
+                .await
+                .expect("Failed to create Agones gameserver")
+                .until_exit_code()
+                .await;
+            match ready {
+                Ok(_) => break,
+                Err(err) => {
+                    if i == TRIES - 1 {
+                        panic!("Failed to create Agones gameserver: {}", err);
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
+            }
+        }
+
         instance
             .exec(ExecCommand::new([
-                "kubectl", "wait", "--for=jsonpath={.status.state}=Ready",
-                "--timeout=120s", "gameserver", "--all"
+                "kubectl",
+                "wait",
+                "--for=jsonpath={.status.state}=Ready",
+                "--timeout=120s",
+                "gameserver",
+                "--all",
             ]))
             .await
+            .expect("Failed to wait for gameserver to be ready")
+            .until_exit_code()
+            .await
             .expect("Failed to wait for gameserver to be ready");
-
-        println!("Agones example gameserver created.");
-
-        tokio::time::sleep(std::time::Duration::from_hours(10)).await;
 
         K3sContainer { instance, client }
     }
 }
 
-async fn create_namespace(client: Client, name: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let api: Api<Namespace> = Api::all(client.clone());
-    let namespace = Namespace {
-        metadata: kube::api::ObjectMeta {
-            name: Some(name.to_string()),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    match api.create(&PostParams::default(), &namespace).await {
-        Ok(_) => {
-            println!("Namespace '{}' creation initiated.", name);
-            Ok(())
-        },
-        Err(kube::Error::Api(e)) if e.code == 409 => {
-            println!("Namespace '{}' already exists, proceeding to wait for readiness.", name);
+pub trait ExecExt {
+    fn until_exit_code(&mut self) -> impl Future<Output = Result<i64, Box<dyn std::error::Error>>>;
+}
+
+impl ExecExt for ExecResult {
+    async fn until_exit_code(&mut self) -> Result<i64, Box<dyn Error>> {
+        let stderr = self.stderr_to_vec().await?;
+        if !stderr.is_empty() {
+            return Err(String::from_utf8_lossy(&stderr).into());
         }
-        Err(e) => Err(e.into()),
+        Ok(self
+            .exit_code()
+            .await?
+            .expect("Command completed without exit code."))
     }
 }

@@ -1,0 +1,23 @@
+apiVersion: agones.dev/v1
+kind: GameServer
+metadata:
+  generateName: simple-game-server-
+  labels:
+    game: simple-game
+spec:
+  ports:
+  - name: default
+    portPolicy: Dynamic
+    containerPort: 7654
+  template:
+    spec:
+      containers:
+      - name: simple-game-server
+        image: us-docker.pkg.dev/agones-images/examples/simple-game-server:0.41
+        resources:
+          requests:
+            memory: 64Mi
+            cpu: 20m
+          limits:
+            memory: 64Mi
+            cpu: 20m

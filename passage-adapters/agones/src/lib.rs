@@ -81,6 +81,7 @@ pub struct GameServerAllocationStatus {
     pub game_server_name: Option<String>,
 
     /// Ports is a list of the ports that the game server makes available.
+    #[serde(default)]
     pub ports: Vec<GameServerPort>,
 
     /// Address is the primary network address where the game server can be reached.

@@ -15,7 +15,7 @@ pub async fn test() {
     let config = AgonesDiscoveryAdapterConfig {
         namespace: Some("default".to_string()),
         selectors: vec![Template::new(serde_json::json!({
-            "matchLabels": { "agones.dev/fleet": "green-fleet" }
+            //"matchLabels": { "game": "simple-game" }
         }))],
         ..Default::default()
     };
