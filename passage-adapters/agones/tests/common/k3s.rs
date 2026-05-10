@@ -1,3 +1,6 @@
+//! Module for K3s containers. This file is copied from testcontainers-modules such that we are able
+//! to set a more up-to-date version.
+
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -5,13 +8,13 @@ use std::{
     io::ErrorKind,
     path::{Path, PathBuf},
 };
-
 use testcontainers::{
     Image,
     core::{ContainerPort, Mount, WaitFor},
 };
 
 const NAME: &str = "rancher/k3s";
+
 const TAG: &str = "v1.35.4-k3s1";
 
 /// Port that the [`traefik`] part of the container has internally
@@ -19,11 +22,13 @@ const TAG: &str = "v1.35.4-k3s1";
 ///
 /// [`traefik`]: https://doc.traefik.io/traefik/
 pub const TRAEFIK_HTTP: ContainerPort = ContainerPort::Tcp(80);
+
 /// Port that the [`Kubernetes`] part of the container has internally
 /// Can be rebound externally via [`testcontainers::core::ImageExt::with_mapped_port`]
 ///
 /// [`Kubernetes`]: https://kubernetes.io/
 pub const KUBE_SECURE_PORT: ContainerPort = ContainerPort::Tcp(6443);
+
 /// Port that the [`Rancher`] part of the container has internally
 /// Can be rebound externally via [`testcontainers::core::ImageExt::with_mapped_port`]
 ///
