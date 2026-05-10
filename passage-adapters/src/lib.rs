@@ -54,6 +54,17 @@ pub struct Client {
     pub address: SocketAddr,
 }
 
+impl Default for Client {
+    fn default() -> Self {
+        Self {
+            protocol_version: 775,
+            server_address: "mc.justchunks.net".to_owned(),
+            server_port: 25565,
+            address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
+        }
+    }
+}
+
 /// Contains the player information.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Player {

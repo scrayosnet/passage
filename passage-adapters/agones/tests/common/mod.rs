@@ -7,15 +7,27 @@ use std::env::temp_dir;
 use testcontainers::core::{AccessMode, CmdWaitFor, ExecCommand, Mount};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, ImageExt};
+use tokio::sync::OnceCell;
 
 const CRD_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/crds");
 
+static AGONES: OnceCell<AgonesContainer> = OnceCell::const_new();
+
+pub async fn agones() -> &'static AgonesContainer {
+    AGONES
+        .get_or_init(|| async { AgonesContainer::start().await })
+        .await
+}
+
 pub struct AgonesContainer {
+    #[allow(dead_code)]
     instance: ContainerAsync<K3s>,
     client: Client,
 }
 
 impl AgonesContainer {
+    /// Starts a new kubernetes cluster in a docker container and installs Agones into it. This may
+    /// take up to two minutes.
     pub async fn start() -> Self {
         // Create the K3s container with the crds mounted. The instance also requires a temp directory
         // to place the kube config into such that it can be used to create a client.
