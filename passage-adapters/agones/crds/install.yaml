@@ -14,8 +14,8 @@ kind: PodDisruptionBudget
 metadata:
   name: agones-controller-pdb
 spec:
-  minAvailable: 1
-  maxUnavailable: 1
+  minAvailable:
+  maxUnavailable:
   selector:
     matchLabels:
       agones.dev/role: controller
@@ -29,8 +29,8 @@ kind: PodDisruptionBudget
 metadata:
   name: agones-extensions-pdb
 spec:
-  minAvailable: 1
-  maxUnavailable: 1
+  minAvailable:
+  maxUnavailable:
   selector:
     matchLabels:
       agones.dev/role: extensions

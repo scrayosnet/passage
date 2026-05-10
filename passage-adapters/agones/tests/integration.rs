@@ -1,4 +1,4 @@
-use common::K3sContainer;
+use common::AgonesContainer;
 use passage_adapters::Client;
 use passage_adapters_agones::template::Template;
 use passage_adapters_agones::{AgonesDiscoveryAdapter, AgonesDiscoveryAdapterConfig};
@@ -9,7 +9,8 @@ pub mod common;
 #[tokio::test]
 pub async fn test() {
     // Create the kubernetes testcontainer with a client.
-    let k3s = K3sContainer::start().await;
+    let kube_container = AgonesContainer::start().await;
+    let kube_client = kube_container.client().clone();
 
     // Create the adapter instance.
     let config = AgonesDiscoveryAdapterConfig {
@@ -19,7 +20,7 @@ pub async fn test() {
         }))],
         ..Default::default()
     };
-    let adapter = AgonesDiscoveryAdapter::new_with_client(k3s.client, config)
+    let adapter = AgonesDiscoveryAdapter::new_with_client(kube_client, config)
         .await
         .expect("Failed to create adapter");
 
@@ -34,5 +35,9 @@ pub async fn test() {
         .allocate(&client)
         .await
         .expect("Failed to allocate server");
+
+    // TODO check that the server is allocated
+
+    drop(kube_container);
     assert!(target.is_some())
 }

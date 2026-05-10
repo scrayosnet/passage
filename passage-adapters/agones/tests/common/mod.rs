@@ -4,35 +4,34 @@ use crate::common::k3s::{K3s, KUBE_SECURE_PORT};
 use kube::config::Kubeconfig;
 use kube::{Client, Config};
 use std::env::temp_dir;
-use std::error::Error;
-use testcontainers::core::{ExecCommand, ExecResult};
+use testcontainers::core::{AccessMode, CmdWaitFor, ExecCommand, Mount};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, ImageExt};
 
-// TODO download file at compile time or add to sources
-const AGONES_INSTALL_URL: &str = "https://raw.githubusercontent.com/googleforgames/agones/release-1.57.0/install/yaml/install.yaml";
+const CRD_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/crds");
 
-const INSTALL_YAML: &str = include_str!("install.yaml");
-
-const AGONES_EXAMPLE_GAMESERVER: &str = "https://raw.githubusercontent.com/googleforgames/agones/release-1.57.0/examples/simple-game-server/gameserver.yaml";
-
-pub struct K3sContainer {
-    pub instance: ContainerAsync<K3s>,
-    pub client: Client,
+pub struct AgonesContainer {
+    instance: ContainerAsync<K3s>,
+    client: Client,
 }
 
-impl K3sContainer {
+impl AgonesContainer {
     pub async fn start() -> Self {
-        // Create the K3s container.
+        // Create the K3s container with the crds mounted. The instance also requires a temp directory
+        // to place the kube config into such that it can be used to create a client.
+        let crd_mount =
+            Mount::bind_mount(CRD_PATH, "/etc/crds").with_access_mode(AccessMode::ReadOnly);
         let instance = K3s::default()
             .with_conf_mount(temp_dir())
+            .with_mount(crd_mount)
             .with_privileged(true)
             .with_userns_mode("host")
             .start()
             .await
             .expect("Failed to start K3s container.");
 
-        // Get the container configuration.
+        // Get the container configuration and build a kube client. This client is then used to interact
+        // with the kubernetes cluster.
         let kube_port = instance
             .get_host_port_ipv4(KUBE_SECURE_PORT)
             .await
@@ -49,96 +48,59 @@ impl K3sContainer {
         let config = Config::from_custom_kubeconfig(kube_conf, &Default::default())
             .await
             .expect("Failed to create Kubernetes client.");
-
-        // Install all required CRDs.
         let client = Client::try_from(config.clone()).expect("Failed to create Kubernetes client.");
 
+        // Next, use the container kubectl binary to install the Agones CRDs. Following the agones
+        // install documentation, we first create the agones namespace. This operation is immediately
+        // applied.
         instance
-            .exec(ExecCommand::new([
-                "kubectl",
-                "create",
-                "namespace",
-                "agones-system",
-            ]))
-            .await
-            .expect("Failed to create Agones namespace")
-            .until_exit_code()
+            .exec(cmd(["kubectl", "create", "namespace", "agones-system"]))
             .await
             .expect("Failed to create Agones namespace");
 
+        // Next, we apply the agones install CRD. The file is mounted into the container such that
+        // we do not have to download it every time. We then wait for the CRDs to be installed.
+        // By checking the status of the webhook, we can determine when the CRDs are ready. This
+        // webhook is required for installing the gameserver.
         instance
-            .exec(ExecCommand::new([
+            .exec(cmd([
                 "kubectl",
                 "apply",
                 "--server-side",
                 "-f",
-                AGONES_INSTALL_URL,
+                "/etc/crds/install.yaml",
             ]))
-            .await
-            .expect("Failed to install Agones CRDs")
-            .until_exit_code()
             .await
             .expect("Failed to install Agones CRDs");
 
-        // TODO maybe remove?
         instance
-            .exec(ExecCommand::new([
+            .exec(cmd([
                 "kubectl",
                 "wait",
-                "--for=condition=established",
-                "--timeout=120s",
-                "crd/gameservers.agones.dev",
-            ]))
-            .await
-            .expect("Failed to wait for gameserver to be ready")
-            .until_exit_code()
-            .await
-            .expect("Failed to wait for gameserver to be ready");
-
-        instance
-            .exec(ExecCommand::new([
-                "kubectl",
-                "wait",
-                "--for=condition=Available",
-                "--timeout=120s",
-                "deployment",
-                "agones-controller",
+                "endpoints",
+                "agones-controller-service",
                 "-n",
                 "agones-system",
+                "--for=jsonpath={.subsets[*].addresses[0].ip}",
+                "--timeout=120s",
             ]))
             .await
-            .expect("Failed to wait for endpoints to be ready")
-            .until_exit_code()
-            .await
-            .expect("Failed to wait for endpoints to be ready");
+            .expect("Failed to wait for webhook service endpoints");
 
-        // Create a gameserver to test with.
-        static TRIES: usize = 10;
-        for i in 0..TRIES {
-            let ready = instance
-                .exec(ExecCommand::new([
-                    "kubectl",
-                    "create",
-                    "-f",
-                    AGONES_EXAMPLE_GAMESERVER,
-                ]))
-                .await
-                .expect("Failed to create Agones gameserver")
-                .until_exit_code()
-                .await;
-            match ready {
-                Ok(_) => break,
-                Err(err) => {
-                    if i == TRIES - 1 {
-                        panic!("Failed to create Agones gameserver: {}", err);
-                    }
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                }
-            }
-        }
+        // Next, we create the gameserver from the mounted configuration file and wait for it to
+        // complete.
+        instance
+            .exec(cmd([
+                "kubectl",
+                "create",
+                "-f",
+                "/etc/crds/gameserver.yaml",
+            ]))
+            .await
+            .expect("Failed to create Agones gameserver");
 
         instance
-            .exec(ExecCommand::new([
+            .exec(cmd([
                 "kubectl",
                 "wait",
                 "--for=jsonpath={.status.state}=Ready",
@@ -147,28 +109,17 @@ impl K3sContainer {
                 "--all",
             ]))
             .await
-            .expect("Failed to wait for gameserver to be ready")
-            .until_exit_code()
-            .await
             .expect("Failed to wait for gameserver to be ready");
 
-        K3sContainer { instance, client }
+        AgonesContainer { instance, client }
+    }
+
+    pub fn client(&self) -> &Client {
+        &self.client
     }
 }
 
-pub trait ExecExt {
-    fn until_exit_code(&mut self) -> impl Future<Output = Result<i64, Box<dyn std::error::Error>>>;
-}
-
-impl ExecExt for ExecResult {
-    async fn until_exit_code(&mut self) -> Result<i64, Box<dyn Error>> {
-        let stderr = self.stderr_to_vec().await?;
-        if !stderr.is_empty() {
-            return Err(String::from_utf8_lossy(&stderr).into());
-        }
-        Ok(self
-            .exit_code()
-            .await?
-            .expect("Command completed without exit code."))
-    }
+/// Creates a new [`ExecCommand`] that waits until it completes successfully (exit code 0).
+fn cmd(cmd: impl IntoIterator<Item = impl Into<String>>) -> ExecCommand {
+    ExecCommand::new(cmd).with_cmd_ready_condition(CmdWaitFor::exit_code(0))
 }
