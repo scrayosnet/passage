@@ -26,7 +26,6 @@ tokio-util = { workspace = true, features = ["rt", "codec"] }
 proxy-header = { workspace = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
 opentelemetry = { workspace = true, features = ["trace", "metrics"] }
 uuid = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

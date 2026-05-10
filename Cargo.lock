@@ -2974,7 +2974,6 @@ dependencies = [
 name = "passage-adapters-agones"
 version = "0.2.1"
 dependencies = [
- "futures-util",
  "k8s-openapi",
  "kube",
  "opentelemetry",
@@ -2983,10 +2982,8 @@ dependencies = [
  "serde",
  "serde_json",
  "testcontainers",
- "testcontainers-modules",
  "thiserror",
  "tokio",
- "tokio-util",
  "tracing",
  "tracing-opentelemetry",
 ]
@@ -3062,7 +3059,6 @@ dependencies = [
  "futures",
  "hmac",
  "opentelemetry",
- "opentelemetry_sdk",
  "passage-adapters",
  "passage-packets",
  "proxy-header",
@@ -4522,15 +4518,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "url",
-]
-
-[[package]]
-name = "testcontainers-modules"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5985fde5befe4ffa77a052e035e16c2da86e8bae301baa9f9904ad3c494d357"
-dependencies = [
- "testcontainers",
 ]
 
 [[package]]
