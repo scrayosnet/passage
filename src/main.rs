@@ -7,6 +7,7 @@ use opentelemetry_otlp::{
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE;
 use opentelemetry_semantic_conventions::{
@@ -101,6 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .with_resource(resource(&config.otel.environment))
                 .build();
             global::set_tracer_provider(tracer_provider.clone());
+            global::set_text_map_propagator(TraceContextPropagator::new());
             Some(tracer_provider)
         } else {
             None

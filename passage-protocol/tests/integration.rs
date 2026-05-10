@@ -275,7 +275,7 @@ async fn simulate_transfer_no_configuration() {
                     id: Default::default(),
                     server_address: "".to_string(),
                     server_port: 0,
-                    trace_id: None,
+                    extra: Default::default(),
                 })
                 .expect("session cookie serialization failed"),
             ),
@@ -445,7 +445,7 @@ async fn simulate_slow_transfer_no_configuration() {
                     id: Default::default(),
                     server_address: "".to_string(),
                     server_port: 0,
-                    trace_id: None,
+                    extra: Default::default(),
                 })
                 .expect("session cookie serialization failed"),
             ),
@@ -637,7 +637,7 @@ async fn simulate_login_no_configuration() {
                     id: Default::default(),
                     server_address: "".to_string(),
                     server_port: 0,
-                    trace_id: None,
+                    extra: Default::default(),
                 })
                 .expect("session cookie serialization failed"),
             ),
@@ -778,7 +778,7 @@ async fn sends_keep_alive() {
                     id: Default::default(),
                     server_address: "".to_string(),
                     server_port: 0,
-                    trace_id: None,
+                    extra: Default::default(),
                 })
                 .expect("session cookie serialization failed"),
             ),
@@ -954,7 +954,7 @@ async fn no_respond_keep_alive() {
                     id: Default::default(),
                     server_address: "".to_string(),
                     server_port: 0,
-                    trace_id: None,
+                    extra: Default::default(),
                 })
                 .expect("session cookie serialization failed"),
             ),
