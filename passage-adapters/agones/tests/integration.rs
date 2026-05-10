@@ -16,7 +16,7 @@ pub async fn test() {
     let config = AgonesDiscoveryAdapterConfig {
         namespace: Some("default".to_string()),
         selectors: vec![Template::new(serde_json::json!({
-            //"matchLabels": { "game": "simple-game" }
+            "matchLabels": { "game": "simple-game" }
         }))],
         ..Default::default()
     };
