@@ -2949,6 +2949,7 @@ version = "0.2.1"
 dependencies = [
  "num-bigint",
  "opentelemetry",
+ "rand 0.10.1",
  "regex",
  "serde",
  "serde_json",

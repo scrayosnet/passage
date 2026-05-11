@@ -3,16 +3,21 @@ use crate::{GameServerAllocation, GameServerAllocationSpec};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::{Api, Client};
 use opentelemetry::trace::TraceContextExt;
+use passage_adapters::backoff::ExponentialBackoff;
 use passage_adapters::discovery::DiscoveryAdapter;
 use passage_adapters::{Error, Target, metrics};
 use serde_json::Value;
 use std::fmt::{Debug, Formatter};
+use std::time::Duration;
 use tokio::time::Instant;
-use tracing::warn;
+use tracing::{debug, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "agones_discovery_adapter";
+
+/// The maximum number of attempts to allocate a game server.
+const MAX_ATTEMPTS: usize = 10;
 
 #[derive(Debug, Clone, Default)]
 pub struct AgonesDiscoveryAdapterConfig {
@@ -21,6 +26,7 @@ pub struct AgonesDiscoveryAdapterConfig {
     pub priorities: Vec<Template>,
     pub scheduling: Option<String>,
     pub metadata: Option<Template>,
+    pub backoff: ExponentialBackoff,
 }
 
 #[derive(Clone)]
@@ -108,36 +114,46 @@ impl AgonesDiscoveryAdapter {
             status: None,
         };
 
-        // Make the allocation request.
-        let result = self
-            .api
-            .create(&kube::api::PostParams::default(), &allocation)
-            .await
-            .map_err(|err| Error::FailedFetch {
-                adapter_type: ADAPTER_TYPE,
-                cause: Box::new(err),
-            })?; // TODO retry with backoff and jitter
-        let Some(status) = &result.status else {
-            warn!("Agones allocation returned no allocation status");
-            return Ok(None);
-        };
-
-        // Convert the allocation (if any) into a target.
-        let target = match status.state.as_deref() {
-            Some("Allocated") => {
-                let target = result.try_into().map_err(|err| Error::FailedParse {
+        // Try to allocate a server with up to 'MAX_ATTEMPTS'. In general, the connection will time
+        // out before the maximum is reached.
+        for attempt in 0..MAX_ATTEMPTS {
+            // Make the allocation request.
+            let result = self
+                .api
+                .create(&kube::api::PostParams::default(), &allocation)
+                .await
+                .map_err(|err| Error::FailedFetch {
                     adapter_type: ADAPTER_TYPE,
                     cause: Box::new(err),
                 })?;
-                Some(target)
-            }
-            Some("UnAllocated") => None, // TODO retry with backoff and jitter
-            state => {
-                warn!(state = ?state, "Agones allocation returned unsupported state");
-                None
-            }
-        };
-        Ok(target)
+            let Some(status) = &result.status else {
+                warn!("Agones allocation returned no allocation status");
+                return Ok(None);
+            };
+
+            // Convert the allocation (if any) into a target.
+            match status.state.as_deref() {
+                Some("Allocated") => {
+                    let target = result.try_into().map_err(|err| Error::FailedParse {
+                        adapter_type: ADAPTER_TYPE,
+                        cause: Box::new(err),
+                    })?;
+                    return Ok(Some(target));
+                }
+                Some("UnAllocated") => debug!("Agones allocation returned unallocated, retrying"),
+                state => warn!(state = ?state, "Agones allocation returned unsupported state"),
+            };
+
+            // Wait for the next try.
+            let wait_secs = self.config.backoff.secs_after(attempt).await;
+            tokio::time::sleep(Duration::from_secs(wait_secs)).await;
+        }
+
+        warn!(
+            attempts = MAX_ATTEMPTS,
+            "Failed to allocate gameserver after max attempts"
+        );
+        Ok(None)
     }
 }
 

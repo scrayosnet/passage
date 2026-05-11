@@ -106,10 +106,13 @@ impl DynDiscoveryActionAdapter {
             }
             #[cfg(feature = "adapters-agones")]
             conf::AgonesDiscovery(config) => {
-                // TODO add other options and remove watcher config
                 let agones_config = AgonesDiscoveryAdapterConfig {
                     namespace: config.namespace,
-                    ..Default::default()
+                    selectors: config.selectors.into_iter().map(Into::into).collect(),
+                    priorities: config.priorities.into_iter().map(Into::into).collect(),
+                    scheduling: config.scheduling,
+                    metadata: config.metadata.map(Into::into),
+                    backoff: config.backoff,
                 };
                 let adapter = AgonesDiscoveryAdapter::new(agones_config).await?;
                 Ok(AgonesDiscovery(adapter))

@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 
 pub mod authentication;
+pub mod backoff;
 pub mod discovery;
 pub mod discovery_action;
 pub mod error;

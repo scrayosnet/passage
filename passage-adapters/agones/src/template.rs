@@ -47,3 +47,9 @@ impl Template {
         }
     }
 }
+
+impl From<Value> for Template {
+    fn from(value: Value) -> Self {
+        Self::new(value)
+    }
+}
