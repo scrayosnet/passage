@@ -1,5 +1,5 @@
-use crate::common::agones;
 use passage_adapters::Client;
+use passage_adapters::backoff::ExponentialBackoff;
 use passage_adapters_agones::template::Template;
 use passage_adapters_agones::{AgonesDiscoveryAdapter, AgonesDiscoveryAdapterConfig};
 
@@ -8,12 +8,13 @@ pub mod common;
 #[tokio::test]
 pub async fn allocate_match_label_selector() {
     // Create the kubernetes testcontainer with a client.
-    let agones = agones().await;
+    let agones = common::agones().await;
     let kube_client = agones.client().clone();
 
     // Create the adapter instance.
     let config = AgonesDiscoveryAdapterConfig {
         namespace: Some("default".to_string()),
+        backoff: ExponentialBackoff::once(),
         selectors: vec![Template::new(serde_json::json!({
             "matchLabels": { "game": "simple-game" }
         }))],
@@ -34,12 +35,13 @@ pub async fn allocate_match_label_selector() {
 #[tokio::test]
 pub async fn allocate_unmatch_label_selector() {
     // Create the kubernetes testcontainer with a client.
-    let agones = agones().await;
+    let agones = common::agones().await;
     let kube_client = agones.client().clone();
 
     // Create the adapter instance.
     let config = AgonesDiscoveryAdapterConfig {
         namespace: Some("default".to_string()),
+        backoff: ExponentialBackoff::once(),
         selectors: vec![Template::new(serde_json::json!({
             "matchLabels": { "game": "unknown-game" }
         }))],
