@@ -16,9 +16,6 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "agones_discovery_adapter";
 
-/// The maximum number of attempts to allocate a game server.
-const MAX_ATTEMPTS: usize = 10;
-
 #[derive(Debug, Clone, Default)]
 pub struct AgonesDiscoveryAdapterConfig {
     pub namespace: Option<String>,
@@ -114,9 +111,8 @@ impl AgonesDiscoveryAdapter {
             status: None,
         };
 
-        // Try to allocate a server with up to 'MAX_ATTEMPTS'. In general, the connection will time
-        // out before the maximum is reached.
-        for attempt in 0..MAX_ATTEMPTS {
+        // Try to allocate a server with up to max attempts.
+        for attempt in 1..(self.config.backoff.max_attempts + 1) {
             // Make the allocation request.
             let result = self
                 .api
@@ -145,12 +141,14 @@ impl AgonesDiscoveryAdapter {
             };
 
             // Wait for the next try.
-            let wait_secs = self.config.backoff.secs_after(attempt).await;
+            let Some(wait_secs) = self.config.backoff.secs_after(attempt).await else {
+                break;
+            };
             tokio::time::sleep(Duration::from_secs(wait_secs)).await;
         }
 
         warn!(
-            attempts = MAX_ATTEMPTS,
+            attempts = self.config.backoff.max_attempts,
             "Failed to allocate gameserver after max attempts"
         );
         Ok(None)
