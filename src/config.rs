@@ -44,6 +44,7 @@
 use crate::metrics::system::DEFAULT_OBSERVE_INTERVAL;
 use config::{ConfigError, Environment, File, FileStoredFormat, Format, Map, Value, ValueKind};
 use passage_adapters::authentication::Profile;
+use passage_adapters::backoff::ExponentialBackoff;
 use passage_adapters::{Protocol, Target};
 use passage_protocol::config::DEFAULT_CONNECTION_TIMEOUT;
 use passage_protocol::connection::{DEFAULT_AUTH_COOKIE_EXPIRY, DEFAULT_MAX_PACKET_LENGTH};
@@ -368,20 +369,33 @@ pub struct FixedDiscovery {
     pub targets: Vec<Target>,
 }
 
-/// [`AgonesDiscovery`] hold the agones discovery configuration.
+/// [`AgonesDiscovery`] hold the agones discovery configuration. The template values get the following
+/// variables as input. Currently, string fields are replaced if they exactly match the variable:
+/// - `{{ .Client.ProtocolVersion }}` The client protocol version.
+/// - `{{ .Client.ServerAddress }}` The server address (presented by the client).
+/// - `{{ .Client.ServerPort }}` The server port (presented by the client).
+/// - `{{ .Client.Address }}` The address of the client (with optional proxy protocol).
+/// - `{{ .Request.TraceId }}` The opentelemetry trace id of the request.
 #[derive(Default, Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct AgonesDiscovery {
-    /// The namespace to apply to the watcher.
+    /// The namespace to apply to the client.
     pub namespace: Option<String>,
 
-    /// The label discovery_action to apply to the watcher.
-    #[serde(alias = "labelselector")]
-    pub label_selector: Option<String>,
+    /// The selectors template to apply to the allocation.
+    pub selectors: Vec<serde_json::Value>,
 
-    /// The field discovery_action to apply to the watcher.
-    #[serde(alias = "fieldselector")]
-    pub field_selector: Option<String>,
+    /// The priorities template to apply to the allocation.
+    pub priorities: Vec<serde_json::Value>,
+
+    /// The scheduling to apply to the allocation.
+    pub scheduling: Option<String>,
+
+    /// The metadata template to apply to the allocation.
+    pub metadata: Option<serde_json::Value>,
+
+    /// The exponential backoff configuration.
+    pub backoff: ExponentialBackoff,
 }
 
 /// [`GrpcDiscovery`] hold the gRPC discovery configuration.

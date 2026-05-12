@@ -28,7 +28,7 @@ impl AuthenticationAdapter for DisabledAuthenticationAdapter {
         metrics::adapter_duration::record(ADAPTER_TYPE, Instant::now());
         // TODO profile may need skin information, maybe provide default
         Ok(Profile {
-            id: player.id.clone(),
+            id: player.id,
             name: player.name.clone(),
             properties: vec![],
             profile_actions: vec![],

@@ -7,7 +7,7 @@ pub(crate) use crate::error::Error;
 use crate::routes::{Route, Routes};
 use crate::{crypto, metrics};
 use futures::{SinkExt, StreamExt};
-use opentelemetry::trace::TraceContextExt;
+use opentelemetry::global;
 use passage_adapters::Error::Rejected;
 use passage_adapters::authentication::{AuthenticationAdapter, Profile};
 use passage_adapters::localization::LocalizationAdapter;
@@ -23,6 +23,7 @@ use passage_packets::login::serverbound as login_in;
 use passage_packets::status::clientbound as status_out;
 use passage_packets::status::serverbound as status_in;
 use passage_packets::{State, VarInt, match_packet, writer::WritePacket};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::ops::Add;
@@ -655,18 +656,16 @@ where
         // set session id if not exist (does not override the session fields)
         if session_cookie.is_none() {
             debug!("sending session cookie packet");
-            let trace_id = tracing::Span::current()
-                .context()
-                .span()
-                .span_context()
-                .trace_id()
-                .to_string();
+            let mut extra = HashMap::new();
+            global::get_text_map_propagator(|propagator| {
+                propagator.inject_context(&tracing::Span::current().context(), &mut extra);
+            });
 
             let cookie = SessionCookie {
                 id: Uuid::new_v4(),
                 server_address: client.server_address.clone(),
                 server_port: client.server_port,
-                trace_id: Some(trace_id),
+                extra,
             };
 
             self.send_packet(conf_out::StoreCookiePacket::encode(&cookie)?)
