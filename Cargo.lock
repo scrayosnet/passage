@@ -449,15 +449,6 @@ checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
 
 [[package]]
 name = "cfb8"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "014c0a0e1ad0dae6a86c082db2f9bd7fe8c2c734227047d0d8b4d4a3a094a1e1"
-dependencies = [
- "cipher 0.4.4",
-]
-
-[[package]]
-name = "cfb8"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c22e6368a74b7dd7039e10da9f0300ab4520584f2960048a5a4a4e51f8e4e183"
@@ -3027,7 +3018,7 @@ dependencies = [
  "aes",
  "byteorder",
  "bytes",
- "cfb8 0.8.1",
+ "cfb8",
  "criterion",
  "fake",
  "fastnbt",
@@ -3044,7 +3035,7 @@ dependencies = [
 name = "passage-protocol"
 version = "0.3.0"
 dependencies = [
- "cfb8 0.9.0",
+ "cfb8",
  "criterion",
  "futures",
  "hmac",
