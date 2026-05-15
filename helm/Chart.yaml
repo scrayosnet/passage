@@ -1,0 +1,6 @@
+apiVersion: v2
+name: passage
+description: Minecraft Server Transfer Router
+type: application
+version: 0.3.0
+appVersion: "0.3.0"
