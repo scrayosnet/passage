@@ -1,0 +1,18 @@
+{{- if .Values.rbac.agones.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "passage.fullname" . }}
+  labels:
+    {{- include "passage.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["agones.dev"]
+    resources: ["gameservers"]
+    verbs: ["list", "watch", "patch"]
+  - apiGroups: ["allocation.agones.dev"]
+    resources: ["gameserverallocations"]
+    verbs: ["create"]
+{{- end }}

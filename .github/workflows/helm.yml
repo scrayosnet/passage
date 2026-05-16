@@ -1,0 +1,33 @@
+name: Publish Helm Chart
+
+on:
+  release:
+    types:
+    - published
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Install Helm
+      uses: azure/setup-helm@v5
+      with:
+        version: latest
+
+    - name: Login to GitHub Container Registry
+      run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+
+    - name: Package Helm chart
+      run: helm package helm
+
+    - name: Push Helm chart to GHCR
+      run: |
+        CHART_VERSION=$(grep '^version:' helm/Chart.yaml | awk '{print $2}')
+        helm push passage-${CHART_VERSION}.tgz oci://ghcr.io/${{ github.repository_owner }}/helm
