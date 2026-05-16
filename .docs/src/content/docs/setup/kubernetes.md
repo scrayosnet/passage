@@ -15,7 +15,53 @@ This guide covers deploying Passage on Kubernetes, from basic setups to producti
 
 ## Quick Start
 
-### Basic Deployment
+### Using Helm (Recommended)
+
+The official Helm Chart is the easiest way to deploy Passage on Kubernetes. It is published to the GitHub
+Container Registry and can be installed with a single command:
+
+```sh
+helm install passage oci://ghcr.io/scrayosnet/helm/passage \
+  --version 0.3.0 \
+  --namespace passage --create-namespace
+```
+
+By default the service type is `ClusterIP`. To expose Passage directly via a cloud load balancer, override it:
+
+```sh
+helm install passage oci://ghcr.io/scrayosnet/helm/passage \
+  --version 0.3.0 \
+  --namespace passage --create-namespace \
+  --set service.type=LoadBalancer
+```
+
+To provide the Passage application configuration and enable Agones-based server discovery, use a `values.yaml` file:
+
+```yaml
+# values.yaml
+service:
+  type: LoadBalancer
+
+config:
+  # Passage application configuration (see Reference > Configuration)
+
+rbac:
+  agones:
+    enabled: true
+    gameserverNamespace: minecraft  # namespace where your GameServers are deployed
+```
+
+```sh
+helm install passage oci://ghcr.io/scrayosnet/helm/passage \
+  --version 0.3.0 \
+  --namespace passage --create-namespace \
+  -f values.yaml
+```
+
+All available options are documented in
+[`helm/values.yaml`](https://github.com/scrayosnet/passage/blob/main/helm/values.yaml).
+
+### Manual Deployment
 
 Create a minimal Passage deployment:
 
@@ -244,7 +290,12 @@ helm install agones --namespace agones-system agones/agones
 
 ### RBAC Permissions
 
-Passage needs permissions to watch GameServers:
+Passage needs permissions to list, watch and patch GameServers, and to create GameServerAllocations.
+
+When using the Helm Chart, set `rbac.agones.enabled: true` and `rbac.agones.gameserverNamespace` — the chart
+creates the ClusterRole and a RoleBinding in the GameServer namespace automatically.
+
+For a manual setup:
 
 ```yaml
 apiVersion: v1
@@ -254,27 +305,32 @@ metadata:
   namespace: passage
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  name: passage-agones
-  namespace: minecraft  # Namespace where GameServers are
+  name: passage
 rules:
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
 - apiGroups: ["agones.dev"]
   resources: ["gameservers"]
-  verbs: ["get", "list", "watch"]
+  verbs: ["list", "watch", "patch"]
+- apiGroups: ["allocation.agones.dev"]
+  resources: ["gameserverallocations"]
+  verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: passage-agones
-  namespace: minecraft
+  name: passage
+  namespace: minecraft  # Namespace where GameServers are
 subjects:
 - kind: ServiceAccount
   name: passage
   namespace: passage
 roleRef:
-  kind: Role
-  name: passage-agones
+  kind: ClusterRole
+  name: passage
   apiGroup: rbac.authorization.k8s.io
 ```
 

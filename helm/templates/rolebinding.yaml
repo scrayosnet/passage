@@ -1,0 +1,17 @@
+{{- if .Values.rbac.agones.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "passage.fullname" . }}
+  namespace: {{ required "rbac.agones.gameserverNamespace must be set when rbac.agones.enabled is true" .Values.rbac.agones.gameserverNamespace }}
+  labels:
+    {{- include "passage.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "passage.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "passage.fullname" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

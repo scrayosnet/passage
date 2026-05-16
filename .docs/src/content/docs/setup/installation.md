@@ -56,7 +56,16 @@ cargo build --release
 
 ## Kubernetes
 
-See the [Kubernetes Guide](/setup/kubernetes/) for detailed setup instructions.
+The recommended way to deploy Passage on Kubernetes is via the official Helm Chart:
+
+```sh
+helm install passage oci://ghcr.io/scrayosnet/helm/passage \
+  --version 0.3.0 \
+  --namespace passage --create-namespace
+```
+
+See the [Kubernetes Guide](/setup/kubernetes/) for the full setup including Agones integration, load balancer
+configuration, and production hardening.
 
 ## Systemd Service (Linux)
 

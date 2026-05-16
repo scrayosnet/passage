@@ -4,12 +4,16 @@ metadata:
   name: {{ include "passage.fullname" . }}
   labels:
     {{- include "passage.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.service.type }}
   ports:
     - port: {{ .Values.service.port }}
-      targetPort: http
+      targetPort: minecraft
       protocol: TCP
-      name: http
+      name: minecraft
   selector:
     {{- include "passage.selectorLabels" . | nindent 4 }}
