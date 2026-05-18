@@ -1,0 +1,17 @@
+Passage has been deployed successfully.
+
+Get the address your Minecraft clients should connect to:
+{{- if contains "LoadBalancer" .Values.service.type }}
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+        You can watch its status by running:
+    kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "passage.fullname" . }}
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "passage.fullname" . }} --template "{{ "{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}" }}")
+  echo "Connect your Minecraft client to $SERVICE_IP:{{ .Values.service.port }}"
+{{- else if contains "NodePort" .Values.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "passage.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo "Connect your Minecraft client to $NODE_IP:$NODE_PORT"
+{{- else }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "passage.fullname" . }} 25565:{{ .Values.service.port }}
+  echo "Connect your Minecraft client to 127.0.0.1:25565"
+{{- end }}

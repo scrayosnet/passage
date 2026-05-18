@@ -1,0 +1,11 @@
+{{- if .Values.config }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "passage.fullname" . }}-config
+  labels:
+    {{- include "passage.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- toYaml .Values.config | nindent 4 }}
+{{- end }}

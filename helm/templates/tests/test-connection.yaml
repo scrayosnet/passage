@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "passage.fullname" . }}-test-connection"
+  labels:
+    {{- include "passage.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: test-connection
+      image: busybox
+      command: ['sh', '-c', 'nc -zv {{ include "passage.fullname" . }} {{ .Values.service.port }}']
+  restartPolicy: Never
