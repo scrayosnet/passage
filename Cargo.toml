@@ -44,7 +44,7 @@ tracing-opentelemetry = { version = "0.32", features = ["metrics"] }
 opentelemetry-appender-tracing = { version = "0.31" }
 opentelemetry = { version = "0.31", features = ["trace", "metrics", "logs"] }
 opentelemetry_sdk = { version = "0.31" }
-opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
+opentelemetry-semantic-conventions = { version = "0.32", features = ["semconv_experimental"] }
 opentelemetry-otlp = { version = "0.31", features = ["http-proto", "metrics", "trace"] }
 sentry = { version = "0.47", default-features = false }
 sentry-tracing = { version = "0.47" }
