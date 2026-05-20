@@ -8,7 +8,18 @@ use sha1::{Digest, Sha1};
 use std::fmt::Debug;
 use uuid::Uuid;
 
+/// The [`AuthenticationAdapter`] is used to provide custom logic for validating a connecting player
+/// against an authentication authority. The default configuration intents using the HTTP adapter
+/// `MojangAdapter,` which implements the official Minecraft authentication protocol.
+///
+/// Implementations verify that the player who sent the login request is who they claim to be.
+/// The shared secret and encoded public key come from the Minecraft encryption handshake and are
+/// forwarded verbatim to the backend for verification.
+///
+/// A successful call returns the player's full [`Profile`]. Returning [`Err`] causes the
+/// connection to be dropped with an appropriate disconnect message.
 pub trait AuthenticationAdapter: Debug + Send + Sync {
+    /// Authenticates a connecting player.
     fn authenticate(
         &self,
         client: &Client,
@@ -28,6 +39,7 @@ pub trait AuthenticationAdapter: Debug + Send + Sync {
 /// time, so it is kept as an array as that is what's specified in the JSON. The `profile_actions`
 /// are empty for non-sanctioned accounts.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
     /// The unique identifier of the Minecraft user profile.
@@ -52,6 +64,7 @@ pub struct Profile {
 /// `signature` of the property is signed with Yggdrasil's private key and therefore its
 /// authenticity can be verified by the Minecraft client.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileProperty {
     /// The unique, identifiable name of the profile property.
@@ -63,19 +76,18 @@ pub struct ProfileProperty {
     pub signature: Option<String>,
 }
 
-/// Creates hash for the Minecraft protocol.
+/// Computes the Minecraft session server hash from the server ID, shared secret, and encoded
+/// public key.
+///
+/// The resulting string uses Minecraft's non-standard signed hex format: negative values are
+/// prefixed with `-` instead of using two's complement. This value must be sent to the Mojang
+/// session server to verify that the client performed the encryption handshake.
 pub fn minecraft_hash(server_id: &str, shared_secret: &[u8], encoded_public: &[u8]) -> String {
-    // create a new hasher instance
+    // create a new hasher instance, take the digest and convert it to Minecraft's format
     let mut hasher = Sha1::new();
-
-    // server id
     hasher.update(server_id);
-    // shared secret
     hasher.update(shared_secret);
-    // encoded public key
     hasher.update(encoded_public);
-
-    // take the digest and convert it to Minecraft's format
     BigInt::from_signed_bytes_be(&hasher.finalize()).to_str_radix(16)
 }
 

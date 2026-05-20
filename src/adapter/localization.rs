@@ -4,9 +4,15 @@ use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters_grpc::GrpcLocalizationAdapter;
 use std::fmt::{Display, Formatter};
 
+/// Runtime-selected localization adapter.
+///
+/// Wraps every built-in and feature-gated [`LocalizationAdapter`] implementation behind a single
+/// enum.
 #[derive(Debug)]
 pub enum DynLocalizationAdapter {
+    /// Resolves messages from an in-memory translation map.
     Fixed(FixedLocalizationAdapter),
+    /// Resolves messages via an external gRPC service.
     #[cfg(feature = "adapters-grpc")]
     Grpc(GrpcLocalizationAdapter),
 }
@@ -37,6 +43,7 @@ impl LocalizationAdapter for DynLocalizationAdapter {
 }
 
 impl DynLocalizationAdapter {
+    /// Constructs the adapter described by `config`, establishing any required connections.
     pub async fn from_config(
         config: config::LocalizationAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {

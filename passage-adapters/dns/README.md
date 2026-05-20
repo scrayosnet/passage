@@ -1,42 +1,13 @@
-# DNS Discovery Adapter
+# DNS Adapters
+
+This crate provides adapters based on DNS.
 
 DNS-based discovery adapter for Passage that resolves backend targets from DNS records.
 
-## Features
+## DNS Discovery Adapter
 
+Currently, this crate supports a DNS-based discovery adapter for discovering targets based on SVR or A/AAAA records. The discovery is implemented as an async cache that is periodically refreshed. This refresh is fully disconnected from the target selection such that refreshes do not block the player login flow.
 - **SRV Records**: Full service discovery with automatic port resolution
 - **A/AAAA Records**: Simple hostname-to-IP resolution with configurable default port
-- **Auto-refresh**: Periodic DNS queries to discover new targets and remove stale ones
-- **Metadata**: Automatically attaches DNS metadata (hostname, priority, weight) to targets
 
-## Usage
-
-Configure the DNS adapter in your `config.toml`:
-
-```yaml
-adapters:
-    discovery:
-        dns:
-            srv:
-                domain: "_minecraft._tcp.headless.svc.cluster.local"
-                refresh_interval: 30
-```
-
-Or for A/AAAA records:
-
-```yaml
-adapters:
-    discovery:
-        dns:
-            a:
-                domain: "headless.svc.cluster.local"
-                port: 25565
-                refresh_interval: 30
-```
-
-## Configuration
-
-- `domain`: The DNS domain to query
-- `record_type`: Either `"srv"` or `"a"`
-- `port`: Default port (required for A/AAAA records, ignored for SRV)
-- `refresh_interval`: DNS query interval in seconds
+The selected targets get the DNS metadata attached. Currently, this includes the `priority`, `weight` for the SVR records as well as the `domain` for both.

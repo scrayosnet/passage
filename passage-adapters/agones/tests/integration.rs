@@ -5,6 +5,7 @@ use passage_adapters_agones::{AgonesDiscoveryAdapter, AgonesDiscoveryAdapterConf
 
 pub mod common;
 
+/// Tests that the adapter is able to allocate a server with a matching label selector.
 #[tokio::test]
 pub async fn allocate_match_label_selector() {
     // Create the kubernetes testcontainer with a client.
@@ -24,7 +25,7 @@ pub async fn allocate_match_label_selector() {
         .await
         .expect("Failed to create adapter");
 
-    // Allocate a server.
+    // Try to allocate a server.
     let target = adapter
         .allocate(&Client::default())
         .await
@@ -32,6 +33,7 @@ pub async fn allocate_match_label_selector() {
     assert!(target.is_some())
 }
 
+/// Tests that the adapter is unable to allocate a server with a non-matching label selector.
 #[tokio::test]
 pub async fn allocate_unmatch_label_selector() {
     // Create the kubernetes testcontainer with a client.
@@ -51,7 +53,7 @@ pub async fn allocate_unmatch_label_selector() {
         .await
         .expect("Failed to create adapter");
 
-    // Allocate a server.
+    // Try to allocate a server.
     let target = adapter
         .allocate(&Client::default())
         .await

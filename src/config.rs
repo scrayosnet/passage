@@ -66,6 +66,7 @@ macro_rules! hashmap {
 /// If both the grpc and rest server are disabled, the application will exit immediately after startup
 /// with status ok.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct Config {
     /// The network address that should be used to bind the HTTP server for connection requests.
@@ -129,6 +130,7 @@ impl Default for Config {
 
 /// [`Sentry`] hold the sentry configuration. The release is automatically inferred from cargo.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct Sentry {
     /// Whether sentry should have debug enabled.
@@ -143,6 +145,7 @@ pub struct Sentry {
 
 /// [`OpenTelemetry`] hold the OpenTelemetry configuration. The release is automatically inferred from cargo.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct OpenTelemetry {
     /// The OpenTelemetry environment of the application.
@@ -160,6 +163,7 @@ pub struct OpenTelemetry {
 
 /// [`OpenTelemetryEndpoint`] hold the OpenTelemetry configuration for a specific endpoint.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct OpenTelemetryEndpoint {
     /// The address of the http/protobuf.
@@ -171,6 +175,7 @@ pub struct OpenTelemetryEndpoint {
 
 /// [`RateLimiter`] hold the connection rate limiting configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct RateLimiter {
     /// Duration in seconds.
@@ -191,6 +196,7 @@ impl Default for RateLimiter {
 
 /// [`ProxyProtocol`] hold the PROXY protocol configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct ProxyProtocol {
     /// Whether to allow V1 headers
@@ -213,6 +219,7 @@ impl Default for ProxyProtocol {
 
 /// [`Routes`] holds the adapter configurations.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct Routes {
     /// The hostname the route should serve. Has to be a valid regex.
@@ -234,6 +241,7 @@ pub struct Routes {
 
 /// [`StatusAdapter`] hold the status adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StatusAdapter {
     Fixed(FixedStatus),
@@ -249,6 +257,7 @@ impl Default for StatusAdapter {
 
 /// [`FixedStatus`] hold the fixed status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct FixedStatus {
     /// The name of the server.
@@ -294,6 +303,7 @@ impl Default for FixedStatus {
 
 /// [`GrpcStatus`] hold the gRPC status (ping) configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct GrpcStatus {
     /// The address of the gRPC adapter server.
@@ -302,6 +312,7 @@ pub struct GrpcStatus {
 
 /// [`HttpStatus`] hold the http status (ping) configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct HttpStatus {
     /// The address of the http adapter server.
@@ -323,6 +334,8 @@ impl Default for HttpStatus {
 
 /// [`DiscoveryAdapter`] hold the discovery (adapter) configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
+#[serde(default)]
 pub struct DiscoveryAdapter {
     /// The discovery adapter configuration to get the initial targets.
     #[serde(flatten)]
@@ -334,6 +347,7 @@ pub struct DiscoveryAdapter {
 
 /// [`DiscoveryActionAdapter`] hold the discovery action adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DiscoveryActionAdapter {
     #[serde(alias = "fixeddiscovery")]
@@ -363,6 +377,7 @@ impl Default for DiscoveryActionAdapter {
 
 /// [`FixedDiscovery`] hold the fixed discovery configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct FixedDiscovery {
     /// The targets that should be served by the discovery adapter.
@@ -377,6 +392,7 @@ pub struct FixedDiscovery {
 /// - `{{ .Client.Address }}` The address of the client (with optional proxy protocol).
 /// - `{{ .Request.TraceId }}` The opentelemetry trace id of the request.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct AgonesDiscovery {
     /// The namespace to apply to the client.
@@ -400,6 +416,7 @@ pub struct AgonesDiscovery {
 
 /// [`GrpcDiscovery`] hold the gRPC discovery configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct GrpcDiscovery {
     /// The address of the gRPC adapter server.
@@ -407,22 +424,38 @@ pub struct GrpcDiscovery {
 }
 
 /// [`ARecordType`] holds the DNS discovery configuration for A/AAAA records.
-#[derive(Default, Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct ARecordType {
     pub port: u16,
 }
 
+impl Default for ARecordType {
+    fn default() -> Self {
+        Self { port: 25565 }
+    }
+}
+
 /// [`DnsDiscoveryRecordType`] hold the DNS discovery adapter record configuration.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
+#[serde(tag = "record_type", rename_all = "snake_case")]
 pub enum DnsDiscoveryRecordType {
     Srv,
+    #[serde(alias = "aaa")]
     A(ARecordType),
+}
+
+impl Default for DnsDiscoveryRecordType {
+    fn default() -> Self {
+        Self::Srv
+    }
 }
 
 /// [`DnsDiscovery`] hold the DNS discovery configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct DnsDiscovery {
     /// The DNS domain to query (e.g., "_minecraft._tcp.example.com" for SRV or "mc.example.com" for A).
@@ -433,7 +466,7 @@ pub struct DnsDiscovery {
     pub refresh_interval: u64,
 
     /// The type of DNS record to query ("srv" or "a").
-    #[serde(alias = "recordtype")]
+    #[serde(flatten, alias = "recordtype")]
     pub record_type: DnsDiscoveryRecordType,
 }
 
@@ -449,6 +482,7 @@ impl Default for DnsDiscovery {
 
 /// [`MetaFilter`] hold the metadata filter configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct MetaFilter {
     /// List of filter rules. All rules must match (AND logic).
@@ -457,6 +491,7 @@ pub struct MetaFilter {
 
 /// A single filter rule.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 pub struct FilterRule {
     /// The metadata key to filter on.
     #[serde(alias = "field")]
@@ -468,6 +503,7 @@ pub struct FilterRule {
 
 /// Filter operation to apply to a target field.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(tag = "op", content = "value", rename_all = "snake_case")]
 pub enum FilterOperation {
     /// Field must equal the specified value.
@@ -489,6 +525,7 @@ pub enum FilterOperation {
 
 /// [`PlayerAllowFilter`] hold the player filter configuration (blocks all if empty).
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct PlayerAllowFilter {
     /// List of player usernames to allow (disabled if empty).
@@ -503,6 +540,7 @@ pub struct PlayerAllowFilter {
 
 /// [`PlayerBlockFilter`] hold the player filter configuration (allows all if empty).
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct PlayerBlockFilter {
     /// List of player usernames to block (disabled if empty).
@@ -517,6 +555,7 @@ pub struct PlayerBlockFilter {
 
 /// [`PlayerFillStrategy`] hold the player fill strategy configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct PlayerFillStrategy {
     /// The name of the field that stores the player amount.
@@ -529,6 +568,7 @@ pub struct PlayerFillStrategy {
 
 /// [`GrpcDiscoveryAction`] hold the gRPC discovery action configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct GrpcDiscoveryAction {
     /// The address of the gRPC adapter server.
@@ -537,6 +577,7 @@ pub struct GrpcDiscoveryAction {
 
 /// [`AuthenticationAdapter`] hold the authentication adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AuthenticationAdapter {
     Disabled,
@@ -553,6 +594,7 @@ impl Default for AuthenticationAdapter {
 
 /// [`FixedAuthentication`] hold the fixed authentication configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct FixedAuthentication {
     /// The fixed profile that should be used for authentication.
@@ -561,6 +603,7 @@ pub struct FixedAuthentication {
 
 /// [`GrpcAuthentication`] hold the gRPC authentication configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct GrpcAuthentication {
     /// The address of the gRPC adapter server.
@@ -569,6 +612,7 @@ pub struct GrpcAuthentication {
 
 /// [`MojangAuthentication`] hold the mojang authentication configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct MojangAuthentication {
     /// The server id passed to the Mojang authentication server.
@@ -578,6 +622,7 @@ pub struct MojangAuthentication {
 
 /// [`LocalizationAdapter`] hold the localization adapter configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LocalizationAdapter {
     Fixed(FixedLocalization),
@@ -592,6 +637,7 @@ impl Default for LocalizationAdapter {
 
 /// [`FixedLocalization`] hold the fixed localization configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct FixedLocalization {
     /// The locale to be used in case the client locale is unknown or unsupported.
@@ -655,6 +701,7 @@ impl Default for FixedLocalization {
 
 /// [`GrpcLocalization`] hold the gRPC localization configuration.
 #[derive(Default, Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct GrpcLocalization {
     /// The address of the gRPC adapter server.
@@ -682,6 +729,11 @@ impl Config {
 
         // you can deserialize (and thus freeze) the entire configuration as
         s.try_deserialize()
+    }
+
+    #[cfg(feature = "config-schema")]
+    pub fn schema() -> serde_json::Result<String> {
+        serde_json::to_string(&schemars::schema_for!(Self))
     }
 }
 

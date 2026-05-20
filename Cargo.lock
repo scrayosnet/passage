@@ -2974,6 +2974,7 @@ dependencies = [
  "passage-adapters-http",
  "passage-protocol",
  "regex",
+ "schemars 1.2.1",
  "sentry",
  "sentry-tracing",
  "serde",
@@ -2995,6 +2996,7 @@ dependencies = [
  "opentelemetry",
  "rand 0.10.1",
  "regex",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "sha1",
@@ -3924,6 +3926,7 @@ dependencies = [
  "schemars_derive",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

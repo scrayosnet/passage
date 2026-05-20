@@ -103,6 +103,7 @@ config = { workspace = true }
 regex = { workspace = true }
 uuid = { workspace = true }
 sysinfo = { workspace = true }
+schemars = { workspace = true, features = ["default"], optional = true }
 
 tracing-opentelemetry = { workspace = true }
 opentelemetry-appender-tracing = { workspace = true }
@@ -121,3 +122,9 @@ adapters-grpc = ["dep:passage-adapters-grpc"]
 adapters-agones = ["dep:passage-adapters-agones"]
 adapters-http = ["dep:passage-adapters-http"]
 adapters-dns = ["dep:passage-adapters-dns"]
+config-schema = ["dep:schemars", "passage-adapters/config-schema"]
+
+[[bin]]
+name="schema"
+path="src/bin/schema.rs"
+required-features = ["config-schema"]

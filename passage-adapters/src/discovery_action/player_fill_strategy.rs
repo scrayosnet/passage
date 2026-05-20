@@ -5,6 +5,12 @@ use tokio::time::Instant;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "player_fill_strategy_adapter";
 
+/// Discovery action adapter that re-orders targets to maximize server utilization.
+///
+/// Targets are sorted first by priority, then by player count from the metadata field named
+/// `field`. Servers below `max_players` are preferred and ranked by descending fill level so that
+/// servers fill up one at a time. Once a server is at or above `max_players,` it is sorted after
+/// non-full servers. After sorting, priorities are recomputed starting from zero.
 #[derive(Debug, Default)]
 pub struct PlayerFillStrategyAdapter {
     field: String,
@@ -12,6 +18,10 @@ pub struct PlayerFillStrategyAdapter {
 }
 
 impl PlayerFillStrategyAdapter {
+    /// Creates a new `PlayerFillStrategyAdapter`.
+    ///
+    /// `field` is the metadata key on each [`Target`](crate::Target) that holds the current player
+    /// count as a parseable `u32`. `max_players` is the capacity threshold.
     pub fn new(field: String, max_players: u32) -> Self {
         Self { field, max_players }
     }

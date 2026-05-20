@@ -6,12 +6,20 @@ use passage_adapters_grpc::authentication_adapter::GrpcAuthenticationAdapter;
 use passage_adapters_http::MojangAdapter;
 use std::fmt::{Display, Formatter};
 
+/// Runtime-selected authentication adapter.
+///
+/// Wraps every built-in and feature-gated [`AuthenticationAdapter`] implementation behind a single
+/// enum so they can be stored uniformly in a [`Route`](passage_protocol::routes::Route).
 #[derive(Debug)]
 pub enum DynAuthenticationAdapter {
+    /// Accepts all players without verification.
     Disabled(DisabledAuthenticationAdapter),
+    /// Returns a fixed, pre-configured profile.
     Fixed(FixedAuthenticationAdapter),
+    /// Delegates to an external gRPC authentication service.
     #[cfg(feature = "adapters-grpc")]
     Grpc(GrpcAuthenticationAdapter),
+    /// Validates players against the official Mojang session server.
     #[cfg(feature = "adapters-http")]
     Mojang(MojangAdapter),
 }
@@ -65,6 +73,7 @@ impl AuthenticationAdapter for DynAuthenticationAdapter {
 }
 
 impl DynAuthenticationAdapter {
+    /// Constructs the adapter described by `config`, establishing any required connections.
     pub async fn from_config(
         config: config::AuthenticationAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {

@@ -1,6 +1,7 @@
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// The map of values to replace in a [`Template`].
 pub type TemplateValues = HashMap<String, Value>;
 
 /// A template that can be used to replace values in a JSON object. This replacement is (currently)
@@ -13,11 +14,13 @@ pub struct Template {
 }
 
 impl Template {
+    /// Creates a new [`Template`] from the given [`Value`].
     pub fn new(inner: Value) -> Self {
         Self { inner }
     }
 
-    /// Creates a new [`Value`] from this by replacing all template values with the given values.
+    /// Creates a new [`Value`] from this [`Template`] by replacing all matching template values with
+    /// the given values.
     pub fn template(&self, values: &TemplateValues) -> Value {
         Self::replace_in(self.inner.clone(), values)
     }
@@ -42,7 +45,7 @@ impl Template {
                     .collect();
                 Value::Object(inner)
             }
-            // All (non-string) primitives cannot be replaced.
+            // All other (non-string) primitives cannot be replaced.
             value => value,
         }
     }
