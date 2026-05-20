@@ -5,39 +5,39 @@ description: Complete field-by-field reference for all Passage configuration opt
 
 This page provides a comprehensive reference for every configuration field in Passage. For a beginner-friendly introduction, see [Configuration Basics](/setup/configuration-basics/).
 
-## Table of Contents
+:::tip[JSON Schema Available]
+Passage provides a [JSON Schema](https://github.com/scrayosnet/passage/blob/main/config/schema.json) for configuration validation. Use it with your editor for autocompletion and validation:
 
-- [Core Settings](#core-settings)
-- [Security Settings](#security-settings)
-- [Observability Settings](#observability-settings)
-- [Adapter Configuration](#adapter-configuration)
-- [Localization](#localization)
-- [Complete Example Configurations](#complete-example-configurations)
-- [Environment Variable Mapping](#environment-variable-mapping)
-- [Configuration File Formats](#configuration-file-formats)
+```yaml
+# yaml-language-server: $schema=./schema.json
+```
+:::
 
 ## Configuration Structure
 
-Passage uses TOML format with the following top-level sections:
+Passage uses a layered configuration system supporting YAML, TOML, and JSON formats. The overall structure:
 
-```toml
-# Core connection settings
-address = "0.0.0.0:25565"
-timeout = 120
+```yaml
+# Core settings
+address: "0.0.0.0:25565"
+timeout: 120
+max_packet_length: 10000
+auth_cookie_expiry: 21600
+auth_secret: "your-secret"
 
-# Security and monitoring
-[sentry]
-[otel]
-[rate_limiter]
-[proxy_protocol]
+# Optional global features
+sentry: { ... }
+otel: { ... }
+rate_limiter: { ... }
+proxy_protocol: { ... }
 
-# Adapter configuration
-[status]
-[target_discovery]
-[target_strategy]
-
-# Internationalization
-[localization]
+# Routes (per-hostname adapter configuration)
+routes:
+- hostname: "mc.example.net"
+  status: { type: fixed, ... }
+  authentication: { type: mojang, ... }
+  discovery: { type: dns_discovery, ..., actions: [...] }
+  localization: { type: fixed, ... }
 ```
 
 ---
@@ -46,863 +46,659 @@ timeout = 120
 
 ### `address`
 
-**Type:** `string` (socket address)
-**Required:** Yes
-**Default:** `"0.0.0.0:25565"`
-**Environment:** `PASSAGE_ADDRESS`
+| | |
+|---|---|
+| **Type** | string (socket address) |
+| **Default** | `"0.0.0.0:25565"` |
+| **Environment** | `PASSAGE_ADDRESS` |
 
 The network address and port that Passage binds to for incoming Minecraft client connections.
 
-**Format:** `"<host>:<port>"`
-
-**Examples:**
-```toml
+```yaml
 # Listen on all interfaces, standard Minecraft port
-address = "0.0.0.0:25565"
+address: "0.0.0.0:25565"
 
 # Listen on specific interface
-address = "192.168.1.100:25565"
+address: "192.168.1.100:25565"
 
 # Use custom port
-address = "0.0.0.0:25566"
+address: "0.0.0.0:25566"
 ```
-
-**Notes:**
-- Use `0.0.0.0` to listen on all network interfaces
-- Use `127.0.0.1` to listen only on localhost
-- Ensure the port is not already in use
-- Requires appropriate firewall configuration
 
 ---
 
 ### `timeout`
 
-**Type:** `integer` (seconds)
-**Required:** Yes
-**Default:** `120`
-**Environment:** `PASSAGE_TIMEOUT`
+| | |
+|---|---|
+| **Type** | integer (seconds) |
+| **Default** | `120` |
+| **Environment** | `PASSAGE_TIMEOUT` |
 
-Maximum time in seconds to wait for client responses during the connection handshake process.
+Maximum time in seconds to wait for client responses during the connection flow. If the client does not respond within this time, the connection is dropped with a timeout message.
 
-**Range:** `1` to `3600`
-
-**Examples:**
-```toml
-# Standard timeout (2 minutes)
-timeout = 120
-
-# Short timeout for high-performance scenarios
-timeout = 60
-
-# Long timeout for slow connections
-timeout = 300
+```yaml
+timeout: 120  # 2 minutes (default)
+timeout: 60   # shorter for high-performance scenarios
+timeout: 300  # longer for slow connections
 ```
 
-**Recommendations:**
-- **Production:** 120-180 seconds
-- **High-performance:** 60 seconds
-- **Mobile/slow connections:** 240-300 seconds
+---
+
+### `max_packet_length`
+
+| | |
+|---|---|
+| **Type** | integer (bytes) |
+| **Default** | `10000` |
+| **Environment** | `PASSAGE_MAX_PACKET_LENGTH` |
+
+The maximum packet size in bytes that Passage will accept. Packets exceeding this size are rejected. The default of 10,000 bytes is sufficient for normal Minecraft handshake and login packets.
+
+```yaml
+max_packet_length: 10000
+```
+
+---
+
+### `auth_cookie_expiry`
+
+| | |
+|---|---|
+| **Type** | integer (seconds) |
+| **Default** | `21600` (6 hours) |
+| **Environment** | `PASSAGE_AUTH_COOKIE_EXPIRY` |
+
+How long authentication cookies remain valid in seconds. When a player connects with a valid cookie, Passage can skip the Mojang authentication step. See [Authentication Cookies](/advanced/cookies/) for details.
+
+```yaml
+auth_cookie_expiry: 21600  # 6 hours (default)
+auth_cookie_expiry: 3600   # 1 hour (more frequent re-auth)
+```
+
+---
+
+### `system_observer_interval`
+
+| | |
+|---|---|
+| **Type** | integer (seconds, optional) |
+| **Default** | `20` |
+| **Environment** | `PASSAGE_SYSTEM_OBSERVER_INTERVAL` |
+
+The interval in seconds at which system metrics (CPU, memory, swap) are observed and reported via OpenTelemetry. Set to `null` to disable system metric collection.
 
 ---
 
 ### `auth_secret`
 
-**Type:** `string`
-**Required:** No
-**Default:** None
-**Environment:** `PASSAGE_AUTH_SECRET`
+| | |
+|---|---|
+| **Type** | string (optional) |
+| **Default** | `null` (disabled) |
+| **Environment** | `PASSAGE_AUTH_SECRET` |
 
-Secret key for signing authentication cookies. If not set, authentication cookies are disabled.
+Secret key for signing authentication cookies (HMAC-SHA256). If not set, authentication cookies are disabled and players must authenticate with Mojang on every connection.
 
-**Examples:**
-```toml
-# In config.toml (not recommended for production)
-auth_secret = "your-secret-key-here"
-```
-
-**Better approach - using a separate file:**
+**Recommended approach -- use a separate secret file:**
 ```bash
-# Create secret file
-echo "your-secret-key-here" > config/auth_secret
+# Generate a secret
+openssl rand -base64 32 > config/auth_secret
 
-# Or specify custom path
+# Or specify custom path via environment variable
 export AUTH_SECRET_FILE=/run/secrets/passage-auth
 ```
 
-**Security Best Practices:**
+The `AUTH_SECRET_FILE` environment variable (default: `config/auth_secret`) points to a plain text file whose entire contents become the `auth_secret` value.
+
+:::caution[Security]
 - Use at least 32 characters
-- Generate with: `openssl rand -base64 32`
 - Never commit secrets to version control
-- Use file-based secrets in production
+- In Kubernetes, use a Secret resource mounted as a file
 - Rotate secrets periodically
+:::
 
 ---
 
-## Security Settings
+## Rate Limiter
 
-### `[rate_limiter]`
+| | |
+|---|---|
+| **Type** | object (optional) |
+| **Enabled by** | Presence of the section |
+| **Environment prefix** | `PASSAGE_RATE_LIMITER_` |
 
-Connection rate limiting to prevent abuse and DoS attacks.
+Per-IP connection rate limiting. If omitted, rate limiting is disabled.
 
-#### `rate_limiter.enabled`
+### Fields
 
-**Type:** `boolean`
-**Default:** `true`
-**Environment:** `PASSAGE_RATE_LIMITER_ENABLED`
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `duration` | integer (seconds) | `60` | Time window for counting connections. |
+| `limit` | integer | `60` | Maximum connections allowed per IP within the time window. |
 
-Enable or disable rate limiting entirely.
-
-```toml
-[rate_limiter]
-enabled = true
+```yaml
+rate_limiter:
+  duration: 60   # 60-second window
+  limit: 60      # max 60 connections per IP per minute
 ```
 
-#### `rate_limiter.duration`
+**Behavior:** If an IP exceeds `limit` connections within `duration` seconds, subsequent connections are rejected until the window expires.
 
-**Type:** `integer` (seconds)
-**Default:** `60`
-**Environment:** `PASSAGE_RATE_LIMITER_DURATION`
+**Tuning guidelines:**
 
-Time window for counting connections from each IP address.
-
-**Range:** `1` to `3600`
-
-#### `rate_limiter.size`
-
-**Type:** `integer`
-**Default:** `60`
-**Environment:** `PASSAGE_RATE_LIMITER_SIZE`
-
-Maximum number of connections allowed per IP address within the duration window.
-
-**Range:** `1` to `1000`
-
-**Example:**
-```toml
-[rate_limiter]
-enabled = true
-duration = 60   # 60 second window
-size = 60       # Max 60 connections per IP per minute
-```
-
-**Behavior:** If an IP makes more than `size` connections within `duration` seconds, subsequent connections are rejected until the window expires.
-
-**Tuning:**
-- **Strict:** `duration=60`, `size=30`
-- **Balanced:** `duration=60`, `size=60` (default)
-- **Permissive:** `duration=120`, `size=200`
+| Scenario | `duration` | `limit` |
+|----------|-----------|---------|
+| Strict (DDoS protection) | `60` | `30` |
+| Balanced (default) | `60` | `60` |
+| Permissive (shared IPs) | `120` | `200` |
 
 ---
 
-### `[proxy_protocol]`
+## PROXY Protocol
 
-PROXY protocol support for preserving real client IP addresses when behind load balancers.
+| | |
+|---|---|
+| **Type** | object (optional) |
+| **Enabled by** | Presence of the section |
+| **Environment prefix** | `PASSAGE_PROXY_PROTOCOL_` |
 
-#### `proxy_protocol.enabled`
+[PROXY protocol](https://www.haproxy.org/download/1.8/doc/proxy-protocol.txt) support for preserving real client IP addresses when Passage is behind a load balancer. If omitted, PROXY protocol is disabled.
 
-**Type:** `boolean`
-**Default:** `false`
-**Environment:** `PASSAGE_PROXY_PROTOCOL_ENABLED`
+### Fields
 
-Enable PROXY protocol v1 and v2 support.
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `allow_v1` | boolean | `true` | Accept PROXY protocol v1 (text) headers. |
+| `allow_v2` | boolean | `true` | Accept PROXY protocol v2 (binary) headers. |
 
-```toml
-[proxy_protocol]
-enabled = true
+```yaml
+proxy_protocol:
+  allow_v1: true
+  allow_v2: true
 ```
+
+:::caution[Important]
+Only enable PROXY protocol if **all** traffic to Passage includes PROXY protocol headers. Mixed traffic (some with headers, some without) will cause connection failures.
+:::
 
 **When to enable:**
-- Behind HAProxy
-- Behind AWS Network Load Balancer (NLB)
-- Behind NGINX with `proxy_protocol` enabled
+- Behind HAProxy with `send-proxy` or `send-proxy-v2`
+- Behind AWS Network Load Balancer (NLB) with proxy protocol enabled
+- Behind NGINX with `proxy_protocol` configured
 - Behind other PROXY protocol-compatible load balancers
-
-**Important:** Only enable if ALL traffic will include PROXY protocol headers. Mixed traffic will cause connection failures.
 
 ---
 
-## Observability Settings
+## Sentry
 
-### `[sentry]`
+| | |
+|---|---|
+| **Type** | object (optional) |
+| **Enabled by** | Presence of the section |
+| **Environment prefix** | `PASSAGE_SENTRY_` |
 
-Error tracking integration with Sentry.io.
+Error tracking with [Sentry](https://sentry.io). The release version is automatically inferred from the build. If omitted, Sentry is disabled.
 
-#### `sentry.enabled`
+### Fields
 
-**Type:** `boolean`
-**Default:** `false`
-**Environment:** `PASSAGE_SENTRY_ENABLED`
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `debug` | boolean | `false` | Enable Sentry SDK debug logging. |
+| `environment` | string | `""` | Environment tag for Sentry events (e.g., `"production"`, `"staging"`). |
+| `address` | string | `""` | Sentry DSN (Data Source Name) URL. |
 
-Enable Sentry error tracking.
-
-#### `sentry.debug`
-
-**Type:** `boolean`
-**Default:** `false`
-**Environment:** `PASSAGE_SENTRY_DEBUG`
-
-Enable debug logging for Sentry SDK.
-
-#### `sentry.address`
-
-**Type:** `string` (URL)
-**Required:** Yes (if enabled)
-**Environment:** `PASSAGE_SENTRY_ADDRESS`
-
-Sentry DSN (Data Source Name) URL.
-
-**Format:** `https://<key>@<organization>.ingest.sentry.io/<project-id>`
-
-#### `sentry.environment`
-
-**Type:** `string`
-**Default:** `"staging"`
-**Environment:** `PASSAGE_SENTRY_ENVIRONMENT`
-
-Environment tag for Sentry events.
-
-**Example:**
-```toml
-[sentry]
-enabled = true
-debug = false
-address = "https://examplePublicKey@o0.ingest.sentry.io/0"
-environment = "production"
+```yaml
+sentry:
+  debug: false
+  environment: "production"
+  address: "https://examplePublicKey@o0.ingest.sentry.io/0"
 ```
 
 ---
 
-### `[otel]`
+## OpenTelemetry
 
-OpenTelemetry configuration for metrics and distributed tracing.
+| | |
+|---|---|
+| **Type** | object |
+| **Environment prefix** | `PASSAGE_OTEL_` |
 
-#### `otel.environment`
+OpenTelemetry configuration for traces, metrics, and logs. Each signal type (traces, metrics, logs) has its own endpoint and can be enabled independently.
 
-**Type:** `string`
-**Default:** `"production"`
-**Environment:** `PASSAGE_OTEL_ENVIRONMENT`
+### Fields
 
-Environment label added to all telemetry data.
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `environment` | string | `""` | Environment label added to all telemetry data. |
+| `traces` | object (optional) | `null` | Traces endpoint configuration. |
+| `metrics` | object (optional) | `null` | Metrics endpoint configuration. |
+| `logs` | object (optional) | `null` | Logs endpoint configuration. |
 
-#### `otel.traces_endpoint`
+Each endpoint object has:
 
-**Type:** `string` (URL)
-**Required:** Yes (for tracing)
-**Environment:** `PASSAGE_OTEL_TRACES_ENDPOINT`
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `address` | string | `""` | OTLP HTTP/protobuf endpoint URL. |
+| `token` | string | `""` | Base64-encoded basic auth token. |
 
-OTLP HTTP endpoint for trace data.
+```yaml
+otel:
+  environment: "production"
+  traces:
+    address: "https://otlp-gateway.grafana.net/otlp/v1/traces"
+    token: "base64_encoded_token"
+  metrics:
+    address: "https://otlp-gateway.grafana.net/otlp/v1/metrics"
+    token: "base64_encoded_token"
+  logs:
+    address: "https://otlp-gateway.grafana.net/otlp/v1/logs"
+    token: "base64_encoded_token"
+```
 
-**Format:** `https://<host>/v1/traces`
-
-#### `otel.traces_token`
-
-**Type:** `string`
-**Required:** Yes (for tracing)
-**Environment:** `PASSAGE_OTEL_TRACES_TOKEN`
-
-Base64-encoded basic auth token for traces endpoint.
-
-**Generation:**
+**Generating a token:**
 ```bash
 echo -n "user:password" | base64
 ```
 
-#### `otel.metrics_endpoint`
+**Supported backends:** Grafana Cloud, Datadog, New Relic, Honeycomb, or any OTLP-compatible collector.
 
-**Type:** `string` (URL)
-**Required:** Yes (for metrics)
-**Environment:** `PASSAGE_OTEL_METRICS_ENDPOINT`
+See [Observability](/advanced/observability/) for detailed setup guides.
 
-OTLP HTTP endpoint for metrics data.
+---
 
-**Format:** `https://<host>/v1/metrics`
+## Routes
 
-#### `otel.metrics_token`
+| | |
+|---|---|
+| **Type** | array of route objects |
+| **Default** | `[]` (empty) |
 
-**Type:** `string`
-**Required:** Yes (for metrics)
-**Environment:** `PASSAGE_OTEL_METRICS_TOKEN`
+Routes define per-hostname adapter configurations. When a player connects, Passage matches the connection's hostname against each route's `hostname` regex pattern and uses the first match.
 
-Base64-encoded basic auth token for metrics endpoint.
+### Route Fields
 
-**Example (Grafana Cloud):**
-```toml
-[otel]
-environment = "production"
-traces_endpoint = "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp/v1/traces"
-traces_token = "base64_encoded_token_here"
-metrics_endpoint = "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp/v1/metrics"
-metrics_token = "base64_encoded_token_here"
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `hostname` | string (regex) | `""` | Regex pattern to match the server hostname from the client handshake. |
+| `status` | [StatusAdapter](#status-adapters) | `fixed` | Server list status configuration. |
+| `authentication` | [AuthenticationAdapter](#authentication-adapters) | `mojang` | Player authentication configuration. |
+| `discovery` | [DiscoveryAdapter](#discovery-adapter) | `fixed_discovery` | Backend server discovery and action pipeline. |
+| `localization` | [LocalizationAdapter](#localization-adapters) | `fixed` | Disconnect message localization. |
+
+```yaml
+routes:
+- hostname: "mc\\.example\\.net"
+  status:
+    type: fixed
+    name: "My Network"
+  authentication:
+    type: mojang
+  discovery:
+    type: fixed_discovery
+    targets:
+    - identifier: "lobby-1"
+      address: "10.0.1.10:25565"
+  localization:
+    type: fixed
+    default_locale: "en"
 ```
 
-**Supported Backends:**
-- Grafana Cloud
-- Datadog
-- New Relic
-- Honeycomb
-- Any OTLP-compatible backend
-
-For Grafana Cloud, get tokens from: **Configuration → Data Sources → OpenTelemetry**.
+:::tip[Hostname Matching]
+The `hostname` field is a regex pattern. Use `\\.` to match literal dots. Use `.*` for a catch-all route. Routes are evaluated in order; the first match wins.
+:::
 
 ---
 
-## Adapter Configuration
+## Status Adapters
 
-### `[status]`
+Selected via `type` within `routes[].status`. See [Status Adapter](/adapters/status/) for detailed documentation.
 
-Server status response configuration (for server list pings).
+### Fixed Status (`type: fixed`)
 
-#### `status.adapter`
+Static server status from configuration.
 
-**Type:** `string`
-**Required:** Yes
-**Environment:** `PASSAGE_STATUS_ADAPTER`
-**Values:** `"fixed"`, `"http"`, `"grpc"`
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | string | `"Passage"` | Server name in the server list. |
+| `description` | string (optional) | `"\"Minecraft Server Transfer Router\""` | MOTD as JSON text component. |
+| `favicon` | string (optional) | Passage logo | Base64-encoded PNG (`data:image/png;base64,...`). |
+| `enforces_secure_chat` | boolean (optional) | `true` | Whether secure chat is enforced. |
+| `preferred_version` | integer | `769` (1.21.4) | Protocol version shown to clients. |
+| `min_version` | integer | `0` | Minimum supported protocol version. 0 = no minimum. |
+| `max_version` | integer | `1000` | Maximum supported protocol version. |
 
-The adapter type for status responses.
+```yaml
+status:
+  type: fixed
+  name: "My Network"
+  description: "{\"text\":\"Welcome!\",\"color\":\"gold\"}"
+  enforces_secure_chat: true
+  preferred_version: 769
+  min_version: 766
+  max_version: 1000
+```
 
-For detailed information, see [Status Adapters](/adapters/status/).
+### HTTP Status (`type: http`)
 
----
+Fetches status from an HTTP endpoint with caching.
 
-#### Fixed Status Adapter
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `address` | string | `"http://localhost:8080"` | HTTP endpoint URL. |
+| `cache_duration` | integer (seconds) | `60` | Cache duration. Must be greater than zero. |
 
-Static server status configuration.
+```yaml
+status:
+  type: http
+  address: "https://api.example.com/minecraft/status"
+  cache_duration: 30
+```
 
-##### `status.fixed.name`
+### gRPC Status (`type: grpc`)
 
-**Type:** `string`
-**Required:** Yes
-**Environment:** `PASSAGE_STATUS_FIXED_NAME`
+Fetches status via a custom gRPC service.
 
-Server name shown in the server list.
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `address` | string | `""` | gRPC service endpoint URL. |
 
-##### `status.fixed.description`
-
-**Type:** `string`
-**Default:** `"\"A Minecraft server powered by Passage\""`
-**Environment:** `PASSAGE_STATUS_FIXED_DESCRIPTION`
-
-MOTD (Message of the Day) as JSON text component.
-
-**Format:** Minecraft JSON text format (escaped)
-
-##### `status.fixed.favicon`
-
-**Type:** `string`
-**Default:** None
-**Environment:** `PASSAGE_STATUS_FIXED_FAVICON`
-
-Server icon as base64-encoded PNG.
-
-**Format:** `data:image/png;base64,<base64_data>`
-
-##### `status.fixed.enforces_secure_chat`
-
-**Type:** `boolean`
-**Default:** `true`
-**Environment:** `PASSAGE_STATUS_FIXED_ENFORCES_SECURE_CHAT`
-
-Whether server enforces secure chat (1.19+).
-
-##### `status.fixed.preferred_version`
-
-**Type:** `integer`
-**Default:** `769` (1.21.4)
-**Environment:** `PASSAGE_STATUS_FIXED_PREFERRED_VERSION`
-
-Preferred protocol version shown to clients.
-
-##### `status.fixed.min_version`
-
-**Type:** `integer`
-**Default:** `0`
-**Environment:** `PASSAGE_STATUS_FIXED_MIN_VERSION`
-
-Minimum supported protocol version. 0 means no minimum.
-
-##### `status.fixed.max_version`
-
-**Type:** `integer`
-**Default:** `0`
-**Environment:** `PASSAGE_STATUS_FIXED_MAX_VERSION`
-
-Maximum supported protocol version. 0 means no maximum.
-
-**Example:**
-```toml
-[status]
-adapter = "fixed"
-
-[status.fixed]
-name = "My Minecraft Network"
-description = "{\"text\":\"Welcome!\",\"color\":\"gold\"}"
-favicon = "data:image/png;base64,iVBORw0KGg..."
-enforces_secure_chat = true
-preferred_version = 769  # 1.21.4
-min_version = 766        # 1.20.5
-max_version = 1000       # Future versions
+```yaml
+status:
+  type: grpc
+  address: "http://status-service:50051"
 ```
 
 ---
 
-#### HTTP Status Adapter
+## Authentication Adapters
 
-Fetch status from HTTP endpoint.
+Selected via `type` within `routes[].authentication`. See [Authentication Adapter](/adapters/authentication/) for detailed documentation.
 
-##### `status.http.address`
+| Type | Description |
+|------|-------------|
+| `mojang` | Standard Mojang/Microsoft authentication (default). |
+| `disabled` | No authentication. For testing only. |
+| `fixed` | Fixed player profile for all connections. |
+| `grpc` | Custom authentication via gRPC service. |
 
-**Type:** `string` (URL)
-**Required:** Yes
-**Environment:** `PASSAGE_STATUS_HTTP_ADDRESS`
+---
 
-HTTP endpoint URL.
+## Discovery Adapter
 
-##### `status.http.cache_duration`
+The discovery section has two parts: a **discovery adapter** (provides the initial target list) and an **actions pipeline** (transforms the list). The adapter type is set via `type`, and actions are listed in `actions[]`.
 
-**Type:** `integer` (seconds)
-**Default:** `5`
-**Environment:** `PASSAGE_STATUS_HTTP_CACHE_DURATION`
+See [Target Discovery](/adapters/target-discovery/) and [Discovery Actions](/adapters/discovery-actions/) for detailed documentation.
 
-How long to cache responses.
+### Fixed Discovery (`type: fixed_discovery`)
 
-**Example:**
-```toml
-[status]
-adapter = "http"
+Static target list from configuration.
 
-[status.http]
-address = "https://api.example.com/minecraft/status"
-cache_duration = 5
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `targets` | array | `[]` | List of backend server targets. |
+
+Each target:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `identifier` | string | *required* | Unique server identifier. |
+| `address` | string | *required* | Socket address (`host:port`). |
+| `priority` | integer | `0` | Priority (lower = preferred). |
+| `meta` | map | `{}` | Key-value metadata. |
+
+```yaml
+discovery:
+  type: fixed_discovery
+  targets:
+  - identifier: "lobby-1"
+    address: "10.0.1.10:25565"
+    meta:
+      type: "lobby"
+      players: "15"
+```
+
+### DNS Discovery (`type: dns_discovery`)
+
+Discovers targets via DNS SRV or A/AAAA records with periodic refresh.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `domain` | string | `""` | DNS domain to query. |
+| `refresh_interval` | integer (seconds) | `30` | How often to re-query DNS. |
+| `record_type` | string | `"srv"` | Record type: `"srv"` or `"a"`. |
+| `port` | integer | `25565` | Default port (only for `record_type: a`). |
+
+```yaml
+# SRV records
+discovery:
+  type: dns_discovery
+  domain: "_minecraft._tcp.servers.example.net"
+  record_type: srv
+  refresh_interval: 30
+
+# A/AAAA records
+discovery:
+  type: dns_discovery
+  domain: "mc.example.net"
+  record_type: a
+  port: 25565
+  refresh_interval: 30
+```
+
+### Agones Discovery (`type: agones_discovery`)
+
+Discovers game servers via [Agones](https://agones.dev/) GameServerAllocation in Kubernetes.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `namespace` | string (optional) | `null` | Kubernetes namespace. `null` = search all namespaces. |
+| `selectors` | array | `[]` | GameServerAllocation selector templates. |
+| `priorities` | array | `[]` | Priority templates for allocation. |
+| `scheduling` | string (optional) | `null` | Agones scheduling strategy. |
+| `metadata` | object (optional) | `null` | Metadata template for allocation. |
+| `backoff` | object | see below | Exponential backoff configuration. |
+
+**Template variables** (replaced in string fields if they exactly match):
+- `{{ .Client.ProtocolVersion }}` -- client protocol version
+- `{{ .Client.ServerAddress }}` -- server address from handshake
+- `{{ .Client.ServerPort }}` -- server port from handshake
+- `{{ .Client.Address }}` -- client IP (with optional proxy protocol)
+- `{{ .Request.TraceId }}` -- OpenTelemetry trace ID
+
+**Backoff configuration:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `initial_secs` | integer | `2` | Wait time for first retry. |
+| `max_secs` | integer | `60` | Maximum wait time between retries. |
+| `max_attempts` | integer | `10` | Maximum retry attempts. |
+| `factor` | float | `2.0` | Multiplicative backoff factor. |
+| `jitter` | float | `0.1` | Random jitter added (seconds). |
+
+### gRPC Discovery (`type: grpc_discovery`)
+
+Dynamic discovery via a custom gRPC service.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `address` | string | `""` | gRPC service endpoint URL. |
+
+```yaml
+discovery:
+  type: grpc_discovery
+  address: "http://discovery-service:50051"
+```
+
+### Discovery Actions (`actions`)
+
+An optional array of actions that process the discovered target list sequentially. See [Discovery Actions](/adapters/discovery-actions/) for the full reference.
+
+Available action types: `meta_filter`, `player_allow_filter`, `player_block_filter`, `player_fill_strategy`, `grpc`.
+
+```yaml
+discovery:
+  type: dns_discovery
+  domain: "servers.example.net"
+  record_type: srv
+  actions:
+  - type: meta_filter
+    rules:
+    - key: "status"
+      op: equals
+      value: "online"
+  - type: player_fill_strategy
+    field: "players"
+    max_players: 50
 ```
 
 ---
 
-#### gRPC Status Adapter
+## Localization Adapters
 
-Fetch status via gRPC.
+Selected via `type` within `routes[].localization`. See [Localization](/advanced/localization/) for detailed documentation.
 
-##### `status.grpc.address`
+### Fixed Localization (`type: fixed`)
 
-**Type:** `string` (URL)
-**Required:** Yes
-**Environment:** `PASSAGE_STATUS_GRPC_ADDRESS`
+Static disconnect messages from configuration.
 
-gRPC service address.
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `default_locale` | string | `"en_US"` | Default locale for unknown clients. |
+| `messages` | map | 6 built-in locales | Locale-specific messages. |
+| `warn_unknown_keys` | boolean | `true` | Warn about unrecognized message keys in logs. |
 
-**Format:** `http://<host>:<port>` or `https://<host>:<port>`
+**Default message keys:**
 
-**Example:**
-```toml
-[status]
-adapter = "grpc"
+| Key | When shown |
+|-----|-----------|
+| `disconnect_timeout` | Connection timed out (keep-alive timeout). |
+| `disconnect_no_target` | No backend server available. |
+| `disconnect_unauthenticated` | Authentication failed. |
 
-[status.grpc]
-address = "http://status-service:3030"
+Messages use Minecraft JSON text component format:
+
+```yaml
+localization:
+  type: fixed
+  default_locale: "en"
+  messages:
+    en:
+      locale: "English"
+      disconnect_timeout: '{"text":"Disconnected: Connection timed out"}'
+      disconnect_no_target: '{"text":"Disconnected: No server available"}'
+      disconnect_unauthenticated: '{"text":"Disconnected: Authentication failed"}'
+    de:
+      locale: "Deutsch"
+      disconnect_timeout: '{"text":"Verbindung getrennt: Zeitüberschreitung"}'
+      disconnect_no_target: '{"text":"Verbindung getrennt: Kein Server verfügbar"}'
+      disconnect_unauthenticated: '{"text":"Verbindung getrennt: Authentifizierung fehlgeschlagen"}'
+```
+
+### gRPC Localization (`type: grpc`)
+
+Delegates localization to a custom gRPC service.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `address` | string | `""` | gRPC service endpoint URL. |
+
+---
+
+## Complete Example
+
+A production-ready configuration with DNS discovery, rate limiting, and observability:
+
+```yaml
+# yaml-language-server: $schema=./schema.json
+
+address: "0.0.0.0:25565"
+timeout: 120
+
+rate_limiter:
+  duration: 60
+  limit: 60
+
+proxy_protocol:
+  allow_v1: true
+  allow_v2: true
+
+sentry:
+  environment: "production"
+  address: "https://examplePublicKey@o0.ingest.sentry.io/0"
+
+otel:
+  environment: "production"
+  traces:
+    address: "https://otlp-gateway.grafana.net/otlp/v1/traces"
+    token: "base64_token"
+  metrics:
+    address: "https://otlp-gateway.grafana.net/otlp/v1/metrics"
+    token: "base64_token"
+
+routes:
+- hostname: "mc\\.example\\.net"
+  status:
+    type: http
+    address: "https://example.net/status"
+    cache_duration: 30
+  authentication:
+    type: mojang
+    server_id: ""
+  discovery:
+    type: dns_discovery
+    domain: "servers.example.net"
+    record_type: srv
+    actions:
+    - type: meta_filter
+      name: "server-filter"
+      rules:
+      - key: "status"
+        op: equals
+        value: "online"
+    - type: player_fill_strategy
+      name: "player-fill"
+      field: "players"
+      max_players: 50
+  localization:
+    type: fixed
+    default_locale: "en"
 ```
 
 ---
 
-### `[target_discovery]`
+## Configuration Layers
 
-Backend server discovery configuration.
+Passage uses a layered configuration system. Upper layers override lower layers:
 
-#### `target_discovery.adapter`
+1. **Environment variables** (highest priority) -- format: `PASSAGE_<FIELD>` with `_` as separator
+2. **Auth secret file** -- sets only `auth_secret` (default path: `config/auth_secret`)
+3. **Configuration file** -- your deployment config (default path: `config/config`)
+4. **Default values** (lowest priority) -- built into Passage
 
-**Type:** `string`
-**Required:** Yes
-**Environment:** `PASSAGE_TARGET_DISCOVERY_ADAPTER`
-**Values:** `"fixed"`, `"grpc"`, `"agones"`
+### Environment Variables
 
-The adapter type for discovering backend servers.
+Override any configuration value:
 
-For detailed information, see [Target Discovery Adapters](/adapters/target-discovery/).
-
----
-
-#### Fixed Discovery Adapter
-
-Static list of backend servers.
-
-##### `target_discovery.fixed.targets`
-
-**Type:** `array of tables`
-**Required:** Yes
-
-List of backend server targets.
-
-**Fields:**
-- `identifier` (string, required): Unique server ID
-- `address` (string, required): Socket address `"host:port"`
-- `meta` (table, optional): Key-value metadata
-
-**Example:**
-```toml
-[target_discovery]
-adapter = "fixed"
-
-[[target_discovery.fixed.targets]]
-identifier = "hub-1"
-address = "10.0.1.10:25565"
-meta = { type = "hub", region = "us-east", players = "15" }
-
-[[target_discovery.fixed.targets]]
-identifier = "survival-1"
-address = "10.0.2.10:25565"
-meta = { type = "survival", region = "us-east" }
-```
-
----
-
-#### gRPC Discovery Adapter
-
-Dynamic discovery via gRPC service.
-
-##### `target_discovery.grpc.address`
-
-**Type:** `string` (URL)
-**Required:** Yes
-**Environment:** `PASSAGE_TARGET_DISCOVERY_GRPC_ADDRESS`
-
-gRPC discovery service address.
-
-**Example:**
-```toml
-[target_discovery]
-adapter = "grpc"
-
-[target_discovery.grpc]
-address = "http://discovery-service:3030"
-```
-
----
-
-#### Agones Discovery Adapter
-
-Discover game servers via Agones Kubernetes integration.
-
-##### `target_discovery.agones.namespace`
-
-**Type:** `string`
-**Default:** `"default"`
-**Environment:** `PASSAGE_TARGET_DISCOVERY_AGONES_NAMESPACE`
-
-Kubernetes namespace to search for GameServers.
-
-##### `target_discovery.agones.label_selector`
-
-**Type:** `string`
-**Default:** `""`
-**Environment:** `PASSAGE_TARGET_DISCOVERY_AGONES_LABEL_SELECTOR`
-
-Kubernetes label selector to filter GameServers.
-
-**Example:**
-```toml
-[target_discovery]
-adapter = "agones"
-
-[target_discovery.agones]
-namespace = "minecraft"
-label_selector = "game=minecraft,type=lobby"
-```
-
----
-
-### `[target_strategy]`
-
-Server selection strategy configuration.
-
-#### `target_strategy.adapter`
-
-**Type:** `string`
-**Required:** Yes
-**Environment:** `PASSAGE_TARGET_STRATEGY_ADAPTER`
-**Values:** `"fixed"`, `"player_fill"`, `"grpc"`
-
-The adapter type for selecting which server to route players to.
-
-For detailed information, see [Target Strategy Adapters](/adapters/target-strategy/).
-
----
-
-#### Fixed Strategy Adapter
-
-Always select the first available server.
-
-**Example:**
-```toml
-[target_strategy]
-adapter = "fixed"
-```
-
----
-
-#### Player Fill Strategy Adapter
-
-Route to server with lowest player count.
-
-##### `target_strategy.player_fill.field`
-
-**Type:** `string`
-**Default:** `"players"`
-**Environment:** `PASSAGE_TARGET_STRATEGY_PLAYER_FILL_FIELD`
-
-Metadata field name containing player count.
-
-##### `target_strategy.player_fill.max_players`
-
-**Type:** `integer`
-**Default:** `100`
-**Environment:** `PASSAGE_TARGET_STRATEGY_PLAYER_FILL_MAX_PLAYERS`
-
-Maximum players per server (servers at this limit are skipped).
-
-##### `target_strategy.player_fill.target_filters`
-
-**Type:** `array of tables`
-**Default:** `[]`
-
-Filters to match servers for specific criteria.
-
-**Filter Fields:**
-- `server_host` (string, optional): Match server hostname from handshake
-- `meta` (table, optional): Match metadata key-value pairs
-
-**Example:**
-```toml
-[target_strategy]
-adapter = "player_fill"
-
-[target_strategy.player_fill]
-field = "players"
-max_players = 50
-
-# Route lobby.example.com to lobby servers
-[[target_strategy.player_fill.target_filters]]
-server_host = "lobby.example.com"
-meta = { type = "lobby" }
-
-# Route play.example.com to game servers
-[[target_strategy.player_fill.target_filters]]
-server_host = "play.example.com"
-meta = { type = "game" }
-```
-
----
-
-#### gRPC Strategy Adapter
-
-Custom selection logic via gRPC service.
-
-##### `target_strategy.grpc.address`
-
-**Type:** `string` (URL)
-**Required:** Yes
-**Environment:** `PASSAGE_TARGET_STRATEGY_GRPC_ADDRESS`
-
-gRPC strategy service address.
-
-**Example:**
-```toml
-[target_strategy]
-adapter = "grpc"
-
-[target_strategy.grpc]
-address = "http://strategy-service:3030"
-```
-
----
-
-## Localization
-
-### `[localization]`
-
-Multi-language disconnect message configuration.
-
-#### `localization.default_locale`
-
-**Type:** `string`
-**Default:** `"en_US"`
-**Environment:** `PASSAGE_LOCALIZATION_DEFAULT_LOCALE`
-
-Default locale code when client locale is unknown.
-
-**Format:** `"<language>_<REGION>"` (e.g., `"en_US"`, `"es_ES"`, `"de_DE"`)
-
-#### `localization.messages`
-
-**Type:** `nested tables`
-**Structure:** `[localization.messages.<locale>]`
-
-Disconnect messages for each locale.
-
-**Message Keys:**
-- `disconnect_timeout`: Shown on connection timeout
-- `disconnect_no_target`: Shown when no backend server available
-- `disconnect_failed_resourcepack`: Shown on resource pack failure
-
-**Value Format:** Minecraft JSON text component (escaped string)
-
-**Placeholders:**
-- `{player}`: Player username
-- `{server}`: Server hostname
-- `{reason}`: Disconnect reason
-
-**Example:**
-```toml
-[localization]
-default_locale = "en_US"
-
-[localization.messages.en]
-disconnect_timeout = "{\"text\":\"Connection timeout\",\"color\":\"red\"}"
-disconnect_no_target = "{\"text\":\"No server available\",\"color\":\"yellow\"}"
-disconnect_failed_resourcepack = "{\"text\":\"Failed to load resource pack\"}"
-
-[localization.messages.es]
-disconnect_timeout = "{\"text\":\"Tiempo de espera agotado\",\"color\":\"red\"}"
-disconnect_no_target = "{\"text\":\"Servidor no disponible\",\"color\":\"yellow\"}"
-
-[localization.messages.de]
-disconnect_timeout = "{\"text\":\"Verbindungszeitüberschreitung\",\"color\":\"red\"}"
-disconnect_no_target = "{\"text\":\"Kein Server verfügbar\",\"color\":\"yellow\"}"
-
-[localization.messages.fr]
-disconnect_timeout = "{\"text\":\"Délai de connexion dépassé\",\"color\":\"red\"}"
-disconnect_no_target = "{\"text\":\"Aucun serveur disponible\",\"color\":\"yellow\"}"
-```
-
----
-
-## Complete Example Configurations
-
-### Minimal Setup
-
-A basic configuration for getting started:
-
-```toml
-address = "0.0.0.0:25565"
-timeout = 120
-
-[status]
-adapter = "fixed"
-[status.fixed]
-name = "My Server"
-
-[target_discovery]
-adapter = "fixed"
-[[target_discovery.fixed.targets]]
-identifier = "main"
-address = "127.0.0.1:25566"
-
-[target_strategy]
-adapter = "fixed"
-
-[localization]
-default_locale = "en_US"
-```
-
----
-
-### Production Setup
-
-A production-ready configuration with all features enabled:
-
-```toml
-address = "0.0.0.0:25565"
-timeout = 120
-
-[rate_limiter]
-enabled = true
-duration = 60
-size = 100
-
-[proxy_protocol]
-enabled = true
-
-[sentry]
-enabled = true
-debug = false
-address = "https://key@sentry.io/project"
-environment = "production"
-
-[otel]
-environment = "production"
-traces_endpoint = "https://traces.grafana.net/otlp/v1/traces"
-traces_token = "token"
-metrics_endpoint = "https://metrics.grafana.net/otlp/v1/metrics"
-metrics_token = "token"
-
-[status]
-adapter = "http"
-[status.http]
-address = "https://status.example.com/minecraft"
-cache_duration = 5
-
-[target_discovery]
-adapter = "agones"
-[target_discovery.agones]
-namespace = "minecraft"
-label_selector = "game=minecraft"
-
-[target_strategy]
-adapter = "player_fill"
-[target_strategy.player_fill]
-field = "players"
-max_players = 50
-
-[localization]
-default_locale = "en_US"
-```
-
----
-
-## Environment Variable Mapping
-
-All configuration values can be overridden with environment variables using the format:
-
-```
-PASSAGE_<SECTION>_<SUBSECTION>_<FIELD>=value
-```
-
-**Examples:**
 ```bash
-# Core settings
 export PASSAGE_ADDRESS="0.0.0.0:25565"
 export PASSAGE_TIMEOUT=120
+export PASSAGE_RATE_LIMITER_DURATION=60
+export PASSAGE_RATE_LIMITER_LIMIT=100
+```
 
-# Nested settings
-export PASSAGE_RATE_LIMITER_ENABLED=true
-export PASSAGE_RATE_LIMITER_SIZE=100
-
-# Adapter settings
-export PASSAGE_STATUS_ADAPTER="fixed"
-export PASSAGE_STATUS_FIXED_NAME="My Server"
-export PASSAGE_TARGET_DISCOVERY_ADAPTER="grpc"
-export PASSAGE_TARGET_DISCOVERY_GRPC_ADDRESS="http://localhost:3030"
-
-# Custom prefix
+Change the environment variable prefix:
+```bash
 export ENV_PREFIX=MYAPP
 export MYAPP_ADDRESS="0.0.0.0:25565"
 ```
 
----
+### Configuration File Formats
 
-## Configuration File Formats
+Passage auto-detects the format from the file extension:
 
-Passage supports multiple configuration file formats:
-
-### TOML (default)
 ```bash
-CONFIG_FILE=config/old_config.toml passage
-```
-
-### JSON
-```bash
-CONFIG_FILE=config/config.json passage
-```
-
-### YAML
-```bash
-CONFIG_FILE=config/config.yaml passage
+CONFIG_FILE=config/config.yaml passage    # YAML
+CONFIG_FILE=config/config.toml passage    # TOML
+CONFIG_FILE=config/config.json passage    # JSON
 ```

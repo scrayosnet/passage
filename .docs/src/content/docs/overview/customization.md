@@ -5,281 +5,170 @@ sidebar:
   order: 5
 ---
 
-Passage is designed to be highly customizable while maintaining simplicity. This page provides an overview of customization options and helps you understand which customizations are right for your network.
+Passage is designed to be highly customizable while maintaining simplicity. This page provides an overview of customization options and helps you choose the right approach for your network.
 
-## Philosophy: Start Simple, Scale Complexity
+## Start Simple, Scale Complexity
 
 Passage follows a progressive enhancement philosophy:
 
-1. **Start with fixed adapters** - Get running quickly with static configuration
-2. **Add dynamic elements** - Introduce HTTP or Agones adapters as needed
-3. **Implement custom logic** - Use gRPC adapters for complex requirements
-4. **Monitor and optimize** - Add observability and fine-tune performance
+1. **Start with fixed adapters** -- Get running quickly with static configuration
+2. **Add dynamic elements** -- Introduce DNS discovery, HTTP status, or Agones as needed
+3. **Implement custom logic** -- Use gRPC adapters for complex requirements
+4. **Monitor and optimize** -- Add observability and fine-tune performance
 
 You don't need to use all features at once. Many successful networks run with just fixed adapters.
 
 ## What Can Be Customized?
 
 ### Core Settings
-- **Network binding**: Which address and port to listen on
-- **Timeouts**: Connection timeout durations
-- **Rate limiting**: Connection flood protection
-- **PROXY protocol**: Support for load balancers
+- Network binding address and port
+- Connection timeouts
+- Rate limiting (per-IP connection flood protection)
+- PROXY protocol support for load balancers
+- Authentication cookie expiry
 
-[→ Configuration Reference](/reference/configuration/)
+[Configuration Reference](/reference/configuration/)
 
-### Status Information
-Control what players see in their server list:
-- Server name (MOTD)
-- Player counts
-- Favicon
-- Version compatibility
+### Per-Route Adapters
 
-**Available options:**
-- Static configuration
-- Dynamic HTTP endpoint
-- Custom gRPC service
+Each route independently configures five adapter categories:
 
-[→ Status Adapters Guide](/adapters/status/)
+| Category | What It Controls | Options |
+|----------|-----------------|---------|
+| **Status** | Server list response (MOTD, player count, favicon) | `fixed`, `http`, `grpc` |
+| **Authentication** | Player identity verification | `mojang`, `disabled`, `fixed`, `grpc` |
+| **Discovery** | How backend servers are found | `fixed_discovery`, `dns_discovery`, `agones_discovery`, `grpc_discovery` |
+| **Discovery Actions** | How the target list is filtered/ordered | `meta_filter`, `player_allow_filter`, `player_block_filter`, `player_fill_strategy`, `grpc` |
+| **Localization** | Disconnect message translations | `fixed`, `grpc` |
 
-### Server Discovery
-Determine which backend servers are available:
-- Static server list
-- Dynamic from external service
-- Auto-discovery from Kubernetes/Agones
-
-**Available options:**
-- Fixed configuration
-- gRPC service
-- Agones GameServer discovery
-
-[→ Target Discovery Guide](/adapters/target-discovery/)
-
-### Routing Strategy
-Choose how players are distributed across servers:
-- First available
-- Fill servers sequentially
-- Custom logic (region-based, skill-based, etc.)
-
-**Available options:**
-- Fixed (first server)
-- Player Fill (consolidate players)
-- gRPC (custom logic)
-
-[→ Target Strategy Guide](/adapters/target-strategy/)
+[Adapter Overview](/adapters/)
 
 ### Observability
-Monitor Passage's performance and health:
-- OpenTelemetry metrics and traces
+- OpenTelemetry traces, metrics, and logs
 - Sentry error tracking
-- Structured logging
+- Structured logging with configurable levels
 
-[→ Monitoring Guide](/advanced/observability/)
+[Monitoring Guide](/advanced/observability/)
 
-### Localization
-Customize disconnect messages in multiple languages:
-- Default locale selection
-- Per-locale message customization
-- Parameter substitution support
+## Common Scenarios
 
-[→ Localization Guide](/advanced/localization/)
+### Small Static Network
 
-## Common Customization Scenarios
+2-3 fixed servers, simple routing:
 
-### Scenario 1: Small Static Network
-
-**Need:** 2-3 fixed servers, simple routing
-
-**Solution:**
-```toml
-[status]
-adapter = "fixed"
-
-[target_discovery]
-adapter = "fixed"
-[[target_discovery.fixed.targets]]
-identifier = "lobby"
-address = "10.0.0.10:25565"
-
-[target_strategy]
-adapter = "fixed"
+```yaml
+routes:
+- hostname: "mc.example.net"
+  status:
+    type: fixed
+    name: "My Network"
+  discovery:
+    type: fixed_discovery
+    targets:
+    - identifier: "lobby"
+      address: "10.0.0.10:25565"
 ```
 
-**Complexity:** None - pure configuration
+**Complexity:** None -- pure configuration.
 
----
+### Multiple Lobbies with Load Balancing
 
-### Scenario 2: Multiple Lobbies with Fill Strategy
+Fill the fullest server below capacity:
 
-**Need:** 5 lobby servers, consolidate players for better experience
-
-**Solution:**
-```toml
-[status]
-adapter = "fixed"
-
-[target_discovery]
-adapter = "fixed"
-# ... list all 5 lobbies with player counts in metadata
-
-[target_strategy]
-adapter = "player_fill"
-[target_strategy.player_fill]
-field = "players"
-max_players = 50
+```yaml
+routes:
+- hostname: "mc.example.net"
+  discovery:
+    type: fixed_discovery
+    targets:
+    - identifier: "lobby-1"
+      address: "10.0.1.10:25565"
+      meta: { players: "45" }
+    - identifier: "lobby-2"
+      address: "10.0.1.11:25565"
+      meta: { players: "38" }
+    actions:
+    - type: player_fill_strategy
+      field: "players"
+      max_players: 50
 ```
 
-**Complexity:** Low - requires updating player counts in metadata
+**Complexity:** Low -- requires updating player counts in metadata (or use DNS/Agones for dynamic data).
 
----
+### DNS Discovery with Filtering
 
-### Scenario 3: Kubernetes with Auto-Scaling
+Automatic server discovery with metadata-based filtering:
 
-**Need:** Cloud deployment with dynamic game servers
-
-**Solution:**
-```toml
-[status]
-adapter = "http"
-[status.http]
-address = "http://status-service/status"
-cache_duration = 5
-
-[target_discovery]
-adapter = "agones"
-[target_discovery.agones]
-namespace = "minecraft"
-
-[target_strategy]
-adapter = "player_fill"
-[target_strategy.player_fill]
-field = "players"
-max_players = 50
+```yaml
+routes:
+- hostname: "mc.example.net"
+  discovery:
+    type: dns_discovery
+    domain: "servers.example.net"
+    record_type: srv
+    actions:
+    - type: meta_filter
+      rules:
+      - key: "status"
+        op: equals
+        value: "online"
+    - type: player_fill_strategy
+      field: "players"
+      max_players: 50
 ```
 
-**Complexity:** Medium - requires Kubernetes and Agones setup
+**Complexity:** Medium -- requires DNS infrastructure.
 
----
+### Kubernetes with Agones
 
-### Scenario 4: Multi-Region Routing
+Cloud deployment with dynamic game servers:
 
-**Need:** Route players to nearest regional server based on IP
-
-**Solution:**
-```toml
-[status]
-adapter = "grpc"
-
-[target_discovery]
-adapter = "grpc"
-
-[target_strategy]
-adapter = "grpc"
-# Custom gRPC service implements geo-IP lookup
+```yaml
+routes:
+- hostname: "mc.example.net"
+  status:
+    type: http
+    address: "http://status-service.minecraft/status"
+    cache_duration: 30
+  discovery:
+    type: agones_discovery
+    namespace: "minecraft"
+    selectors:
+    - matchLabels:
+        game: "minecraft"
+        type: "lobby"
+    scheduling: "Packed"
 ```
 
-**Complexity:** High - requires custom gRPC services
+**Complexity:** Medium -- requires Kubernetes and Agones setup. See [Kubernetes Guide](/setup/kubernetes/).
 
-[→ Custom gRPC Adapters Guide](/advanced/grpc-adapters/)
+### Multi-Region with Custom Routing
 
-## Customization Roadmap
+Full gRPC adapter stack for complex logic:
 
-### Phase 1: Getting Started
-1. Install Passage with default configuration
-2. Configure one backend server
-3. Test connection flow
-4. Enable rate limiting
+```yaml
+routes:
+- hostname: "mc.example.net"
+  status:
+    type: grpc
+    address: "http://status-service:50051"
+  discovery:
+    type: grpc_discovery
+    address: "http://discovery-service:50051"
+    actions:
+    - type: grpc
+      name: "region-router"
+      address: "http://router-service:50051"
+```
 
-### Phase 2: Basic Customization
-1. Customize status (MOTD, favicon)
-2. Add multiple backend servers
-3. Configure player fill strategy
-4. Set up basic monitoring
-
-### Phase 3: Dynamic Elements
-1. Switch to HTTP status adapter (if needed)
-2. Integrate with Kubernetes/Agones (if applicable)
-3. Implement custom target filters
-4. Add localization for your languages
-
-### Phase 4: Advanced Features
-1. Implement custom gRPC adapters
-2. Add complex routing logic
-3. Integrate with existing infrastructure
-4. Optimize for high-scale deployment
+**Complexity:** High -- requires custom gRPC services. See [Custom gRPC Adapters](/advanced/grpc-adapters/).
 
 ## Best Practices
 
-### Configuration Management
-
-✅ **Do:**
-- Use version control for config files (except secrets)
-- Start with minimal config and add as needed
-- Document your customizations
-- Test configuration changes in staging first
-
-❌ **Don't:**
-- Commit secrets to version control
-- Over-configure before understanding needs
-- Change too many things at once
-- Skip testing after config changes
-
-### Adapter Selection
-
-✅ **Do:**
-- Choose the simplest adapter that meets your needs
-- Keep adapters fast (<50ms response time)
-- Monitor adapter performance
-- Implement fallback behavior
-
-❌ **Don't:**
-- Use gRPC adapters unless you need custom logic
-- Make slow API calls in adapter implementations
-- Forget to cache expensive operations
-- Block on I/O in adapter code
-
-### Performance Optimization
-
-✅ **Do:**
-- Enable rate limiting in production
-- Use appropriate cache durations
-- Monitor connection latency
-- Scale horizontally when needed
-
-❌ **Don't:**
-- Run without rate limiting
-- Cache status for too long (>30 seconds)
-- Ignore performance metrics
-- Add unnecessary complexity
-
-## Customization Checklist
-
-Before deploying your customized Passage:
-
-- [ ] Configuration is complete and valid
-- [ ] All adapters respond quickly (<50ms)
-- [ ] Rate limiting is enabled and tuned
-- [ ] Observability is configured
-- [ ] Localization covers your player base
-- [ ] Failover behavior is tested
-- [ ] Documentation is updated
-- [ ] Staging environment tested successfully
-- [ ] Rollback plan is in place
-- [ ] Monitoring alerts are configured
-
-## Getting Help
-
-### Documentation Resources
-- [Configuration Reference](/reference/configuration/) - All config options
-- [Adapter Overview](/adapters/) - Understanding adapters
-- [Advanced Topics](/advanced/grpc-adapters/) - Complex customizations
-
-### Community Support
-- [GitHub Discussions](https://github.com/scrayosnet/passage/discussions) - Ask questions
-- [Discord Server](https://discord.gg/xZ4wbuuKZf) - Real-time help
-- [GitHub Issues](https://github.com/scrayosnet/passage/issues) - Report bugs
-
-### Professional Support
-For enterprise deployments or custom development:
-- Contact the maintainers via GitHub
-- Consider sponsoring the project for priority support
+- **Choose the simplest adapter** that meets your needs
+- **Keep adapter response times under 50ms** -- slow adapters delay player connections
+- **Enable rate limiting** in production
+- **Start with fixed adapters** and upgrade as your needs grow
+- **Monitor adapter performance** with OpenTelemetry
+- **Test configuration changes** in a staging environment before production
+- **Use descriptive `name` fields** on discovery actions for easier debugging

@@ -138,7 +138,7 @@ User=minecraft
 ExecStart=/usr/local/bin/passage
 WorkingDirectory=/opt/passage
 Restart=always
-Environment="CONFIG_FILE=/opt/passage/config/config.toml"
+Environment="CONFIG_FILE=/opt/passage/config/config.yaml"
 
 [Install]
 WantedBy=multi-user.target

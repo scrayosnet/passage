@@ -63,12 +63,21 @@ Caches validated player profile data to skip Mojang API calls on reconnection. B
 
 ### Configuration
 
-```toml
-auth_secret_file = "config/auth_secret"
-auth_cookie_expiry_secs = 60  # Recommended: 60 seconds (1 minute)
+```yaml
+auth_cookie_expiry: 60  # Recommended: 60 seconds (1 minute)
+auth_secret: "config/auth_secret"  # Path to secret file
 ```
 
-The `auth_cookie_expiry_secs` setting controls how long cookies remain valid. **Recommended: 60 seconds (1 minute)** for production environments. Since cookies are refreshed on every transfer, active players will never experience authentication issues. Only returning players who haven't connected within the expiry window will need to re-authenticate with Mojang.
+Or via environment variables:
+
+```bash
+export PASSAGE_AUTH_COOKIE_EXPIRY=60
+export AUTH_SECRET_FILE=config/auth_secret
+```
+
+The `auth_cookie_expiry` setting controls how long cookies remain valid (in seconds). **Recommended: 60 seconds (1 minute)** for production environments. Since cookies are refreshed on every transfer, active players will never experience authentication issues. Only returning players who haven't connected within the expiry window will need to re-authenticate with Mojang.
+
+The auth secret can be configured either via the `auth_secret` config field (path to a file containing the secret) or via the `AUTH_SECRET_FILE` environment variable.
 
 Generate and secure the secret:
 
@@ -169,7 +178,7 @@ volumeMounts:
 - Check `auth_secret` is configured and consistent across all servers
 - Cookie expires after configured duration (default 6 hours, recommended 60 seconds)
 - IP address must match (NAT changes invalidate cookie)
-- Verify `auth_cookie_expiry_secs` is configured appropriately
+- Verify `auth_cookie_expiry` is configured appropriately
 - Check logs for validation errors
 
 **Session cookie not persisting** (new ID every time):

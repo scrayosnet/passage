@@ -31,7 +31,7 @@ This comparison may be biased, but we've done our best to give you an accurate o
 | Plugins/extensions | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Secure player forwarding | ❌ | ❌ | ✅ | ✅ | ✅ |
 | Mojang chat signing | ⚠️ Limited | ⚠️ Limited | ⚠️ Limited | ⚠️ Limited | ✅ Full |
-| Resource pack handling | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Resource pack handling | ✅ | ✅ | ✅ | ✅ | N/A |
 | **Version Support** |
 | Latest Minecraft version | ⚠️ After update | ⚠️ After update | ✅ Usually | ✅ Fast | ✅✅ Always |
 | Protocol independence | ❌ | ❌ | ❌ | ❌ | ✅ |
@@ -40,6 +40,10 @@ This comparison may be biased, but we've done our best to give you an accurate o
 | Actively maintained | ❓ | ❌ | ✅ | ✅ | ✅ |
 | Modern codebase | ❌ | ❌ | ✅ | ✅ | ✅ |
 | Open source | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+:::note[Resource Pack Handling]
+Resource packs are marked N/A for Passage because they are handled by the backend game server directly — not the proxy. Since Passage transfers players to backends immediately, the backend server manages resource pack delivery as it would in a standard direct connection. This is actually simpler: your game servers control their own resource packs without any proxy configuration.
+:::
 
 ## Key Advantages of Passage
 

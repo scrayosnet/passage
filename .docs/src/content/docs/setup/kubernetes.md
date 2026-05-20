@@ -1,6 +1,8 @@
 ---
 title: Kubernetes Deployment
 description: Deploy Passage on Kubernetes with high availability and auto-scaling.
+sidebar:
+    order: 4
 ---
 
 This guide covers deploying Passage on Kubernetes, from basic setups to production-grade configurations with Agones integration.
@@ -9,16 +11,12 @@ This guide covers deploying Passage on Kubernetes, from basic setups to producti
 
 - Kubernetes cluster (1.25+)
 - `kubectl` configured
-- Basic understanding of Kubernetes concepts
 - (Optional) Helm 3.x for chart-based deployment
 - (Optional) Agones installed for game server discovery
 
-## Quick Start
+## Quick Start with Helm (Recommended)
 
-### Using Helm (Recommended)
-
-The official Helm Chart is the easiest way to deploy Passage on Kubernetes. It is published to the GitHub
-Container Registry and can be installed with a single command:
+The official Helm chart is the easiest way to deploy Passage:
 
 ```sh
 helm install passage oci://ghcr.io/scrayosnet/helm/passage \
@@ -26,7 +24,7 @@ helm install passage oci://ghcr.io/scrayosnet/helm/passage \
   --namespace passage --create-namespace
 ```
 
-By default the service type is `ClusterIP`. To expose Passage directly via a cloud load balancer, override it:
+To expose Passage via a cloud load balancer:
 
 ```sh
 helm install passage oci://ghcr.io/scrayosnet/helm/passage \
@@ -35,7 +33,9 @@ helm install passage oci://ghcr.io/scrayosnet/helm/passage \
   --set service.type=LoadBalancer
 ```
 
-To provide the Passage application configuration and enable Agones-based server discovery, use a `values.yaml` file:
+### Helm with Custom Configuration
+
+Create a `values.yaml` to configure Passage and enable Agones:
 
 ```yaml
 # values.yaml
@@ -43,12 +43,13 @@ service:
   type: LoadBalancer
 
 config:
-  # Passage application configuration (see Reference > Configuration)
+  # Passage application configuration goes here
+  # See Reference > Configuration for all options
 
 rbac:
   agones:
     enabled: true
-    gameserverNamespace: minecraft  # namespace where your GameServers are deployed
+    gameserverNamespace: minecraft
 ```
 
 ```sh
@@ -58,48 +59,43 @@ helm install passage oci://ghcr.io/scrayosnet/helm/passage \
   -f values.yaml
 ```
 
-All available options are documented in
-[`helm/values.yaml`](https://github.com/scrayosnet/passage/blob/main/helm/values.yaml).
+All available options are documented in [`helm/values.yaml`](https://github.com/scrayosnet/passage/blob/main/helm/values.yaml).
 
-### Manual Deployment
+## Manual Deployment
 
-Create a minimal Passage deployment:
+### ConfigMap
 
 ```yaml
-# passage-deployment.yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: passage
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: passage-config
   namespace: passage
 data:
-  config.toml: |
-    address = "0.0.0.0:25565"
-    timeout = 120
+  config.yaml: |
+    address: "0.0.0.0:25565"
+    timeout: 120
 
-    [status]
-    adapter = "fixed"
-    [status.fixed]
-    name = "My Kubernetes Network"
-    description = "\"Powered by Passage\""
+    rate_limiter:
+      duration: 60
+      limit: 60
 
-    [target_discovery]
-    adapter = "fixed"
-    [[target_discovery.fixed.targets]]
-    identifier = "hub-1"
-    address = "hub-service.minecraft:25565"
+    routes:
+    - hostname: "mc.example.net"
+      status:
+        type: fixed
+        name: "My Kubernetes Network"
+        description: "\"Powered by Passage\""
+      discovery:
+        type: fixed_discovery
+        targets:
+        - identifier: "hub-1"
+          address: "hub-service.minecraft:25565"
+```
 
-    [target_strategy]
-    adapter = "fixed"
+### Deployment
 
-    [localization]
-    default_locale = "en_US"
----
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -139,7 +135,11 @@ spec:
       - name: config
         configMap:
           name: passage-config
----
+```
+
+### Service
+
+```yaml
 apiVersion: v1
 kind: Service
 metadata:
@@ -147,6 +147,7 @@ metadata:
   namespace: passage
 spec:
   type: LoadBalancer
+  externalTrafficPolicy: Local  # Preserve client IP
   ports:
   - port: 25565
     targetPort: 25565
@@ -159,16 +160,12 @@ spec:
 Deploy:
 ```bash
 kubectl apply -f passage-deployment.yaml
-```
-
-Get the external IP:
-```bash
-kubectl get svc passage -n passage
+kubectl get svc passage -n passage  # Get external IP
 ```
 
 ## Production Configuration
 
-### High Availability Setup
+### High Availability
 
 ```yaml
 apiVersion: apps/v1
@@ -177,7 +174,7 @@ metadata:
   name: passage
   namespace: passage
 spec:
-  replicas: 3  # Multiple instances
+  replicas: 3
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -191,7 +188,6 @@ spec:
       labels:
         app: passage
     spec:
-      # Anti-affinity: spread across nodes
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -201,8 +197,7 @@ spec:
                 matchExpressions:
                 - key: app
                   operator: In
-                  values:
-                  - passage
+                  values: [passage]
               topologyKey: kubernetes.io/hostname
       containers:
       - name: passage
@@ -217,7 +212,6 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "1000m"
-        # Health checks
         livenessProbe:
           tcpSocket:
             port: 25565
@@ -252,21 +246,14 @@ spec:
 ### Authentication Secret
 
 ```bash
-# Generate auth secret
 openssl rand -base64 32 > auth_secret
-
-# Create Kubernetes secret
 kubectl create secret generic passage-auth-secret \
   --from-file=auth-secret=auth_secret \
   -n passage
-
-# Clean up local file
 rm auth_secret
 ```
 
-### Resource Limits
-
-Recommended resource allocation:
+### Resource Guidelines
 
 | Scenario | CPU Request | CPU Limit | Memory Request | Memory Limit |
 |----------|-------------|-----------|----------------|--------------|
@@ -276,26 +263,11 @@ Recommended resource allocation:
 
 ## Agones Integration
 
-### Installing Agones
-
-```bash
-# Add Agones Helm repository
-helm repo add agones https://agones.dev/chart/stable
-helm repo update
-
-# Install Agones
-kubectl create namespace agones-system
-helm install agones --namespace agones-system agones/agones
-```
-
 ### RBAC Permissions
 
-Passage needs permissions to list, watch and patch GameServers, and to create GameServerAllocations.
+When using the Helm chart, set `rbac.agones.enabled: true` -- the chart creates the necessary ClusterRole and RoleBinding automatically.
 
-When using the Helm Chart, set `rbac.agones.enabled: true` and `rbac.agones.gameserverNamespace` — the chart
-creates the ClusterRole and a RoleBinding in the GameServer namespace automatically.
-
-For a manual setup:
+For manual setup:
 
 ```yaml
 apiVersion: v1
@@ -343,35 +315,33 @@ metadata:
   name: passage-config
   namespace: passage
 data:
-  config.toml: |
-    address = "0.0.0.0:25565"
-    timeout = 120
+  config.yaml: |
+    address: "0.0.0.0:25565"
+    timeout: 120
 
-    [status]
-    adapter = "http"
-    [status.http]
-    address = "http://status-service.minecraft/status"
-    cache_duration = 5
+    rate_limiter:
+      duration: 60
+      limit: 100
 
-    [target_discovery]
-    adapter = "agones"
-    [target_discovery.agones]
-    namespace = "minecraft"
-    label_selector = "game=minecraft,type=lobby"
-
-    [target_strategy]
-    adapter = "player_fill"
-    [target_strategy.player_fill]
-    field = "players"
-    max_players = 50
-
-    [rate_limiter]
-    enabled = true
-    duration = 60
-    size = 100
-
-    [localization]
-    default_locale = "en_US"
+    routes:
+    - hostname: "mc.example.net"
+      status:
+        type: http
+        address: "http://status-service.minecraft/status"
+        cache_duration: 30
+      discovery:
+        type: agones_discovery
+        namespace: "minecraft"
+        selectors:
+        - matchLabels:
+            game: "minecraft"
+            type: "lobby"
+        scheduling: "Packed"
+        actions:
+        - type: player_fill_strategy
+          name: "fill"
+          field: "players"
+          max_players: 50
 ```
 
 ### Example GameServer Fleet
@@ -410,61 +380,15 @@ spec:
               value: "PAPER"
 ```
 
-## Networking
-
-### LoadBalancer Service
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: passage
-  namespace: passage
-spec:
-  type: LoadBalancer
-  externalTrafficPolicy: Local  # Preserve client IP
-  ports:
-  - port: 25565
-    targetPort: 25565
-    protocol: TCP
-    name: minecraft
-  selector:
-    app: passage
-```
-
-### NodePort Service
-
-For on-premise or specific cloud setups:
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: passage
-  namespace: passage
-spec:
-  type: NodePort
-  ports:
-  - port: 25565
-    targetPort: 25565
-    nodePort: 30565  # Must be in 30000-32767 range
-    protocol: TCP
-  selector:
-    app: passage
-```
-
-### Ingress (Not Recommended)
-
-Minecraft protocol is TCP-based and doesn't work well with HTTP-based ingress controllers. Use LoadBalancer or NodePort instead.
-
 ## PROXY Protocol
 
-If using a load balancer that supports PROXY protocol:
+If your load balancer sends PROXY protocol headers:
 
 ```yaml
-# In passage-config ConfigMap
-[proxy_protocol]
-enabled = true
+# In the Passage config
+proxy_protocol:
+  allow_v1: true
+  allow_v2: true
 ```
 
 AWS NLB example:
@@ -486,6 +410,18 @@ spec:
     protocol: TCP
   selector:
     app: passage
+```
+
+## OpenTelemetry
+
+```yaml
+# In the Passage config
+otel:
+  environment: "production"
+  traces:
+    address: "http://tempo.monitoring:4318/v1/traces"
+  metrics:
+    address: "http://mimir.monitoring:4318/v1/metrics"
 ```
 
 ## Horizontal Pod Autoscaling
@@ -510,43 +446,6 @@ spec:
       target:
         type: Utilization
         averageUtilization: 70
-  - type: Resource
-    resource:
-      name: memory
-      target:
-        type: Utilization
-        averageUtilization: 80
-```
-
-## Monitoring
-
-### Prometheus ServiceMonitor
-
-```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: passage
-  namespace: passage
-spec:
-  selector:
-    matchLabels:
-      app: passage
-  endpoints:
-  - port: metrics
-    interval: 30s
-```
-
-### OpenTelemetry Configuration
-
-```yaml
-# In passage-config ConfigMap
-[otel]
-environment = "production"
-traces_endpoint = "http://tempo.monitoring:4318/v1/traces"
-traces_token = ""
-metrics_endpoint = "http://mimir.monitoring:4318/v1/metrics"
-metrics_token = ""
 ```
 
 ## Troubleshooting
@@ -554,27 +453,16 @@ metrics_token = ""
 ### Pods Not Starting
 
 ```bash
-# Check pod status
 kubectl get pods -n passage
-
-# View logs
 kubectl logs -n passage -l app=passage
-
-# Describe pod for events
 kubectl describe pod -n passage <pod-name>
 ```
 
-### Can't Connect from Minecraft Client
+### Can't Connect from Minecraft
 
 ```bash
-# Check service
 kubectl get svc passage -n passage
-
-# Check if LoadBalancer got external IP
-kubectl get svc passage -n passage -o jsonpath='{.status.loadBalancer.ingress[0]}'
-
-# Test connection to pod directly
-kubectl port-forward -n passage svc/passage 25565:25565
+kubectl port-forward -n passage svc/passage 25565:25565  # Test locally
 ```
 
 ### Agones Discovery Not Working
@@ -588,52 +476,17 @@ kubectl auth can-i watch gameservers \
 # Check GameServers exist
 kubectl get gameservers -n minecraft
 
-# Check Passage logs for Agones errors
+# Check Passage logs
 kubectl logs -n passage -l app=passage | grep agones
 ```
 
-### High CPU Usage
-
-- Check rate limiter is enabled
-- Review adapter response times
-- Consider increasing replicas instead of resources
-
-### Memory Leak
-
-Passage is stateless and should have constant memory. If memory grows:
-- Check for goroutine leaks (shouldn't happen in Rust)
-- Review logs for errors
-- File a bug report with metrics
-
 ## Best Practices
 
-### Security
-
-✅ Use NetworkPolicies to restrict traffic
-✅ Run with non-root user (Passage default)
-✅ Store secrets in Kubernetes Secrets
-✅ Use RBAC with minimal permissions
-✅ Enable Pod Security Standards
-
-### Reliability
-
-✅ Run multiple replicas (minimum 2)
-✅ Use pod anti-affinity
-✅ Configure health checks
-✅ Set resource requests and limits
-✅ Enable HPA for auto-scaling
-
-### Performance
-
-✅ Use `externalTrafficPolicy: Local` for LoadBalancer
-✅ Enable rate limiting
-✅ Right-size resource requests
-✅ Monitor with Prometheus/OpenTelemetry
-
-### Operations
-
-✅ Use specific image tags (not `latest`)
-✅ Implement zero-downtime rolling updates
-✅ Configure logging aggregation
-✅ Set up alerting for key metrics
-✅ Document your configuration
+- Use **specific image tags** (not `latest`) for reproducible deployments
+- Run at least **2 replicas** with pod anti-affinity for high availability
+- Use `externalTrafficPolicy: Local` to preserve client IP addresses
+- Store the auth secret in a Kubernetes Secret, not in the ConfigMap
+- Enable rate limiting in production
+- Configure liveness and readiness probes
+- Set appropriate resource requests and limits
+- Use RBAC with minimal permissions

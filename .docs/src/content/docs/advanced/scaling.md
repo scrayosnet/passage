@@ -248,14 +248,14 @@ spec:
 When using load balancers, enable PROXY protocol to preserve client IP addresses:
 
 **Passage Configuration**:
-```toml
-[proxy_protocol]
-enabled = true
+```yaml
+proxy_protocol:
+  allow_v1: true
+  allow_v2: true
 
-[rate_limiter]
-enabled = true
-duration = 60
-size = 60  # 60 connections per minute per IP
+rate_limiter:
+  duration: 60
+  limit: 60  # 60 connections per minute per IP
 ```
 
 This is crucial for rate limiting and security features that rely on client IP addresses.
@@ -279,11 +279,10 @@ Different algorithms suit different use cases:
 
 Passage includes built-in rate limiting to prevent abuse:
 
-```toml
-[rate_limiter]
-enabled = true
-duration = 60      # Time window in seconds
-size = 60          # Max connections per IP per window
+```yaml
+rate_limiter:
+  duration: 60      # Time window in seconds
+  limit: 60         # Max connections per IP per window
 ```
 
 **How it Works**:
@@ -359,21 +358,13 @@ func (s *server) SelectTarget(ctx context.Context, req *pb.SelectTargetRequest) 
 Passage has a small memory footprint, but you can optimize further:
 
 **Disable Unused Features**:
-```toml
-# Disable Sentry if not needed
-[sentry]
-enabled = false
 
-# Disable OpenTelemetry if not needed
-[otel]
-metrics_token = ""
-traces_token = ""
-```
+Sentry and OpenTelemetry are disabled by default — simply omit their configuration sections. Only add them when needed.
 
 **Reduce Timeouts**:
-```toml
+```yaml
 # Lower connection timeout for faster cleanup
-timeout = 60  # Default: 120 seconds
+timeout: 60  # Default: 120 seconds
 ```
 
 **Resource Limits (Kubernetes)**:
@@ -427,11 +418,14 @@ Ensure MTU is consistent across your network (typically 1500 for Ethernet, 9000 
 **Connection Pooling for Adapters**:
 When using HTTP/gRPC adapters, connection pooling is automatic. For high-traffic scenarios, increase timeouts:
 
-```toml
-# Example: HTTP adapter with caching
-[status.http]
-address = "https://status-service/status"
-cache_duration = 5  # Cache for 5 seconds to reduce backend load
+```yaml
+# Example: HTTP status adapter with caching
+routes:
+- hostname: "mc.example.net"
+  status:
+    type: http
+    address: "https://status-service/status"
+    cache_duration: 30  # Cache for 30 seconds to reduce backend load
 ```
 
 ## Monitoring and Observability
@@ -670,13 +664,13 @@ Before deploying Passage at scale, verify:
 - Memory leak (unlikely, but report if suspected)
 
 **Solutions**:
-```toml
+```yaml
 # Reduce timeout
-timeout = 60  # Down from 120
+timeout: 60  # Down from 120
 
 # Tighten rate limiter window
-[rate_limiter]
-duration = 30  # Down from 60
+rate_limiter:
+  duration: 30  # Down from 60
 ```
 
 Restart pods to clear rate limiter state.
@@ -701,9 +695,9 @@ Restart pods to clear rate limiter state.
        value: 100  # Double replicas quickly
    ```
 3. Increase rate limit:
-   ```toml
-   [rate_limiter]
-   size = 100  # Up from 60
+   ```yaml
+   rate_limiter:
+     limit: 100  # Up from 60
    ```
 
 ### Issue: Backend Adapter Latency
@@ -716,10 +710,12 @@ Restart pods to clear rate limiter state.
 - Network latency to adapter
 
 **Solutions**:
-1. Enable caching for HTTP adapters:
-   ```toml
-   [status.http]
-   cache_duration = 5  # Cache for 5 seconds
+1. Enable caching for HTTP status adapters:
+   ```yaml
+   status:
+     type: http
+     address: "https://status-service/status"
+     cache_duration: 30  # Cache for 30 seconds
    ```
 2. Scale backend adapter services
 3. Use co-located adapters (same cluster/region)
