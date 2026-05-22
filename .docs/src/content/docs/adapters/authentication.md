@@ -41,7 +41,7 @@ Use `mojang` authentication for all production networks. It ensures only legitim
 
 ## Disabled Adapter
 
-Skips authentication entirely. The connection is not encrypted.
+Skips authentication entirely and uses the client reported identity.
 
 ```yaml
 routes:

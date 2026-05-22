@@ -190,7 +190,7 @@ actions:
 
 ## Player Fill Strategy
 
-Reorders targets so that the fullest server below the `max_players` capacity is selected first. Servers at or above `max_players` are skipped. Among servers with equal player counts, one is chosen randomly.
+Reorders targets so that the fullest server below the `max_players` capacity is selected first. Servers at or above `max_players` are ordered in reverse (fullst last). Among servers with equal player counts, one is chosen randomly.
 
 ```yaml
 actions:
@@ -204,7 +204,7 @@ actions:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `field` | string | `""` | Metadata key containing the current player count. |
-| `max_players` | integer | `0` | Maximum players per server. Servers at or above this limit are skipped. |
+| `max_players` | integer | `0` | Maximum players per server. |
 
 ### How It Works
 
