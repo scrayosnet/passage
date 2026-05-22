@@ -84,6 +84,7 @@ documentation.workspace = true
 homepage.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+default-run = "passage"
 
 [dependencies]
 passage-adapters = { workspace = true }
@@ -123,6 +124,10 @@ adapters-agones = ["dep:passage-adapters-agones"]
 adapters-http = ["dep:passage-adapters-http"]
 adapters-dns = ["dep:passage-adapters-dns"]
 config-schema = ["dep:schemars", "passage-adapters/config-schema"]
+
+[[bin]]
+name="passage"
+path="src/main.rs"
 
 [[bin]]
 name="schema"
