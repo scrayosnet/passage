@@ -312,9 +312,9 @@ Unlike traditional proxies, Passage preserves Mojang's chat signing:
 - Full chat signing support out of the box
 
 This means:
-✅ Chat reporting works correctly
-✅ Signed messages are cryptographically verifiable
-✅ Server operators can trust message authenticity
+- ✅ Chat reporting works correctly
+- ✅ Signed messages are cryptographically verifiable
+- ✅ Server operators can trust message authenticity
 
 ## Authentication Adapters
 
