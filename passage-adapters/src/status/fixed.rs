@@ -6,6 +6,13 @@ use tracing::trace;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "fixed_status_adapter";
 
+/// Status adapter that always returns the same pre-configured server status.
+///
+/// The protocol version reported in the status is adjusted dynamically: when the connecting
+/// client's protocol version falls within `[min_version, max_version]`, the client's version is
+/// echoed back so the client shows "compatible"; otherwise `preferred_version` is used.
+///
+/// Passing `None` for `status` makes the adapter return no status.
 #[derive(Debug, Default)]
 pub struct FixedStatusAdapter {
     status: Option<ServerStatus>,
@@ -15,6 +22,7 @@ pub struct FixedStatusAdapter {
 }
 
 impl FixedStatusAdapter {
+    /// Creates a new `FixedStatusAdapter`.
     pub fn new(
         status: Option<ServerStatus>,
         preferred_version: Protocol,

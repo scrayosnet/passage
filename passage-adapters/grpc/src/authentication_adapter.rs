@@ -10,7 +10,12 @@ use tracing::instrument;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "grpc_authentication_adapter";
 
+/// Authentication adapter that delegates player validation to an external gRPC service.
+///
+/// The service receives the full encryption handshake material and returns either a player profile
+/// or a rejection reason.
 pub struct GrpcAuthenticationAdapter {
+    /// The client by which requests are made.
     client: AuthenticationClient<Channel>,
 }
 
@@ -21,6 +26,7 @@ impl Debug for GrpcAuthenticationAdapter {
 }
 
 impl GrpcAuthenticationAdapter {
+    /// Connects to the gRPC service at `address` and returns an initialized adapter.
     pub async fn new<D>(address: D) -> Result<Self, Error>
     where
         D: TryInto<tonic::transport::Endpoint>,
@@ -59,8 +65,6 @@ impl GrpcAuthenticationAdapter {
                 adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })?;
-
-        // return the result right away
         match response.into_inner().reason {
             None => Err(reject(ADAPTER_TYPE)),
             Some(authentication_response::Reason::Key(key)) => {

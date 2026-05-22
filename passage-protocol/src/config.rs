@@ -28,6 +28,7 @@ pub struct Config {
 }
 
 impl Config {
+    /// Sets the HMAC secret used to sign and verify session cookies (builder style).
     pub fn with_auth_secret(mut self, auth_secret: Option<String>) -> Self {
         self.auth_secret = auth_secret;
         self

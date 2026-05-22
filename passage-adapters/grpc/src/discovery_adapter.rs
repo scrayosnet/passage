@@ -10,7 +10,9 @@ use tracing::instrument;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "grpc_discovery_adapter";
 
+/// Discovery adapter that fetches the available backend targets from an external gRPC service.
 pub struct GrpcDiscoveryAdapter {
+    /// The client by which requests are made.
     client: DiscoveryClient<Channel>,
 }
 
@@ -21,6 +23,7 @@ impl Debug for GrpcDiscoveryAdapter {
 }
 
 impl GrpcDiscoveryAdapter {
+    /// Connects to the gRPC service at `address` and returns an initialized adapter.
     pub async fn new<D>(address: D) -> Result<Self, Error>
     where
         D: TryInto<tonic::transport::Endpoint>,

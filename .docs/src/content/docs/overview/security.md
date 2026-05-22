@@ -312,19 +312,32 @@ Unlike traditional proxies, Passage preserves Mojang's chat signing:
 - Full chat signing support out of the box
 
 This means:
-✅ Chat reporting works correctly
-✅ Signed messages are cryptographically verifiable
-✅ Server operators can trust message authenticity
+- ✅ Chat reporting works correctly
+- ✅ Signed messages are cryptographically verifiable
+- ✅ Server operators can trust message authenticity
 
-## Offline Mode (Not Supported)
+## Authentication Adapters
 
-Passage does NOT support offline mode servers:
+The authentication behavior described above (full Mojang authentication) is the **default** (`type: mojang`). Passage supports configurable authentication on a per-route basis:
 
-- All players must have valid Mojang accounts
-- Authentication with Mojang's session servers is required
-- This is a security feature, not a limitation
+| Type | Description |
+|------|-------------|
+| `mojang` (default) | Full Mojang authentication as described above |
+| `disabled` | Skip authentication entirely (for testing only) |
+| `fixed` | Return a fixed player profile (for testing only) |
+| `grpc` | Delegate authentication to an external gRPC service |
 
-If you need offline mode, you should use a traditional proxy like Velocity or BungeeCord.
+See the [Authentication Adapter](/adapters/authentication/) documentation for configuration details.
+
+:::caution
+Disabling or replacing Mojang authentication removes important security guarantees. Only use `disabled` or `fixed` in development environments. The `grpc` adapter should still implement proper authentication logic.
+:::
+
+## Offline Mode (Not Supported by Default)
+
+With the default `mojang` authentication adapter, Passage requires all players to have valid Mojang accounts. This is a security feature, not a limitation.
+
+If you need offline mode, you should use a traditional proxy like Velocity or BungeeCord. Alternatively, you can implement a custom authentication flow using the `grpc` authentication adapter.
 
 ## Security Best Practices
 

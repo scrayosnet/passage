@@ -49,6 +49,7 @@ pub enum Error {
     },
 }
 
+/// Constructs a [`Error::Rejected`] without a reason.
 pub fn reject(adapter_type: &'static str) -> Error {
     Error::Rejected {
         adapter_type,
@@ -56,6 +57,7 @@ pub fn reject(adapter_type: &'static str) -> Error {
     }
 }
 
+/// Constructs a [`Error::Rejected`] with a localizable message key as the reason.
 pub fn reject_reason(adapter_type: &'static str, reason: impl Into<String>) -> Error {
     Error::Rejected {
         adapter_type,
@@ -63,4 +65,5 @@ pub fn reject_reason(adapter_type: &'static str, reason: impl Into<String>) -> E
     }
 }
 
+/// Convenience alias for `Result<T, passage_adapters::Error>`.
 pub type Result<T, E = Error> = std::result::Result<T, E>;

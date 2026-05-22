@@ -6,12 +6,18 @@ use tracing::trace;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "fixed_authentication_adapter";
 
+/// Authentication adapter that always returns the same pre-configured profile.
+///
+/// If `profile` is `None`, every login attempt is rejected. Useful for testing or for networks
+/// that want all connections to be attributed to a single identity.
 #[derive(Debug, Default)]
 pub struct FixedAuthenticationAdapter {
     profile: Option<Profile>,
 }
 
 impl FixedAuthenticationAdapter {
+    /// Creates a new `FixedAuthenticationAdapter` with the given profile. Pass `None` to reject all
+    /// incoming connections.
     pub fn new(profile: Option<Profile>) -> Self {
         Self { profile }
     }

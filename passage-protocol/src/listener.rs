@@ -19,7 +19,10 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{debug, info, instrument, warn};
 
-// the server listener
+/// TCP listener that accepts Minecraft connections and spawns a [`Connection`] for each one.
+///
+/// The listener owns the shared adapter state and distributes it to each new connection. It
+/// supports optional rate-limiting per source IP and graceful shutdown via a [`CancellationToken`].
 pub struct Listener<Stat, Disc, Auth, Loca> {
     routes: Routes<Stat, Disc, Auth, Loca>,
     tracker: TaskTracker,
@@ -34,6 +37,7 @@ where
     Auth: AuthenticationAdapter + 'static,
     Loca: LocalizationAdapter + 'static,
 {
+    /// Creates a new `Listener` with the given routes, optional rate limiter, and configuration.
     pub fn new(
         routes: Routes<Stat, Disc, Auth, Loca>,
         rate_limiter: Option<RateLimiter<IpAddr>>,

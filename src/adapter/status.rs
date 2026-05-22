@@ -8,11 +8,17 @@ use passage_adapters_http::HttpStatusAdapter;
 use serde_json::value::RawValue;
 use std::fmt::{Display, Formatter};
 
+/// Runtime-selected status adapter.
+///
+/// Wraps every built-in and feature-gated [`StatusAdapter`] implementation behind a single enum.
 #[derive(Debug)]
 pub enum DynStatusAdapter {
+    /// Returns a fixed, pre-configured server status.
     Fixed(FixedStatusAdapter),
+    /// Retrieves status from an external gRPC service.
     #[cfg(feature = "adapters-grpc")]
     Grpc(GrpcStatusAdapter),
+    /// Periodically polls a remote HTTP endpoint for the server status.
     #[cfg(feature = "adapters-http")]
     Http(HttpStatusAdapter),
 }
@@ -42,6 +48,7 @@ impl StatusAdapter for DynStatusAdapter {
 }
 
 impl DynStatusAdapter {
+    /// Constructs the adapter described by `config`, establishing any required connections.
     pub async fn from_config(
         config: config::StatusAdapter,
     ) -> Result<Self, Box<dyn std::error::Error>> {

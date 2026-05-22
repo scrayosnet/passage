@@ -17,20 +17,33 @@ use passage_adapters_grpc::GrpcDiscoveryActionAdapter;
 use passage_adapters_grpc::GrpcDiscoveryAdapter;
 use std::fmt::{Display, Formatter};
 
+/// Runtime-selected discovery action adapter.
+///
+/// Wraps all built-in and feature-gated discovery sources and filters behind a single enum, used
+/// as elements in the per-route discovery pipeline.
 #[derive(Debug)]
 pub enum DynDiscoveryActionAdapter {
+    /// Returns a static pre-configured list of targets.
     FixedDiscovery(FixedDiscoveryAdapter),
+    /// Allocates a target from an Agones `GameServer` fleet.
     #[cfg(feature = "adapters-agones")]
     AgonesDiscovery(AgonesDiscoveryAdapter),
+    /// Fetches targets from an external gRPC discovery service.
     #[cfg(feature = "adapters-grpc")]
     GrpcDiscovery(GrpcDiscoveryAdapter),
+    /// Resolves targets from DNS SRV or A records.
     #[cfg(feature = "adapters-dns")]
     DnsDiscovery(DnsDiscoveryAdapter),
+    /// Delegates the entire pipeline step to an external gRPC service.
     #[cfg(feature = "adapters-grpc")]
     Grpc(GrpcDiscoveryActionAdapter),
+    /// Removes targets whose metadata does not match configured rules.
     MetaFilter(MetaFilterAdapter),
+    /// Removes all targets when the player is not on the allow-list.
     PlayerAllowFilter(PlayerAllowFilterAdapter),
+    /// Removes all targets when the player is on the block-list.
     PlayerBlockFilter(PlayerBlockFilterAdapter),
+    /// Re-orders targets to maximise server utilisation.
     PlayerFillStrategy(PlayerFillStrategyAdapter),
 }
 
@@ -82,6 +95,11 @@ impl DiscoveryActionAdapter for DynDiscoveryActionAdapter {
 }
 
 impl DynDiscoveryActionAdapter {
+    /// Constructs the ordered adapter pipeline described by `config`.
+    ///
+    /// The first element is the discovery source; subsequent elements are action adapters applied
+    /// in order. Returns all adapters as a `Vec` suitable for use with the blanket
+    /// `DiscoveryActionAdapter for Vec<T>` implementation.
     pub async fn from_config(
         config: config::DiscoveryAdapter,
     ) -> Result<Vec<Self>, Box<dyn std::error::Error>> {

@@ -7,6 +7,10 @@ use uuid::Uuid;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "player_block_filter_adapter";
 
+/// Discovery action adapter that clears the target list when the player matches a blocklist.
+///
+/// A player is blocked when they match at least one configured criterion (OR logic). If no
+/// criteria are configured, no players are blocked.
 #[derive(Debug, Default)]
 pub struct PlayerBlockFilterAdapter {
     /// List of player usernames to block (disabled if empty).
@@ -20,6 +24,10 @@ pub struct PlayerBlockFilterAdapter {
 }
 
 impl PlayerBlockFilterAdapter {
+    /// Creates a new `PlayerBlockFilterAdapter`.
+    ///
+    /// Any criterion that is `None` is skipped. A player must satisfy at least one non-`None`
+    /// criterion to be blocked.
     pub fn new(
         usernames: Option<Vec<String>>,
         username: Option<Regex>,

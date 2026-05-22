@@ -1,4 +1,9 @@
-use crate::error::GameServerError;
+//! This crate provides adapters based on [Agones](https://agones.dev/), an open source, batteries-included,
+//! multiplayer dedicated game server scaling and orchestration platform that can run anywhere Kubernetes
+//! can run.
+//! - Agones Discovery is an allocation-based discovery adapter.
+
+use crate::error::AgonesError;
 use kube::{CustomResource, ResourceExt};
 use passage_adapters::Target;
 use schemars::JsonSchema;
@@ -10,14 +15,10 @@ pub mod discovery_adapter;
 pub mod error;
 pub mod template;
 
-// reexport errors types
+// reexport errors and adapters
+pub use discovery_adapter::{AgonesDiscoveryAdapter, AgonesDiscoveryAdapterConfig};
 #[allow(unused_imports)]
 pub use error::*;
-
-// reexport adapters
-pub use discovery_adapter::*;
-
-pub const META_STATE: &str = "state";
 
 /// A GameServerAllocation is used to atomically allocate a `GameServer` out of a set of `GameServers`.
 /// This could be a single `Fleet`, multiple `Fleets`, or a self-managed group of `GameServers`.
@@ -71,6 +72,7 @@ pub struct GameServerAllocationSpec {
     pub metadata: Option<serde_json::Value>,
 }
 
+/// The status of a [`GameServerAllocationSpec`]. Contains the allocation result.
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GameServerAllocationStatus {
@@ -103,20 +105,27 @@ pub struct GameServerAllocationStatus {
     pub lists: Option<HashMap<String, GameServerList>>,
 }
 
+/// Labels and annotations attached to an Agones `GameServer` resource.
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GameServerMetadata {
+    /// Kubernetes labels on the game server.
     pub labels: HashMap<String, String>,
+    /// Kubernetes annotations on the game server.
     pub annotations: HashMap<String, String>,
 }
 
+/// A single port exposed by an allocated `GameServer`.
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GameServerPort {
+    /// Optional name identifying the port (e.g. `"game"` or `"query"`).
     pub name: Option<String>,
+    /// The externally reachable port number.
     pub port: u16,
 }
 
+/// The state of a named counter on an allocated `GameServer` (Agones `CountsAndLists` feature).
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GameServerCounter {
@@ -124,6 +133,7 @@ pub struct GameServerCounter {
     capacity: Option<u32>,
 }
 
+/// The state of a named list on an allocated `GameServer` (Agones `CountsAndLists` feature).
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GameServerList {
@@ -133,22 +143,18 @@ pub struct GameServerList {
 }
 
 impl TryFrom<GameServerAllocation> for Target {
-    type Error = GameServerError;
+    type Error = AgonesError;
 
-    fn try_from(server: GameServerAllocation) -> Result<Self, GameServerError> {
-        let identifier = server
-            .metadata
-            .name
-            .clone()
-            .ok_or(GameServerError::NoName)?;
-        let status = server.status.clone().ok_or(GameServerError::NotStatus {
+    fn try_from(server: GameServerAllocation) -> Result<Self, AgonesError> {
+        let identifier = server.metadata.name.clone().ok_or(AgonesError::NoName)?;
+        let status = server.status.clone().ok_or(AgonesError::NoStatus {
             identifier: identifier.clone(),
         })?;
         let ip: IpAddr = status
             .address
-            .ok_or(GameServerError::NoAddress)?
+            .ok_or(AgonesError::NoAddress)?
             .parse()
-            .map_err(|err| GameServerError::InvalidAddress {
+            .map_err(|err| AgonesError::InvalidAddress {
                 identifier: identifier.clone(),
                 cause: Box::new(err),
             })?;
@@ -157,18 +163,13 @@ impl TryFrom<GameServerAllocation> for Target {
             .ports
             .first()
             .map(|p| p.port)
-            .ok_or(GameServerError::NotPublic {
+            .ok_or(AgonesError::NotPublic {
                 identifier: identifier.clone(),
             })?;
         let address = SocketAddr::new(ip, port);
 
         // add meta data
         let mut meta = HashMap::new();
-
-        // add state
-        if let Some(state) = status.state {
-            meta.insert(META_STATE.to_string(), state);
-        }
 
         // add counters and lists
         if let Some(counters) = &status.counters {

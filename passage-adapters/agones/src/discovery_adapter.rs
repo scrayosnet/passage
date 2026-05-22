@@ -16,16 +16,28 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "agones_discovery_adapter";
 
+/// Configuration for [`AgonesDiscoveryAdapter`].
 #[derive(Debug, Clone, Default)]
 pub struct AgonesDiscoveryAdapterConfig {
+    /// Kubernetes namespace to search for `GameServer` resources. `None` searches all namespaces.
     pub namespace: Option<String>,
+    /// Ordered list of `GameServerAllocation` selector templates used to find an eligible server.
     pub selectors: Vec<Template>,
+    /// Priority list that influences allocation order within matching selectors.
     pub priorities: Vec<Template>,
+    /// Agones scheduling strategy (`"Packed"` or `"Distributed"`).
     pub scheduling: Option<String>,
+    /// Optional metadata template injected into the allocation request.
     pub metadata: Option<Template>,
+    /// Back-off strategy for retrying unallocated responses.
     pub backoff: ExponentialBackoff,
 }
 
+/// Discovery adapter that allocates a `GameServer` from an [Agones](https://agones.dev) fleet.
+///
+/// Each call to [`DiscoveryAdapter::discover`] submits a `GameServerAllocation` to the Kubernetes
+/// API. If the allocation returns `"UnAllocated"`, the adapter retries according to the configured
+/// [`ExponentialBackoff`] strategy.
 #[derive(Clone)]
 pub struct AgonesDiscoveryAdapter {
     config: AgonesDiscoveryAdapterConfig,
@@ -39,6 +51,7 @@ impl Debug for AgonesDiscoveryAdapter {
 }
 
 impl AgonesDiscoveryAdapter {
+    /// Creates a new adapter using the provided Kubernetes `client`.
     pub async fn new_with_client(
         client: Client,
         config: AgonesDiscoveryAdapterConfig,
@@ -53,6 +66,7 @@ impl AgonesDiscoveryAdapter {
         Ok(Self { config, api })
     }
 
+    /// Creates a new adapter using the default in-cluster Kubernetes configuration.
     pub async fn new(config: AgonesDiscoveryAdapterConfig) -> Result<Self, Error> {
         // Build the client from the default config.
         let client = Client::try_default()
@@ -64,6 +78,10 @@ impl AgonesDiscoveryAdapter {
         Self::new_with_client(client, config).await
     }
 
+    /// Submits a `GameServerAllocation` and returns the resulting [`Target`], retrying on
+    /// `"UnAllocated"` responses up to the configured back-off limit.
+    ///
+    /// Returns `Ok(None)` if no server could be allocated within the attempt budget.
     pub async fn allocate(
         &self,
         client: &passage_adapters::Client,
@@ -123,7 +141,7 @@ impl AgonesDiscoveryAdapter {
                     cause: Box::new(err),
                 })?;
             let Some(status) = &result.status else {
-                warn!("Agones allocation returned no allocation status");
+                warn!("agones allocation returned no allocation status");
                 return Ok(None);
             };
 
@@ -136,8 +154,8 @@ impl AgonesDiscoveryAdapter {
                     })?;
                     return Ok(Some(target));
                 }
-                Some("UnAllocated") => debug!("Agones allocation returned unallocated, retrying"),
-                state => warn!(state = ?state, "Agones allocation returned unsupported state"),
+                Some("UnAllocated") => debug!("agones allocation returned unallocated, retrying"),
+                state => warn!(state = ?state, "agones allocation returned unsupported state"),
             };
 
             // Wait for the next try.
@@ -149,7 +167,7 @@ impl AgonesDiscoveryAdapter {
 
         warn!(
             attempts = self.config.backoff.max_attempts,
-            "Failed to allocate gameserver after max attempts"
+            "failed to allocate gameserver after max attempts"
         );
         Ok(None)
     }

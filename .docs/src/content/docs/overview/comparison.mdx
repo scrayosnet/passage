@@ -31,7 +31,7 @@ This comparison may be biased, but we've done our best to give you an accurate o
 | Plugins/extensions | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Secure player forwarding | ❌ | ❌ | ✅ | ✅ | ✅ |
 | Mojang chat signing | ⚠️ Limited | ⚠️ Limited | ⚠️ Limited | ⚠️ Limited | ✅ Full |
-| Resource pack handling | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Resource pack handling | ✅ | ✅ | ✅ | ✅ | N/A |
 | **Version Support** |
 | Latest Minecraft version | ⚠️ After update | ⚠️ After update | ✅ Usually | ✅ Fast | ✅✅ Always |
 | Protocol independence | ❌ | ❌ | ❌ | ❌ | ✅ |
@@ -40,6 +40,10 @@ This comparison may be biased, but we've done our best to give you an accurate o
 | Actively maintained | ❓ | ❌ | ✅ | ✅ | ✅ |
 | Modern codebase | ❌ | ❌ | ✅ | ✅ | ✅ |
 | Open source | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+:::note[Resource Pack Handling]
+Resource packs are marked N/A for Passage because they are handled by the backend game server directly — not the proxy. Since Passage transfers players to backends immediately, the backend server manages resource pack delivery as it would in a standard direct connection. This is actually simpler: your game servers control their own resource packs without any proxy configuration.
+:::
 
 ## Key Advantages of Passage
 
@@ -80,26 +84,32 @@ Passage doesn't maintain any player state after transfer:
 
 **Horizontal Scaling**
 
-```
-Traditional Proxy: Complex multi-proxy setup
-                   - Shared state database required
-                   - Complex player routing
-                   - Cross-proxy messaging
-                   - Plugin data synchronization
+import {Tabs, TabItem} from '@astrojs/starlight/components';
 
-Passage: Just add more instances
-         - No shared state needed
-         - Standard load balancer (DNS, HAProxy, K8s Service)
-         - Independent operation
-         - Linear scaling
-```
-
-**Zero-Downtime Deployments**
-
-- Rolling updates don't disconnect players
-- Players are on backend servers, not Passage
-- Update Passage anytime without player impact
-- No session migration needed
+<Tabs>
+    <TabItem label="Passage">
+        <ul>
+            <li>Just add more instances</li>
+            <li>No shared state needed</li>
+            <li>Standard load balancer (DNS, HAProxy, K8s Service)</li>
+            <li>Independent operation</li>
+            <li>Linear scaling</li>
+            <li>Rolling updates don't disconnect players</li>
+            <li>Players are on backend servers, not Passage</li>
+            <li>Update Passage anytime without player impact</li>
+            <li>No session migration needed</li>
+        </ul>
+    </TabItem>
+    <TabItem label="Traditional Proxies">
+        <ul>
+            <li>Complex multi-proxy setup</li>
+            <li>Shared state database required</li>
+            <li>Complex player routing</li>
+            <li>Cross-proxy messaging</li>
+            <li>Plugin data synchronization</li>
+        </ul>
+    </TabItem>
+</Tabs>
 
 ### 3. Version Independence
 
@@ -135,38 +145,75 @@ Traditional proxies must intercept and modify chat messages, which breaks Mojang
 
 ### 5. Reliability
 
-**No Single Point of Failure**
-
+**Restart Impact**
 ```mermaid
-flowchart LR
-    subgraph Traditional["Traditional Proxy"]
-        PR[Proxy Restart] --> PD[All Players Disconnected] --> AP[Angry Players]
-    end
+sequenceDiagram
+participant Player as Player
+participant Proxy as Traditional Proxy
+participant Backend as Backend Server
 
-    subgraph Pass["Passage"]
-        PAR[Passage Restart] --> PSC[Players Stay Connected] --> NN[No One Notices]
-    end
+    Player->>Proxy: Gameplay traffic
+    Proxy->>Backend: Forwarded gameplay traffic
+
+    Note over Proxy: Proxy restarts
+
+    Proxy--xPlayer: Connection closed
+    Proxy--xBackend: Backend connection closed
+
+    Note over Player: Player must reconnect
 ```
 
-**Simplified Architecture**
-
 ```mermaid
-flowchart LR
-    subgraph Traditional
-        C1[Client] --> Proxy[Proxy<br/>stateful]
-        Proxy --> B1[Backend]
-        Proxy -.-> SS[Session Storage]
-        Proxy -.-> PS[Plugin State]
-        Proxy -.-> CM[Cross-proxy Messaging]
+sequenceDiagram
+participant Player as Player
+participant Passage
+participant Backend as Backend Server
+
+    Player->>Passage: Login, authentication, routing
+    Passage-->>Player: Transfer packet
+    Passage->>Passage: Close connection
+
+    Player->>Backend: Direct gameplay connection
+
+    Note over Passage: Passage restarts
+
+    Note over Player,Backend: Existing gameplay connection is unaffected
+```
+**Operational Architecture**
+```mermaid
+flowchart TB
+subgraph Traditional["Traditional Proxy Architecture"]
+direction TB
+
+        C1[Player] --> P1[Proxy instance]
+        P1 --> B1[Backend server]
+
+        P1 --> State1[Per-player connection state]
+        P1 --> Plugins[Proxy plugins]
+        P1 --> Sessions[Session / routing data]
+        P1 --> Sync[Cross-proxy synchronization]
+
+        State1 -. required while player is online .-> P1
+        Plugins -. may affect gameplay traffic .-> P1
+        Sessions -. shared for scaling .-> P1
+        Sync -. needed across instances .-> P1
     end
 
-    subgraph Pass["Passage Architecture"]
-        C2[Client] --> Passage[Passage<br/>stateless]
-        Passage --> B2[Backend]
+    subgraph PassageArch["Passage Architecture"]
+        direction TB
+
+        C2[Player] --> P2[Passage]
+        P2 --> Auth[Authenticate]
+        P2 --> Discover[Discover target]
+        P2 --> Select[Select backend]
+        P2 --> Transfer[Send transfer packet]
+        Transfer --> B2[Backend server]
+
+        C2 -. gameplay traffic .-> B2
+        P2 -. no player state after transfer .- State2[No persistent player state]
     end
 ```
-
-Fewer components = fewer failure modes.
+Fewer runtime dependencies mean fewer failure modes, and because Passage is not in the gameplay path after transfer, restarting or replacing a Passage instance does not disconnect players.
 
 ## Trade-offs and Considerations
 
@@ -254,7 +301,6 @@ Fewer components = fewer failure modes.
 1. Conceptually similar (lightweight, performant)
 2. Both written in native languages
 3. Similar operational patterns
-4. Consider: Why not improve Gate instead?
 
 ## Key Performance Differences
 
@@ -269,25 +315,25 @@ Passage's architecture provides distinct performance characteristics:
 
 ### Advantages of Passage
 
-✅ **Performance**: Native code, no packet transcoding, minimal overhead
-✅ **Scalability**: Stateless, horizontal scaling, zero-downtime deploys
-✅ **Reliability**: No single point of failure, instant recovery
-✅ **Simplicity**: Clean architecture, fewer components
-✅ **Version independence**: Always works with new Minecraft versions
-✅ **Chat signing**: Full support out of the box
-✅ **Resource efficiency**: Minimal memory and CPU usage
-✅ **Modern codebase**: Rust, well-tested, actively maintained
-✅ **Cloud-native**: Perfect for Kubernetes and auto-scaling
-✅ **Observability**: Built-in OpenTelemetry support
+- ✅ **Performance**: Native code, no packet transcoding, minimal overhead
+- ✅ **Scalability**: Stateless, horizontal scaling, zero-downtime deploys
+- ✅ **Reliability**: No single point of failure, instant recovery
+- ✅ **Simplicity**: Clean architecture, fewer components
+- ✅ **Version independence**: Always works with new Minecraft versions
+- ✅ **Chat signing**: Full support out of the box
+- ✅ **Resource efficiency**: Minimal memory and CPU usage
+- ✅ **Modern codebase**: Rust, well-tested, actively maintained
+- ✅ **Cloud-native**: Perfect for Kubernetes and auto-scaling
+- ✅ **Observability**: Built-in OpenTelemetry support
 
 ### Advantages of Traditional Proxies
 
-✅ **Plugin ecosystem**: Rich plugins for many use cases
-✅ **Version support**: Works with pre-1.20.5 Minecraft
-✅ **Maturity**: Battle-tested over many years
-✅ **Documentation**: Extensive community knowledge
-✅ **Drop-in replacement**: Easy migration between proxy types
-✅ **Offline mode**: Supported (if needed)
+- ✅ **Plugin ecosystem**: Rich plugins for many use cases
+- ✅ **Version support**: Works with pre-1.20.5 Minecraft
+- ✅ **Maturity**: Battle-tested over many years
+- ✅ **Documentation**: Extensive community knowledge
+- ✅ **Drop-in replacement**: Easy migration between proxy types
+- ✅ **Offline mode**: Supported (if needed)
 
 ## Conclusion
 

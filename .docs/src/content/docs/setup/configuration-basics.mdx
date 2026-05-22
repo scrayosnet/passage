@@ -1,327 +1,351 @@
 ---
 title: Configuration Basics
-description: Learn the fundamentals of configuring Passage.
+description: Learn the fundamentals of configuring Passage with routes, adapters, and environment variables.
+sidebar:
+    order: 2
 ---
 
-This guide covers the basics of configuring Passage for your Minecraft network.
+import { FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+This guide covers the basics of configuring Passage for your Minecraft network. For the complete field-by-field reference, see the [Configuration Reference](/reference/configuration/).
 
 ## Configuration Files
 
-Passage uses a layered configuration system with multiple sources:
+Passage uses a layered configuration system. Higher layers override lower ones:
 
-### Layer Priority (highest to lowest)
+<Steps>
 
-1. **Environment Variables** - Override any setting
-2. **Auth Secret File** - Dedicated file for auth secret
-3. **Custom Config File** - Your deployment-specific settings
-4. **Default Config** - Built-in defaults (embedded at compile time)
+1. **Environment Variables** -- Override any setting at runtime
+2. **Auth Secret File** -- Dedicated file for the authentication cookie secret
+3. **Config File** -- Your deployment-specific settings (YAML, TOML, or JSON)
+4. **Built-in Defaults** -- Sensible defaults compiled into the binary
+
+</Steps>
 
 ### File Locations
-
-import { FileTree } from '@astrojs/starlight/components';
 
 <FileTree>
 
 - config/
-  - config.toml Your custom configuration
-  - auth_secret Optional: Authentication secret
-  - default.toml Built-in defaults (reference only)
+  - config.yaml Your configuration file
+  - auth_secret Authentication cookie secret (optional)
 
 </FileTree>
+
+Both the config file and auth secret file paths can be customized via environment variables:
+
+```bash
+# Default: config/config (auto-detects .yaml, .toml, .json extension)
+CONFIG_FILE=config/config
+
+# Default: config/auth_secret
+AUTH_SECRET_FILE=config/auth_secret
+```
+
+:::tip
+Passage auto-detects the config file format based on its extension. YAML (`.yaml`), TOML (`.toml`), and JSON (`.json`) are all supported.
+:::
+
+## Routes-Based Configuration
+
+Unlike traditional Minecraft proxies that use a flat configuration, Passage organizes everything into **routes**. Each route matches a hostname pattern and defines its own set of adapters:
+
+```yaml
+# config/config.yaml
+routes:
+- hostname: "mc.example.net"
+  status:
+    type: fixed
+    name: "My Network"
+  authentication:
+    type: mojang
+  discovery:
+    type: fixed_discovery
+    targets:
+    - identifier: "lobby-1"
+      address: "10.0.1.10:25565"
+```
+
+This is conceptually similar to virtual hosts in a web server -- each hostname gets its own independent configuration. See [Adapters](/adapters/) for a full overview of the adapter system.
 
 ## Minimal Configuration
 
 The simplest working configuration:
 
-```toml
-# config/config.toml
-address = "0.0.0.0:25565"
-
-[status]
-adapter = "fixed"
-
-[status.fixed]
-name = "My Server"
-
-[target_discovery]
-adapter = "fixed"
-
-[[target_discovery.fixed.targets]]
-identifier = "server-1"
-address = "127.0.0.1:25566"
-
-[target_strategy]
-adapter = "fixed"
+```yaml
+# config/config.yaml
+routes:
+- hostname: ".*"
+  discovery:
+    type: fixed_discovery
+    targets:
+    - identifier: "server-1"
+      address: "127.0.0.1:25566"
 ```
 
 This configuration:
-- Listens on all interfaces at port 25565
-- Returns "My Server" as the status name
-- Routes all players to 127.0.0.1:25566
+- Listens on `0.0.0.0:25565` (the default)
+- Matches **any** hostname (`.*` is a regex)
+- Uses **Mojang** authentication (the default)
+- Returns the default status response
+- Routes all players to `127.0.0.1:25566`
+
+Most settings have sensible defaults, so you only need to configure what you want to change.
 
 ## Environment Variables
 
-All configuration fields can be overridden with environment variables:
+All configuration fields can be overridden with environment variables using the format `PASSAGE_<FIELD>`:
 
 ```bash
-# Format: PASSAGE_[SECTION]_[FIELD]
 export PASSAGE_ADDRESS="0.0.0.0:25565"
 export PASSAGE_TIMEOUT=120
-export PASSAGE_STATUS_ADAPTER="fixed"
-export PASSAGE_TARGET_DISCOVERY_ADAPTER="grpc"
-export PASSAGE_TARGET_DISCOVERY_GRPC_ADDRESS="http://localhost:3030"
 ```
 
-Nested fields use underscores:
-```bash
-PASSAGE_STATUS_FIXED_NAME="Cool Server"
-PASSAGE_RATE_LIMITER_ENABLED=true
-PASSAGE_RATE_LIMITER_SIZE=100
-```
+### Custom Prefix
 
-### Custom Environment Prefix
-
-Change the prefix from `PASSAGE` to something else:
+Change the default `PASSAGE` prefix:
 
 ```bash
 ENV_PREFIX=MYNETWORK
-MYNETWORK_ADDRESS=0.0.0.0:25565 passage
+MYNETWORK_ADDRESS="0.0.0.0:25565" passage
 ```
 
-## Configuration File Location
-
-Specify a custom config file:
-
-```bash
-# Default location
-CONFIG_FILE=config/config passage
-
-# Custom location
-CONFIG_FILE=/etc/passage/production.toml passage
-
-# Supports multiple formats
-CONFIG_FILE=/etc/passage/config.json passage
-CONFIG_FILE=/etc/passage/config.yaml passage
-```
+:::note
+Environment variables work best for simple top-level fields like `address` and `timeout`. For complex nested structures like routes and adapters, use a config file.
+:::
 
 ## Core Settings
 
 ### Connection Settings
 
-```toml
-# Address to bind for incoming connections
-address = "0.0.0.0:25565"
+```yaml
+# Bind address for incoming connections (default: "0.0.0.0:25565")
+address: "0.0.0.0:25565"
 
-# Connection timeout in seconds
-timeout = 120
+# Connection timeout in seconds (default: 120)
+timeout: 120
+
+# Maximum packet size in bytes (default: 2097152 / 2 MiB)
+max_packet_length: 2097152
+
+# Authentication cookie expiry in seconds (default: 30)
+auth_cookie_expiry: 30
 ```
 
 ### Rate Limiting
 
-Prevent connection floods:
+Prevent connection floods by limiting connections per IP:
 
-```toml
-[rate_limiter]
-enabled = true
-duration = 60  # Time window in seconds
-size = 60      # Max connections per IP per window
+```yaml
+rate_limiter:
+  duration: 60  # Time window in seconds
+  limit: 60     # Max connections per IP in that window
 ```
 
-### PROXY Protocol Support
+The rate limiter is **disabled by default**. Adding the `rate_limiter` section enables it -- there is no separate `enabled` field.
 
-Enable if Passage is behind a proxy/load balancer:
+### PROXY Protocol
 
-```toml
-[proxy_protocol]
-enabled = true
+If Passage is behind a load balancer (HAProxy, AWS NLB, etc.), enable PROXY protocol to preserve client IP addresses:
+
+```yaml
+proxy_protocol:
+  allow_v1: true  # Accept PROXY protocol v1 headers
+  allow_v2: true  # Accept PROXY protocol v2 headers
 ```
 
-This allows Passage to see the real client IP address when behind HAProxy, AWS NLB, or other PROXY protocol-compatible load balancers.
+Like the rate limiter, PROXY protocol is **disabled by default** and enabled by adding the section.
 
-## Adapter Configuration
+:::caution
+Only enable PROXY protocol if your load balancer actually sends PROXY protocol headers. Enabling it without a compatible load balancer will break connections.
+:::
 
-Passage uses three types of adapters. Each must be configured:
+## Per-Route Adapters
 
-### Status Adapter
+Each route configures **four adapter categories** that control different aspects of the connection:
 
-Provides server status information (MOTD, player count, favicon):
+```yaml
+routes:
+- hostname: "mc.example.net"
+  # 1. Status: What players see in the server list
+  status:
+    type: fixed
+    name: "My Network"
 
-```toml
-[status]
-adapter = "fixed"  # or "http" or "grpc"
+  # 2. Authentication: How players are verified
+  authentication:
+    type: mojang
 
-[status.fixed]
-name = "My Minecraft Network"
-description = "\"Welcome!\""
+  # 3. Localization: Disconnect messages in multiple languages
+  localization:
+    type: fixed
+    default_locale: "en_US"
+
+  # 4. Discovery: How backend servers are found and selected
+  discovery:
+    type: dns_discovery
+    domain: "servers.example.net"
+    record_type: srv
+    actions:
+    - type: meta_filter
+      rules:
+      - key: "status"
+        op: equals
+        value: "online"
+    - type: player_fill_strategy
+      field: "players"
+      max_players: 50
 ```
 
-### Target Discovery Adapter
+| Adapter | Purpose | Default | Options |
+|---------|---------|---------|---------|
+| [Status](/adapters/status/) | Server list response (MOTD, players, favicon) | `fixed` | `fixed`, `http`, `grpc` |
+| [Authentication](/adapters/authentication/) | Player identity verification | `mojang` | `mojang`, `disabled`, `fixed`, `grpc` |
+| [Localization](/advanced/localization/) | Disconnect message translations | `fixed` | `fixed`, `grpc` |
+| [Discovery](/adapters/target-discovery/) | Backend server selection | `fixed_discovery` | `fixed_discovery`, `dns_discovery`, `agones_discovery`, `grpc_discovery` |
 
-Discovers available backend servers:
-
-```toml
-[target_discovery]
-adapter = "fixed"  # or "grpc" or "agones"
-
-[[target_discovery.fixed.targets]]
-identifier = "hub-1"
-address = "10.0.1.10:25565"
-```
-
-### Target Strategy Adapter
-
-Selects which server to send each player to:
-
-```toml
-[target_strategy]
-adapter = "fixed"  # or "grpc" or "player_fill"
-```
-
-## Localization
-
-Configure disconnect messages in multiple languages:
-
-```toml
-[localization]
-default_locale = "en_US"
-
-[localization.messages.en]
-disconnect_timeout = "{\"text\":\"Connection timeout\"}"
-disconnect_no_target = "{\"text\":\"No server available\"}"
-
-[localization.messages.es]
-disconnect_timeout = "{\"text\":\"Tiempo de espera agotado\"}"
-disconnect_no_target = "{\"text\":\"Servidor no disponible\"}"
-```
-
-Messages support parameter substitution with placeholders like `{player}`.
+The discovery adapter also supports an **actions pipeline** that filters, reorders, or customizes the target list. See [Discovery Actions](/adapters/discovery-actions/) for details.
 
 ## Observability
 
 ### OpenTelemetry
 
-Send metrics and traces to Grafana Cloud, Datadog, or other OTLP-compatible backends:
+Send traces, metrics, and logs to any OTLP-compatible backend (Grafana Cloud, Datadog, etc.):
 
-```toml
-[otel]
-environment = "production"
-metrics_endpoint = "https://otlp.example.com/v1/metrics"
-metrics_token = "base64_auth_token"
-traces_endpoint = "https://otlp.example.com/v1/traces"
-traces_token = "base64_auth_token"
+```yaml
+otel:
+  environment: "production"
+  traces:
+    address: "https://otlp.example.com/v1/traces"
+    token: "base64_auth_token"
+  metrics:
+    address: "https://otlp.example.com/v1/metrics"
+    token: "base64_auth_token"
+  logs:
+    address: "https://otlp.example.com/v1/logs"
+    token: "base64_auth_token"
 ```
 
-### Sentry (Optional)
+Each endpoint (`traces`, `metrics`, `logs`) is optional and independently configured.
 
-Enable error tracking with Sentry:
+### Sentry
 
-```toml
-[sentry]
-enabled = true
-debug = false
-address = "https://your-key@sentry.io/project-id"
-environment = "production"
+Enable error tracking by adding a `sentry` section:
+
+```yaml
+sentry:
+  address: "https://your-key@sentry.io/project-id"
+  environment: "production"
+  debug: false
 ```
 
-## Configuration Validation
-
-Test your configuration:
-
-```bash
-# Run Passage - it will validate config on startup
-passage
-
-# Check logs for validation errors
-RUST_LOG=debug passage
-```
-
-Common validation errors:
-- Missing required adapter configuration
-- Invalid socket address format
-- Malformed TOML syntax
-- Invalid adapter type names
-
-## Best Practices
-
-### Security
-- Store auth secrets in `config/auth_secret` file, not in config.toml
-- Don't commit `config/config.toml` to version control
-- Use environment variables for sensitive values in CI/CD
-
-### Performance
-- Enable rate limiting to prevent abuse
-- Set reasonable timeout values (60-300 seconds)
-- Use gRPC adapters for high-performance scenarios
-
-### Reliability
-- Configure multiple targets for redundancy
-- Use Agones adapter for auto-scaling
-- Monitor with OpenTelemetry
+Like other optional sections, Sentry is enabled by its presence -- there is no `enabled` field.
 
 ## Example Configurations
 
 ### Simple Static Setup
 
-```toml
-address = "0.0.0.0:25565"
-timeout = 120
+A single backend server with default settings:
 
-[status]
-adapter = "fixed"
-[status.fixed]
-name = "My Network"
-
-[target_discovery]
-adapter = "fixed"
-[[target_discovery.fixed.targets]]
-identifier = "lobby"
-address = "10.0.0.10:25565"
-
-[target_strategy]
-adapter = "fixed"
+```yaml
+# config/config.yaml
+routes:
+- hostname: "mc.example.net"
+  status:
+    type: fixed
+    name: "My Network"
+    description: "\"Welcome to my server!\""
+  discovery:
+    type: fixed_discovery
+    targets:
+    - identifier: "lobby"
+      address: "10.0.0.10:25565"
 ```
 
-### Dynamic Kubernetes Setup
+### DNS Discovery with Load Balancing
 
-```toml
-address = "0.0.0.0:25565"
+Automatically discover servers via DNS and fill the fullest available:
 
-[status]
-adapter = "http"
-[status.http]
-address = "http://status-service/status"
-cache_duration = 5
+```yaml
+# config/config.yaml
+address: "0.0.0.0:25565"
+timeout: 120
 
-[target_discovery]
-adapter = "agones"
-[target_discovery.agones]
-namespace = "minecraft"
-label_selector = "game=minecraft"
+rate_limiter:
+  duration: 60
+  limit: 60
 
-[target_strategy]
-adapter = "player_fill"
-[target_strategy.player_fill]
-field = "players"
-max_players = 50
+routes:
+- hostname: "mc.example.net"
+  status:
+    type: http
+    address: "https://example.net/status"
+    cache_duration: 30
+  discovery:
+    type: dns_discovery
+    domain: "servers.example.net"
+    record_type: srv
+    actions:
+    - type: meta_filter
+      name: "online-filter"
+      rules:
+      - key: "status"
+        op: equals
+        value: "online"
+    - type: player_fill_strategy
+      name: "fill-strategy"
+      field: "players"
+      max_players: 50
 ```
 
-### Multi-Region gRPC Setup
+### Full gRPC Setup
 
-```toml
-address = "0.0.0.0:25565"
+Delegate all logic to external services:
 
-[status]
-adapter = "grpc"
-[status.grpc]
-address = "http://status-service:3030"
+```yaml
+# config/config.yaml
+address: "0.0.0.0:25565"
 
-[target_discovery]
-adapter = "grpc"
-[target_discovery.grpc]
-address = "http://discovery-service:3030"
-
-[target_strategy]
-adapter = "grpc"
-[target_strategy.grpc]
-address = "http://strategy-service:3030"
+routes:
+- hostname: "mc.example.net"
+  status:
+    type: grpc
+    address: "http://status-service:50051"
+  authentication:
+    type: grpc
+    address: "http://auth-service:50051"
+  localization:
+    type: grpc
+    address: "http://localization-service:50051"
+  discovery:
+    type: grpc_discovery
+    address: "http://discovery-service:50051"
+    actions:
+    - type: grpc
+      name: "custom-router"
+      address: "http://router-service:50051"
 ```
+
+## Validation
+
+Passage validates the configuration on startup. Run it to check for errors:
+
+```bash
+# Run with debug logging to see configuration details
+RUST_LOG=debug passage
+```
+
+Common issues:
+- Invalid regex in `hostname` field
+- Missing required fields (e.g., `address` for gRPC adapters)
+- Unknown adapter `type` values
+- Malformed YAML syntax
+
+## Best Practices
+
+- **Store secrets separately**: Use `config/auth_secret` for the authentication secret, not the main config file
+- **Use environment variables** for sensitive values in CI/CD pipelines
+- **Don't commit** your config file to version control if it contains secrets
+- **Enable rate limiting** in production to prevent connection floods
+- **Set reasonable timeouts** (60-300 seconds depending on your network)
+- **Use descriptive names** for discovery actions to simplify debugging

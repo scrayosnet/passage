@@ -28,3 +28,7 @@ regex = { workspace = true }
 tokio = { workspace = true, features = ["time", "sync"] }
 rand = { workspace = true }
 opentelemetry = { workspace = true, features = ["metrics"] }
+schemars = { workspace = true, features = ["default", "uuid1"], optional = true }
+
+[features]
+config-schema = ["dep:schemars"]

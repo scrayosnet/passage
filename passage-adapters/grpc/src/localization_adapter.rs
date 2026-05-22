@@ -10,7 +10,9 @@ use tracing::instrument;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "grpc_localization_adapter";
 
+/// Localization adapter that resolves message keys via an external gRPC service.
 pub struct GrpcLocalizationAdapter {
+    /// The client by which requests are made.
     client: LocalizationClient<Channel>,
 }
 
@@ -21,6 +23,7 @@ impl Debug for GrpcLocalizationAdapter {
 }
 
 impl GrpcLocalizationAdapter {
+    /// Connects to the gRPC service at `address` and returns an initialized adapter.
     pub async fn new<D>(address: D) -> Result<Self, Error>
     where
         D: TryInto<tonic::transport::Endpoint>,

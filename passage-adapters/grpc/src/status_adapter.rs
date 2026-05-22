@@ -9,7 +9,9 @@ use tracing::instrument;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "grpc_status_adapter";
 
+/// Status adapter that retrieves server status from an external gRPC service.
 pub struct GrpcStatusAdapter {
+    /// The client by which requests are made.
     client: StatusClient<Channel>,
 }
 
@@ -20,6 +22,7 @@ impl Debug for GrpcStatusAdapter {
 }
 
 impl GrpcStatusAdapter {
+    /// Connects to the gRPC service at `address` and returns an initialized adapter.
     pub async fn new<D>(address: D) -> Result<Self, Error>
     where
         D: TryInto<tonic::transport::Endpoint>,
@@ -28,7 +31,7 @@ impl GrpcStatusAdapter {
         Ok(Self {
             client: StatusClient::connect(address).await.map_err(|err| {
                 Error::FailedInitialization {
-                    adapter_type: "grpc_status",
+                    adapter_type: ADAPTER_TYPE,
                     cause: err.into(),
                 }
             })?,
@@ -54,7 +57,7 @@ impl GrpcStatusAdapter {
             .get_status(request)
             .await
             .map_err(|err| Error::FailedFetch {
-                adapter_type: "grpc_status",
+                adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })?
             .into_inner()

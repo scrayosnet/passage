@@ -6,12 +6,18 @@ use tracing::trace;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "disabled_authentication_adapter";
 
+/// Authentication adapter that skips all verification and accepts every player.
+///
+/// The returned profile mirrors the name and ID the client supplied during login. Use this adapter
+/// only in environments where Mojang authentication is unavailable or undesired (e.g. offline-mode
+/// test setups).
 #[derive(Debug, Default)]
 pub struct DisabledAuthenticationAdapter {}
 
 impl DisabledAuthenticationAdapter {
+    /// Creates a new `DisabledAuthenticationAdapter`.
     pub fn new() -> Self {
-        Self {}
+        Self::default()
     }
 }
 

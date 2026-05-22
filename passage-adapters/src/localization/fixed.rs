@@ -8,6 +8,11 @@ use tracing::{debug, trace, warn};
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "fixed_localization_adapter";
 
+/// Localization adapter backed by an in-memory message map.
+///
+/// When a locale is not found, the adapter falls back to progressively shorter locale prefixes
+/// (e.g. `"en_US"` → `"en"`) and ultimately to `default_locale`. If the key is still not found, the
+/// key itself is returned as the message.
 #[derive(Debug)]
 pub struct FixedLocalizationAdapter {
     default_locale: String,
@@ -16,6 +21,9 @@ pub struct FixedLocalizationAdapter {
 }
 
 impl FixedLocalizationAdapter {
+    /// Creates a new `FixedLocalizationAdapter`.
+    ///
+    /// `ignore_not_found` controls whether a warning is logged when a key has no translation.
     pub fn new(
         default_locale: String,
         messages: HashMap<String, HashMap<String, String>>,

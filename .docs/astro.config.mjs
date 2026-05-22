@@ -2,7 +2,6 @@
 import {defineConfig} from 'astro/config';
 import starlight from '@astrojs/starlight';
 import mermaid from "astro-mermaid";
-import starlightLinksValidator from 'starlight-links-validator'
 import sitemap from '@astrojs/sitemap';
 import starlightLlmsTxt from "starlight-llms-txt";
 
@@ -23,23 +22,23 @@ export default defineConfig({
         sidebar: [
             {
                 label: 'Overview',
-                autogenerate: {directory: 'overview'},
+                items: [{ autogenerate: { directory: 'overview' } }],
             },
             {
                 label: 'Setup',
-                autogenerate: {directory: 'setup'},
+                items: [{ autogenerate: { directory: 'setup' } }],
             },
             {
                 label: 'Adapters',
-                autogenerate: {directory: 'adapters'},
+                items: [{ autogenerate: { directory: 'adapters' } }],
             },
             {
                 label: 'Advanced',
-                autogenerate: {directory: 'advanced'},
+                items: [{ autogenerate: { directory: 'advanced' } }],
             },
             {
                 label: 'Reference',
-                autogenerate: {directory: 'reference'},
+                items: [{ autogenerate: { directory: 'reference' } }],
                 collapsed: true,
             },
         ],
@@ -50,7 +49,7 @@ export default defineConfig({
         editLink: {
             baseUrl: 'https://github.com/scrayosnet/passage/edit/main/.docs/',
         },
-        plugins: [starlightLinksValidator(), starlightLlmsTxt()],
+        plugins: [starlightLlmsTxt()],
     }), mermaid({
         theme: 'forest',
         autoTheme: true

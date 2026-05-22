@@ -1,0 +1,1309 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Config",
+  "description": "[`Config`] holds all configuration for the application. I.g. one immutable instance is created\non startup and then shared among the application components.\n\nIf both the grpc and rest server are disabled, the application will exit immediately after startup\nwith status ok.",
+  "type": "object",
+  "properties": {
+    "address": {
+      "description": "The network address that should be used to bind the HTTP server for connection requests.",
+      "type": "string",
+      "default": "0.0.0.0:25565"
+    },
+    "auth_cookie_expiry": {
+      "description": "The number of seconds until an auth cookie expires.",
+      "type": "integer",
+      "format": "uint64",
+      "default": 21600,
+      "minimum": 0
+    },
+    "auth_secret": {
+      "description": "The auth cookie secret, disabled if empty.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "max_packet_length": {
+      "description": "The max packet size in bytes accepted by the server.",
+      "type": "integer",
+      "format": "uint",
+      "default": 10000,
+      "minimum": 0
+    },
+    "otel": {
+      "description": "The OpenTelemetry configuration (disabled if empty).",
+      "$ref": "#/$defs/OpenTelemetry"
+    },
+    "proxy_protocol": {
+      "description": "The PROXY protocol config (disabled if empty).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProxyProtocol"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rate_limiter": {
+      "description": "The rate limiter config (disabled if empty).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RateLimiter"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "routes": {
+      "description": "The routes' configuration.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Routes"
+      }
+    },
+    "sentry": {
+      "description": "The sentry configuration (disabled if empty).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Sentry"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "system_observer_interval": {
+      "description": "The interval in seconds at which the system observer should be run.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "default": 20,
+      "minimum": 0
+    },
+    "timeout": {
+      "description": "The timeout in seconds that is used for connection timeouts.",
+      "type": "integer",
+      "format": "uint64",
+      "default": 120,
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "ARecordType": {
+      "description": "[`ARecordType`] holds the DNS discovery configuration for A/AAAA records.",
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer",
+          "format": "uint16",
+          "default": 25565,
+          "maximum": 65535,
+          "minimum": 0
+        }
+      }
+    },
+    "AgonesDiscovery": {
+      "description": "[`AgonesDiscovery`] hold the agones discovery configuration. The template values get the following\nvariables as input. Currently, string fields are replaced if they exactly match the variable:\n- `{{ .Client.ProtocolVersion }}` The client protocol version.\n- `{{ .Client.ServerAddress }}` The server address (presented by the client).\n- `{{ .Client.ServerPort }}` The server port (presented by the client).\n- `{{ .Client.Address }}` The address of the client (with optional proxy protocol).\n- `{{ .Request.TraceId }}` The opentelemetry trace id of the request.",
+      "type": "object",
+      "properties": {
+        "backoff": {
+          "description": "The exponential backoff configuration.",
+          "$ref": "#/$defs/ExponentialBackoff"
+        },
+        "metadata": {
+          "description": "The metadata template to apply to the allocation.",
+          "default": null
+        },
+        "namespace": {
+          "description": "The namespace to apply to the client.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "priorities": {
+          "description": "The priorities template to apply to the allocation.",
+          "type": "array",
+          "default": [],
+          "items": true
+        },
+        "scheduling": {
+          "description": "The scheduling to apply to the allocation.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "selectors": {
+          "description": "The selectors template to apply to the allocation.",
+          "type": "array",
+          "default": [],
+          "items": true
+        }
+      }
+    },
+    "AuthenticationAdapter": {
+      "description": "[`AuthenticationAdapter`] hold the authentication adapter configuration.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "disabled"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "fixed"
+            }
+          },
+          "$ref": "#/$defs/FixedAuthentication",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "grpc"
+            }
+          },
+          "$ref": "#/$defs/GrpcAuthentication",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "mojang"
+            }
+          },
+          "$ref": "#/$defs/MojangAuthentication",
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "DiscoveryActionAdapter": {
+      "description": "[`DiscoveryActionAdapter`] hold the discovery action adapter configuration.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "fixed_discovery"
+            }
+          },
+          "$ref": "#/$defs/FixedDiscovery",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "agones_discovery"
+            }
+          },
+          "$ref": "#/$defs/AgonesDiscovery",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "grpc_discovery"
+            }
+          },
+          "$ref": "#/$defs/GrpcDiscovery",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "dns_discovery"
+            }
+          },
+          "$ref": "#/$defs/DnsDiscovery",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "grpc"
+            }
+          },
+          "$ref": "#/$defs/GrpcDiscoveryAction",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "meta_filter"
+            }
+          },
+          "$ref": "#/$defs/MetaFilter",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "player_allow_filter"
+            }
+          },
+          "$ref": "#/$defs/PlayerAllowFilter",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "player_block_filter"
+            }
+          },
+          "$ref": "#/$defs/PlayerBlockFilter",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "player_fill_strategy"
+            }
+          },
+          "$ref": "#/$defs/PlayerFillStrategy",
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "DiscoveryAdapter": {
+      "description": "[`DiscoveryAdapter`] hold the discovery (adapter) configuration.",
+      "type": "object",
+      "properties": {
+        "actions": {
+          "description": "Any action to be applied to the discovered targets.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiscoveryActionAdapter"
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "fixed_discovery"
+            }
+          },
+          "$ref": "#/$defs/FixedDiscovery",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "agones_discovery"
+            }
+          },
+          "$ref": "#/$defs/AgonesDiscovery",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "grpc_discovery"
+            }
+          },
+          "$ref": "#/$defs/GrpcDiscovery",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "dns_discovery"
+            }
+          },
+          "$ref": "#/$defs/DnsDiscovery",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "grpc"
+            }
+          },
+          "$ref": "#/$defs/GrpcDiscoveryAction",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "meta_filter"
+            }
+          },
+          "$ref": "#/$defs/MetaFilter",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "player_allow_filter"
+            }
+          },
+          "$ref": "#/$defs/PlayerAllowFilter",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "player_block_filter"
+            }
+          },
+          "$ref": "#/$defs/PlayerBlockFilter",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "player_fill_strategy"
+            }
+          },
+          "$ref": "#/$defs/PlayerFillStrategy",
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "DnsDiscovery": {
+      "description": "[`DnsDiscovery`] hold the DNS discovery configuration.",
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "The DNS domain to query (e.g., \"_minecraft._tcp.example.com\" for SRV or \"mc.example.com\" for A).",
+          "type": "string",
+          "default": ""
+        },
+        "refresh_interval": {
+          "description": "How often to re-query DNS in seconds.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 30,
+          "minimum": 0
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {
+              "type": "string",
+              "const": "srv"
+            }
+          },
+          "required": [
+            "record_type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "record_type": {
+              "type": "string",
+              "const": "a"
+            }
+          },
+          "$ref": "#/$defs/ARecordType",
+          "required": [
+            "record_type"
+          ]
+        }
+      ]
+    },
+    "ExponentialBackoff": {
+      "description": "Configuration for exponential back-off with optional jitter.\n\nEach successive attempt waits `initial_secs × factor^attempt` seconds, capped at `max_secs`.\nA random value in `[0, jitter)` is added to avoid synchronised retries. After `max_attempts`\nthe strategy signals that retrying should stop.",
+      "type": "object",
+      "properties": {
+        "factor": {
+          "description": "Multiplicative factor applied to the wait time after each attempt.",
+          "type": "number",
+          "format": "double",
+          "default": 2.0
+        },
+        "initial_secs": {
+          "description": "Wait time in seconds for the first retry.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 2,
+          "minimum": 0
+        },
+        "jitter": {
+          "description": "Upper bound of random jitter added to each wait time (seconds).",
+          "type": "number",
+          "format": "double",
+          "default": 0.1
+        },
+        "max_attempts": {
+          "description": "Maximum number of attempts before giving up.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 10,
+          "minimum": 0
+        },
+        "max_secs": {
+          "description": "Maximum wait time in seconds between retries.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
+          "minimum": 0
+        }
+      }
+    },
+    "FilterRule": {
+      "description": "A single filter rule.",
+      "type": "object",
+      "properties": {
+        "key": {
+          "description": "The metadata key to filter on.",
+          "type": "string"
+        }
+      },
+      "oneOf": [
+        {
+          "description": "Field must equal the specified value.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "equals"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Field must not equal the specified value.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "not_equals"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Field must exist (have any value).",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "exists"
+            }
+          },
+          "required": [
+            "op"
+          ]
+        },
+        {
+          "description": "Field must not exist.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "not_exists"
+            }
+          },
+          "required": [
+            "op"
+          ]
+        },
+        {
+          "description": "Field must be one of the specified values.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "in"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        },
+        {
+          "description": "Field must not be any of the specified values.",
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "not_in"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "op",
+            "value"
+          ]
+        }
+      ],
+      "required": [
+        "key"
+      ]
+    },
+    "FixedAuthentication": {
+      "description": "[`FixedAuthentication`] hold the fixed authentication configuration.",
+      "type": "object",
+      "properties": {
+        "profile": {
+          "description": "The fixed profile that should be used for authentication.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Profile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      }
+    },
+    "FixedDiscovery": {
+      "description": "[`FixedDiscovery`] hold the fixed discovery configuration.",
+      "type": "object",
+      "properties": {
+        "targets": {
+          "description": "The targets that should be served by the discovery adapter.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Target"
+          }
+        }
+      }
+    },
+    "FixedLocalization": {
+      "description": "[`FixedLocalization`] hold the fixed localization configuration.",
+      "type": "object",
+      "properties": {
+        "default_locale": {
+          "description": "The locale to be used in case the client locale is unknown or unsupported.",
+          "type": "string",
+          "default": "en_US"
+        },
+        "messages": {
+          "description": "The localizable messages.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "default": {
+            "de": {
+              "disconnect_no_target": "{\"text\":\"Verbindung getrennt: Kein verfügbarer Server für diese Verbindung\"}",
+              "disconnect_timeout": "{\"text\":\"Verbindung getrennt: Keine Antwort vom Client (Keep-Alive-Timeout)\"}",
+              "disconnect_unauthenticated": "{\"text\":\"Verbindung getrennt: Client konnte nicht authentifiziert werden\"}",
+              "locale": "Deutsch"
+            },
+            "en": {
+              "disconnect_no_target": "{\"text\":\"Disconnected: No available server to handle your connection\"}",
+              "disconnect_timeout": "{\"text\":\"Disconnected: No response from client (keep-alive timeout)\"}",
+              "disconnect_unauthenticated": "{\"text\":\"Disconnected: Could not authenticate client\"}",
+              "locale": "English"
+            },
+            "es": {
+              "disconnect_no_target": "{\"text\":\"Desconectado: No hay un servidor disponible para manejar tu conexión\"}",
+              "disconnect_timeout": "{\"text\":\"Desconectado: No hubo respuesta del cliente (tiempo de espera agotado)\"}",
+              "disconnect_unauthenticated": "{\"text\":\"Desconectado: No se pudo autenticar el cliente\"}",
+              "locale": "Español"
+            },
+            "fr": {
+              "disconnect_no_target": "{\"text\":\"Déconnecté : aucun serveur disponible pour traiter votre connexion\"}",
+              "disconnect_timeout": "{\"text\":\"Déconnecté : aucune réponse du client (délai de keep-alive dépassé)\"}",
+              "disconnect_unauthenticated": "{\"text\":\"DDéconnecté : Impossible d’authentifier le client\"}",
+              "locale": "Français"
+            },
+            "ru": {
+              "disconnect_no_target": "{\"text\":\"Отключено: нет доступного сервера для обработки подключения\"}",
+              "disconnect_timeout": "{\"text\":\"Отключено: нет ответа от клиента (тайм-аут keep-alive)\"}",
+              "disconnect_unauthenticated": "{\"text\":\"Отключено: не удалось аутентифицировать клиента\"}",
+              "locale": "English"
+            },
+            "zh-CN": {
+              "disconnect_no_target": "{\"text\":\"已断开连接：无法验证客户端\"}",
+              "disconnect_timeout": "{\"text\":\"已断开连接：客 户端无响应（保持连接超时）\"}",
+              "locale": "简体中文"
+            }
+          }
+        },
+        "warn_unknown_keys": {
+          "description": "Whether to warn about unknown keys.",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "FixedStatus": {
+      "description": "[`FixedStatus`] hold the fixed status (ping) configuration.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "The description of the server.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": "\"Minecraft Server Transfer Router\""
+        },
+        "enforces_secure_chat": {
+          "description": "Whether the server requires secure chat.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": true
+        },
+        "favicon": {
+          "description": "The favicon of the server.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABABAMAAABYR2ztAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAeUExURdJDACIiIshABV4oHnQtHKI3FEElILs9DDAjIZMzF3zpuzQAAAIISURBVEjH5ZU7T8MwEMettCUwhpQ0bOG9JoW2jIQWWAMUEBsJr7IV1ErtRkQlxIaQQOLb4sfZPidCfABuiWL/cne++/tCnD+M/FfgbrvXaw9+BXZOAsJsqz/AgJuKt5cTom0NAeFGxB4PQ4It0kBAKOEdcO/W+ELsW6kCfPo6/ubr1mlaBz81HcJTXu224xyVc6jLfWuXJpzAy7EGliRwzmiIYEcaaMD+Oo/3gVMQwCIEEN/MhIsFBDzjrCSBgSsBxLLes6AQ4goHZXbLkkw1EHJgE/VsXznkwJ4ZgXUvMOrAATvHbW9KjwDQvKuGLuryGADQRk1M5byDS0iyP7RiE8iwHkLyeDDNTcCFLKEOK+5hQZz+kKwoICNzZb2HpIKaVSkDmTgX6KFWBmARFGWlJcAllgJcOJJhnvhKyn5S3O7SRQ0kpSzfxvGQu4WbVUpin4wSBDRkc1GZ7IQLQADLoGjcTNphDXiBlDTYq5IQzIdEa9oxNUbUAu63F6j7D8A9U3WKysxN10GsrOdmBAws84VRrjXNLC8CkmjCXXUKIejSFy8CITAR0IEBMGJHkBOk5hh14HZKq9yU46SK5qR0GjteRw2sOQ0sqQjXfJTal5/0rs1rIAMHZ0/8uUHvQCtAsof7L23KS9oKonIOYpRCua7xtPdvLgSz2o9++1/4dzu9bjv9p//NH77UnP1UgYF9AAAAAElFTkSuQmCC"
+        },
+        "max_version": {
+          "description": "The maximum protocol version supported by the server.",
+          "type": "integer",
+          "format": "int32",
+          "default": 1000
+        },
+        "min_version": {
+          "description": "The minimum protocol version supported by the server.",
+          "type": "integer",
+          "format": "int32",
+          "default": 0
+        },
+        "name": {
+          "description": "The name of the server.",
+          "type": "string",
+          "default": "Passage"
+        },
+        "preferred_version": {
+          "description": "The preferred protocol version of the server.",
+          "type": "integer",
+          "format": "int32",
+          "default": 769
+        }
+      }
+    },
+    "GrpcAuthentication": {
+      "description": "[`GrpcAuthentication`] hold the gRPC authentication configuration.",
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "The address of the gRPC adapter server.",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "GrpcDiscovery": {
+      "description": "[`GrpcDiscovery`] hold the gRPC discovery configuration.",
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "The address of the gRPC adapter server.",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "GrpcDiscoveryAction": {
+      "description": "[`GrpcDiscoveryAction`] hold the gRPC discovery action configuration.",
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "The address of the gRPC adapter server.",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "GrpcLocalization": {
+      "description": "[`GrpcLocalization`] hold the gRPC localization configuration.",
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "The address of the gRPC adapter server.",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "GrpcStatus": {
+      "description": "[`GrpcStatus`] hold the gRPC status (ping) configuration.",
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "The address of the gRPC adapter server.",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "HttpStatus": {
+      "description": "[`HttpStatus`] hold the http status (ping) configuration.",
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "The address of the http adapter server.",
+          "type": "string",
+          "default": "http://localhost:8080"
+        },
+        "cache_duration": {
+          "description": "The cache duration in seconds to store the queried status. Must be greater than zero.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
+          "minimum": 0
+        }
+      }
+    },
+    "LocalizationAdapter": {
+      "description": "[`LocalizationAdapter`] hold the localization adapter configuration.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "fixed"
+            }
+          },
+          "$ref": "#/$defs/FixedLocalization",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "grpc"
+            }
+          },
+          "$ref": "#/$defs/GrpcLocalization",
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "MetaFilter": {
+      "description": "[`MetaFilter`] hold the metadata filter configuration.",
+      "type": "object",
+      "properties": {
+        "rules": {
+          "description": "List of filter rules. All rules must match (AND logic).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FilterRule"
+          }
+        }
+      }
+    },
+    "MojangAuthentication": {
+      "description": "[`MojangAuthentication`] hold the mojang authentication configuration.",
+      "type": "object",
+      "properties": {
+        "server_id": {
+          "description": "The server id passed to the Mojang authentication server.",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "OpenTelemetry": {
+      "description": "[`OpenTelemetry`] hold the OpenTelemetry configuration. The release is automatically inferred from cargo.",
+      "type": "object",
+      "properties": {
+        "environment": {
+          "description": "The OpenTelemetry environment of the application.",
+          "type": "string",
+          "default": ""
+        },
+        "logs": {
+          "description": "The logs configuration (disabled if empty).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenTelemetryEndpoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metrics": {
+          "description": "The traces configuration (disabled if empty).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenTelemetryEndpoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "traces": {
+          "description": "The traces configuration (disabled if empty).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OpenTelemetryEndpoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OpenTelemetryEndpoint": {
+      "description": "[`OpenTelemetryEndpoint`] hold the OpenTelemetry configuration for a specific endpoint.",
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "The address of the http/protobuf.",
+          "type": "string",
+          "default": ""
+        },
+        "token": {
+          "description": "The base64 basic auth token.",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "PlayerAllowFilter": {
+      "description": "[`PlayerAllowFilter`] hold the player filter configuration (blocks all if empty).",
+      "type": "object",
+      "properties": {
+        "ids": {
+          "description": "List of player IDs to allow (disabled if empty).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        },
+        "username": {
+          "description": "Regex of player usernames to allow (disabled if empty).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "usernames": {
+          "description": "List of player usernames to allow (disabled if empty).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "PlayerBlockFilter": {
+      "description": "[`PlayerBlockFilter`] hold the player filter configuration (allows all if empty).",
+      "type": "object",
+      "properties": {
+        "ids": {
+          "description": "List of player IDs to block (disabled if empty).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        },
+        "username": {
+          "description": "Regex of player usernames to block (disabled if empty).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "usernames": {
+          "description": "List of player usernames to block (disabled if empty).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "PlayerFillStrategy": {
+      "description": "[`PlayerFillStrategy`] hold the player fill strategy configuration.",
+      "type": "object",
+      "properties": {
+        "field": {
+          "description": "The name of the field that stores the player amount.",
+          "type": "string",
+          "default": ""
+        },
+        "max_players": {
+          "description": "The number of players that will be filled at maximum.",
+          "type": "integer",
+          "format": "uint32",
+          "default": 0,
+          "minimum": 0
+        }
+      }
+    },
+    "Profile": {
+      "description": "Represents a single Minecraft user profile with all current properties.\n\nEach Minecraft account is associated with exactly one profile that reflects the visual and\ntechnical state that the player is in. Some fields can be influenced by the player while other\nfields are strictly set by the system.\n\nThe `properties` usually only include one property called `textures`, but this may change over\ntime, so it is kept as an array as that is what's specified in the JSON. The `profile_actions`\nare empty for non-sanctioned accounts.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The unique identifier of the Minecraft user profile.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "description": "The current visual name of the Minecraft user profile.",
+          "type": "string"
+        },
+        "profileActions": {
+          "description": "The pending imposed moderative actions of the Minecraft user profile.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "properties": {
+          "description": "The currently assigned properties of the Minecraft user profile.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProfileProperty"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "ProfileProperty": {
+      "description": "Represents a single property of a Minecraft user profile.\n\nA property defines one specific aspect of a user profile. The most prominent property is called\n`textures` and contains information on the skin and visual appearance of the user. Each property\nname is unique for an individual user.\n\nAll properties are cryptographic signed to verify the authenticity of the provided data. The\n`signature` of the property is signed with Yggdrasil's private key and therefore its\nauthenticity can be verified by the Minecraft client.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The unique, identifiable name of the profile property.",
+          "type": "string"
+        },
+        "signature": {
+          "description": "The base64 encoded signature of the profile property.\nOnly provided if `?unsigned=false` is appended to url",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "description": "The base64 encoded value of the profile property.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ]
+    },
+    "ProxyProtocol": {
+      "description": "[`ProxyProtocol`] hold the PROXY protocol configuration.",
+      "type": "object",
+      "properties": {
+        "allow_v1": {
+          "description": "Whether to allow V1 headers",
+          "type": "boolean",
+          "default": true
+        },
+        "allow_v2": {
+          "description": "Whether to allow V2 headers",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "RateLimiter": {
+      "description": "[`RateLimiter`] hold the connection rate limiting configuration.",
+      "type": "object",
+      "properties": {
+        "duration": {
+          "description": "Duration in seconds.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
+          "minimum": 0
+        },
+        "limit": {
+          "description": "Maximum amount of connections per duration.",
+          "type": "integer",
+          "format": "uint",
+          "default": 60,
+          "minimum": 0
+        }
+      }
+    },
+    "Routes": {
+      "description": "[`Routes`] holds the adapter configurations.",
+      "type": "object",
+      "properties": {
+        "authentication": {
+          "description": "The authentication adapter configuration.",
+          "$ref": "#/$defs/AuthenticationAdapter"
+        },
+        "discovery": {
+          "description": "The discovery adapter configuration.",
+          "$ref": "#/$defs/DiscoveryAdapter"
+        },
+        "hostname": {
+          "description": "The hostname the route should serve. Has to be a valid regex.",
+          "type": "string",
+          "default": ""
+        },
+        "localization": {
+          "description": "The localization adapter configuration.",
+          "$ref": "#/$defs/LocalizationAdapter"
+        },
+        "status": {
+          "description": "The status (ping) adapter configuration.",
+          "$ref": "#/$defs/StatusAdapter"
+        }
+      }
+    },
+    "Sentry": {
+      "description": "[`Sentry`] hold the sentry configuration. The release is automatically inferred from cargo.",
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "The address of the sentry instance. This can either be the official sentry or a self-hosted instance.",
+          "type": "string",
+          "default": ""
+        },
+        "debug": {
+          "description": "Whether sentry should have debug enabled.",
+          "type": "boolean",
+          "default": false
+        },
+        "environment": {
+          "description": "The sentry environment of the application.",
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "StatusAdapter": {
+      "description": "[`StatusAdapter`] hold the status adapter configuration.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "fixed"
+            }
+          },
+          "$ref": "#/$defs/FixedStatus",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "grpc"
+            }
+          },
+          "$ref": "#/$defs/GrpcStatus",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "http"
+            }
+          },
+          "$ref": "#/$defs/HttpStatus",
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "Target": {
+      "description": "A target gameserver that can be connected to.",
+      "type": "object",
+      "properties": {
+        "address": {
+          "description": "The target's address.",
+          "type": "string"
+        },
+        "identifier": {
+          "description": "The target's unique identifier.",
+          "type": "string"
+        },
+        "meta": {
+          "description": "Any metadata attached to the target that may be used by the adapters.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "priority": {
+          "description": "The target's priority, lower values are preferred.",
+          "type": "integer",
+          "format": "uint16",
+          "default": 0,
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "required": [
+        "identifier",
+        "address"
+      ]
+    }
+  }
+}

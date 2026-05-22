@@ -10,7 +10,13 @@ use tracing::instrument;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "grpc_discovery_action_adapter";
 
+/// Discovery action adapter that delegates target filtering and selection to an external gRPC
+/// service.
+///
+/// The service receives the current candidate list and returns either a modified list or a
+/// rejection key to abort routing.
 pub struct GrpcDiscoveryActionAdapter {
+    /// The client by which requests are made.
     client: DiscoveryActionClient<Channel>,
 }
 
@@ -21,6 +27,7 @@ impl Debug for GrpcDiscoveryActionAdapter {
 }
 
 impl GrpcDiscoveryActionAdapter {
+    /// Connects to the gRPC service at `address` and returns an initialized adapter.
     pub async fn new<D>(address: D) -> Result<Self, Error>
     where
         D: TryInto<tonic::transport::Endpoint>,

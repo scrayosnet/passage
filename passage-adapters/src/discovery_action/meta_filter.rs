@@ -58,6 +58,9 @@ impl FilterRule {
     }
 }
 
+/// Discovery action adapter that removes targets that do not match a set of metadata rules.
+///
+/// All rules must match (AND logic). An empty rule set accepts every target.
 #[derive(Debug, Default)]
 pub struct MetaFilterAdapter {
     /// List of filter rules. All rules must match (AND logic).
@@ -65,17 +68,18 @@ pub struct MetaFilterAdapter {
 }
 
 impl MetaFilterAdapter {
+    /// Creates a new `MetaFilterAdapter` with the given filter rules.
     pub fn new(rules: Vec<FilterRule>) -> Self {
         Self { rules }
     }
 
-    /// Add a filter rule to this adapter.
+    /// Adds a single filter rule and returns the updated adapter (builder style).
     pub fn add_rule(mut self, key: String, operation: FilterOperation) -> Self {
         self.rules.push(FilterRule { key, operation });
         self
     }
 
-    /// Check if a target matches all filter rules.
+    /// Returns `true` if `target` satisfies every rule in this adapter.
     pub fn matches_filters(&self, target: &Target) -> bool {
         // Empty rules means accept all targets
         if self.rules.is_empty() {

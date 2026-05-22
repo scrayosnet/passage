@@ -18,7 +18,7 @@ use tracing::{debug, info, warn};
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "dns_discovery_adapter";
 
-/// The type of DNS record to query.
+/// A [`RecordType`] configures which record type should be queried by the adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordType {
     /// SRV records for service discovery (includes port in DNS response).
@@ -30,9 +30,15 @@ pub enum RecordType {
     },
 }
 
-/// DNS-based discovery adapter that resolves targets from DNS records.
+/// DNS-based discovery adapter that resolves targets from DNS records. On creation, the adapter will
+/// start a background task that periodically refreshes the targets. The task is automatically stopped
+/// once the adapter is dropped.
 pub struct DnsDiscoveryAdapter {
+    /// The resolved targets. This thread-safe container is shared between the instance and its refresh
+    /// task.
     inner: Arc<RwLock<Vec<Target>>>,
+
+    /// The cancellation token used to stop the background refresh task.
     token: CancellationToken,
 }
 
@@ -43,13 +49,7 @@ impl Debug for DnsDiscoveryAdapter {
 }
 
 impl DnsDiscoveryAdapter {
-    /// Creates a new DNS discovery adapter.
-    ///
-    /// # Arguments
-    ///
-    /// * `domain` - The DNS domain to query
-    /// * `refresh_duration` - How often to re-query DNS in seconds
-    /// * `record_type` - The type of DNS record to query
+    /// Creates a new DNS discovery adapter and starts the background refresh task.
     pub async fn new(
         domain: String,
         refresh_duration: u64,
@@ -59,7 +59,7 @@ impl DnsDiscoveryAdapter {
         let inner: Arc<RwLock<Vec<Target>>> = Arc::new(RwLock::new(Vec::new()));
         let token = CancellationToken::new();
 
-        // create DNS resolver
+        // Create the DNS resolver
         let resolver = Resolver::builder_with_config(
             ResolverConfig::default(),
             TokioRuntimeProvider::default(),
@@ -67,19 +67,22 @@ impl DnsDiscoveryAdapter {
         .build()
         .map_err(|err| DnsError::BuildFailed { cause: err })?;
 
-        // start background refresh task
+        // Start the background refresh task with the cancellation token for stopping and the shared
+        // target container. The task is configured to skip any missed ticks in case the query is delayed.
         let _inner = Arc::clone(&inner);
         let _token = token.clone();
         let _domain = domain.clone();
         let mut interval = tokio::time::interval(refresh_interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         tokio::spawn(async move {
-            info!("starting DNS discovery watcher");
+            info!("starting DNS discovery background task");
             loop {
                 tokio::select! {
                     biased;
                     _ = _token.cancelled() => break,
-                    _ = interval.tick() => {},
+                    _ = interval.tick() => {
+                        debug!("refreshing targets from DNS");
+                    },
                 }
 
                 // query DNS based on record type
@@ -99,7 +102,7 @@ impl DnsDiscoveryAdapter {
                     }
                 }
             }
-            info!("stopping DNS discovery watcher");
+            info!("stopping DNS discovery background task");
         });
 
         Ok(Self { inner, token })
@@ -131,7 +134,6 @@ impl DnsDiscoveryAdapter {
             for ip in lookup.iter() {
                 let address = SocketAddr::new(ip, port);
                 let identifier = format!("{}:{}", target_name, port);
-
                 targets.push(Target {
                     identifier: identifier.clone(),
                     address,
@@ -139,6 +141,7 @@ impl DnsDiscoveryAdapter {
                     meta: HashMap::from([
                         ("priority".to_string(), srv.priority.to_string()),
                         ("weight".to_string(), srv.weight.to_string()),
+                        ("domain".to_string(), domain.to_string()),
                     ]),
                 });
             }
@@ -168,7 +171,7 @@ impl DnsDiscoveryAdapter {
                 identifier: identifier.clone(),
                 address,
                 priority: 0,
-                meta: HashMap::from([]),
+                meta: HashMap::from([("domain".to_string(), domain.to_string())]),
             });
         }
 

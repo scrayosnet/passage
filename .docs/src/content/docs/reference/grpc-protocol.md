@@ -3,35 +3,39 @@ title: gRPC Protocol Reference
 description: Complete reference for Passage gRPC adapter protocol definitions.
 ---
 
-This page provides a complete reference for the gRPC protocol used by Passage's custom adapters. Use this reference when implementing your own gRPC adapters in any language.
+Complete reference for the gRPC protocol used by Passage's custom adapters. All services are defined in the `scrayosnet.passage.adapter` package.
 
-## Overview
-
-Passage defines three gRPC services for extending functionality:
-
-- **Status Service** - Provides server list status information (MOTD, player count, favicon)
-- **Discovery Service** - Discovers available backend servers
-- **Strategy Service** - Selects which server to route each player to
-
-All services are defined in the `scrayosnet.passage.adapter` package.
+For implementation examples, see [Custom gRPC Adapters](/advanced/grpc-adapters/).
 
 ## Proto Files
 
-Proto definitions are located in the Passage repository:
-
 ```
-proto/adapter/
-├── adapter.proto     # Common types (Target, Address, MetaEntry)
-├── status.proto      # Status service definition
-├── discovery.proto   # Discovery service definition
-└── strategy.proto    # Strategy service definition
+passage-adapters/grpc/proto/adapter/
+├── adapter.proto           # Common types
+├── status.proto            # Status service
+├── authentication.proto    # Authentication service
+├── discovery.proto         # Discovery service
+├── discovery_action.proto  # Discovery Action service
+└── localization.proto      # Localization service
 ```
 
-## Common Types
+## Services Overview
+
+| Service | RPC | Request | Response | Config `type` |
+|---------|-----|---------|----------|---------------|
+| `Status` | `GetStatus` | `StatusRequest` | `StatusResponse` | `grpc` (in `status`) |
+| `Authentication` | `Authenticate` | `AuthenticationRequest` | `AuthenticationResponse` | `grpc` (in `authentication`) |
+| `Discovery` | `GetTargets` | `TargetRequest` | `TargetsResponse` | `grpc_discovery` (in `discovery`) |
+| `DiscoveryAction` | `Apply` | `ApplyRequest` | `ApplyResponse` | `grpc` (in `discovery.actions`) |
+| `Localization` | `Localize` | `LocalizationRequest` | `LocalizationResponse` | `grpc` (in `localization`) |
+
+---
+
+## Common Types (`adapter.proto`)
+
+These types are shared across all services.
 
 ### `Address`
-
-Represents a network socket address.
 
 ```protobuf
 message Address {
@@ -40,17 +44,10 @@ message Address {
 }
 ```
 
-**Fields:**
-- `hostname` (string): Hostname or IP address (e.g., `"10.0.1.10"`, `"minecraft.example.com"`)
-- `port` (uint32): Port number (e.g., `25565`)
-
-**Example:**
-```json
-{
-  "hostname": "10.0.1.10",
-  "port": 25565
-}
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `hostname` | string | Hostname or IP address |
+| `port` | uint32 | Port number |
 
 ---
 
@@ -63,35 +60,20 @@ message Target {
     string identifier = 1;
     Address address = 2;
     repeated MetaEntry meta = 3;
+    uint32 priority = 4;
 }
 ```
 
-**Fields:**
-- `identifier` (string): Unique identifier for this server (e.g., `"hub-1"`, `"survival-east-2"`)
-- `address` (Address): Network address of the server
-- `meta` (repeated MetaEntry): Optional metadata key-value pairs
-
-**Example:**
-```json
-{
-  "identifier": "hub-1",
-  "address": {
-    "hostname": "10.0.1.10",
-    "port": 25565
-  },
-  "meta": [
-    {"key": "type", "value": "hub"},
-    {"key": "region", "value": "us-east"},
-    {"key": "players", "value": "15"}
-  ]
-}
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `identifier` | string | Unique name for the server |
+| `address` | Address | Network address |
+| `meta` | repeated MetaEntry | Key-value metadata pairs |
+| `priority` | uint32 | Priority for ordering (lower = higher priority) |
 
 ---
 
 ### `MetaEntry`
-
-Key-value pair for storing server metadata.
 
 ```protobuf
 message MetaEntry {
@@ -100,24 +82,94 @@ message MetaEntry {
 }
 ```
 
-**Fields:**
-- `key` (string): Metadata key (e.g., `"type"`, `"region"`, `"players"`)
-- `value` (string): Metadata value (always string, even for numbers)
-
-**Common Metadata Keys:**
-- `type`: Server type (e.g., `"hub"`, `"survival"`, `"minigame"`)
-- `region`: Geographic region (e.g., `"us-east"`, `"eu-west"`)
-- `players`: Current player count (e.g., `"15"`)
-- `max_players`: Maximum players (e.g., `"100"`)
-- `version`: Minecraft version (e.g., `"1.21.4"`)
+| Field | Type | Description |
+|-------|------|-------------|
+| `key` | string | Metadata key (e.g., `"type"`, `"players"`) |
+| `value` | string | Metadata value (always a string) |
 
 ---
 
-## Status Service
+### `ClientInfo`
+
+Client connection information, passed to Discovery, DiscoveryAction, and Authentication services.
+
+```protobuf
+message ClientInfo {
+    Address client_address = 1;
+    Address server_address = 2;
+    uint64 protocol_version = 3;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `client_address` | Address | The connecting client's address |
+| `server_address` | Address | The address the client connected to |
+| `protocol_version` | uint64 | Minecraft protocol version number |
+
+---
+
+### `PlayerInfo`
+
+Player identity information.
+
+```protobuf
+message PlayerInfo {
+    string name = 1;
+    string id = 2;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Player's username |
+| `id` | string | Player's UUID (with hyphens) |
+
+---
+
+### `Profile`
+
+Minecraft player profile, used in authentication responses.
+
+```protobuf
+message Profile {
+    string id = 1;
+    string name = 2;
+    repeated ProfileProperty properties = 3;
+    repeated string profile_actions = 4;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Player UUID |
+| `name` | string | Player username |
+| `properties` | repeated ProfileProperty | Profile properties (e.g., textures) |
+| `profile_actions` | repeated string | Pending moderation actions |
+
+---
+
+### `ProfileProperty`
+
+```protobuf
+message ProfileProperty {
+    string name = 1;
+    string value = 2;
+    optional string signature = 3;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Property name (e.g., `"textures"`) |
+| `value` | string | Base64-encoded property value |
+| `signature` | string (optional) | Base64-encoded Mojang signature |
+
+---
+
+## Status Service (`status.proto`)
 
 Provides server list status information for Minecraft client pings.
-
-### Service Definition
 
 ```protobuf
 service Status {
@@ -135,33 +187,11 @@ message StatusRequest {
 }
 ```
 
-**Fields:**
-- `client_address` (Address): The client's network address
-- `server_address` (Address): The address the client connected to
-- `protocol` (uint64): Minecraft protocol version number the client is using
-
-**Protocol Version Examples:**
-- `769` - Minecraft 1.21.4
-- `767` - Minecraft 1.21.1
-- `766` - Minecraft 1.20.5
-- `763` - Minecraft 1.20.1
-
-**Example Request:**
-```json
-{
-  "client_address": {
-    "hostname": "192.168.1.100",
-    "port": 54321
-  },
-  "server_address": {
-    "hostname": "play.example.com",
-    "port": 25565
-  },
-  "protocol": 769
-}
-```
-
----
+| Field | Type | Description |
+|-------|------|-------------|
+| `client_address` | Address | The client's network address |
+| `server_address` | Address | The address the client connected to |
+| `protocol` | uint64 | Client's Minecraft protocol version |
 
 ### `StatusResponse`
 
@@ -171,10 +201,7 @@ message StatusResponse {
 }
 ```
 
-**Fields:**
-- `status` (StatusData, optional): Server status data. If null, connection is rejected.
-
----
+If `status` is null, the connection is rejected.
 
 ### `StatusData`
 
@@ -188,36 +215,13 @@ message StatusData {
 }
 ```
 
-**Fields:**
-- `version` (ProtocolVersion, required): Version information
-- `players` (Players, optional): Player count information
-- `description` (string, optional): MOTD as JSON text component
-- `favicon` (bytes, optional): 64x64 PNG image data
-- `enforces_secure_chat` (bool, optional): Whether secure chat is enforced (1.19+)
-
-**Example:**
-```json
-{
-  "status": {
-    "version": {
-      "name": "My Minecraft Network",
-      "protocol": 769
-    },
-    "players": {
-      "online": 42,
-      "max": 100,
-      "samples": [
-        {"name": "Steve", "id": "069a79f4-44e9-4726-a5be-fca90e38aaf5"},
-        {"name": "Alex", "id": "ec561538-f3fd-461d-aff5-086b22154bce"}
-      ]
-    },
-    "description": "{\"text\":\"Welcome to our server!\",\"color\":\"gold\"}",
-    "enforces_secure_chat": true
-  }
-}
-```
-
----
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | ProtocolVersion | Version and protocol info |
+| `players` | Players (optional) | Player count and samples |
+| `description` | string (optional) | MOTD as JSON text component |
+| `favicon` | bytes (optional) | 64x64 PNG image data |
+| `enforces_secure_chat` | bool (optional) | Whether secure chat is enforced |
 
 ### `ProtocolVersion`
 
@@ -228,11 +232,10 @@ message ProtocolVersion {
 }
 ```
 
-**Fields:**
-- `name` (string): Display name shown in server list
-- `protocol` (int32): Minecraft protocol version number
-
----
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Display name in server list (e.g., `"My Network"`) |
+| `protocol` | int32 | Protocol version number (e.g., `769` for 1.21.4) |
 
 ### `Players`
 
@@ -244,13 +247,6 @@ message Players {
 }
 ```
 
-**Fields:**
-- `online` (uint32): Current number of online players
-- `max` (uint32): Maximum player capacity
-- `samples` (repeated PlayerEntry): Sample player entries shown on hover
-
----
-
 ### `PlayerEntry`
 
 ```protobuf
@@ -260,17 +256,75 @@ message PlayerEntry {
 }
 ```
 
-**Fields:**
-- `name` (string): Player display name
-- `id` (string): Player UUID (with hyphens)
+**Example response:**
+```json
+{
+  "status": {
+    "version": {"name": "My Network", "protocol": 769},
+    "players": {
+      "online": 42, "max": 100,
+      "samples": [{"name": "Steve", "id": "069a79f4-44e9-4726-a5be-fca90e38aaf5"}]
+    },
+    "description": "{\"text\":\"Welcome!\",\"color\":\"gold\"}"
+  }
+}
+```
 
 ---
 
-## Discovery Service
+## Authentication Service (`authentication.proto`)
 
-Discovers available backend Minecraft servers.
+Verifies player identity using custom logic.
 
-### Service Definition
+```protobuf
+service Authentication {
+    rpc Authenticate(AuthenticationRequest) returns (AuthenticationResponse);
+}
+```
+
+### `AuthenticationRequest`
+
+```protobuf
+message AuthenticationRequest {
+    ClientInfo client = 1;
+    PlayerInfo player = 2;
+    bytes shared_secret = 3;
+    bytes encoded_public = 4;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `client` | ClientInfo | Client and server addresses, protocol version |
+| `player` | PlayerInfo | Player name and UUID |
+| `shared_secret` | bytes | The encrypted shared secret from the client |
+| `encoded_public` | bytes | The encoded public key |
+
+### `AuthenticationResponse`
+
+```protobuf
+message AuthenticationResponse {
+    oneof reason {
+        Profile profile = 1;
+        string key = 2;
+    }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `profile` | Profile | Accept: the player's verified profile |
+| `key` | string | Reject: a localization key for the disconnect message |
+
+Return exactly one of `profile` or `key`:
+- **`profile`**: Allows the connection with the given identity
+- **`key`**: Disconnects the player with the localized message for that key (e.g., `"disconnect_unauthenticated"`)
+
+---
+
+## Discovery Service (`discovery.proto`)
+
+Discovers available backend servers.
 
 ```protobuf
 service Discovery {
@@ -282,39 +336,13 @@ service Discovery {
 
 ```protobuf
 message TargetRequest {
-    Address client_address = 1;
-    Address server_address = 2;
-    uint64 protocol = 3;
-    string username = 4;
-    string user_id = 5;
+    ClientInfo client = 1;
 }
 ```
 
-**Fields:**
-- `client_address` (Address): The client's network address
-- `server_address` (Address): The address the client connected to
-- `protocol` (uint64): Minecraft protocol version
-- `username` (string): Player's username (e.g., `"Steve"`)
-- `user_id` (string): Player's UUID (with hyphens, e.g., `"069a79f4-44e9-4726-a5be-fca90e38aaf5"`)
-
-**Example Request:**
-```json
-{
-  "client_address": {
-    "hostname": "192.168.1.100",
-    "port": 54321
-  },
-  "server_address": {
-    "hostname": "play.example.com",
-    "port": 25565
-  },
-  "protocol": 769,
-  "username": "Steve",
-  "user_id": "069a79f4-44e9-4726-a5be-fca90e38aaf5"
-}
-```
-
----
+| Field | Type | Description |
+|-------|------|-------------|
+| `client` | ClientInfo | Client address, server address, and protocol version |
 
 ### `TargetsResponse`
 
@@ -324,312 +352,136 @@ message TargetsResponse {
 }
 ```
 
-**Fields:**
-- `targets` (repeated Target): List of available backend servers
+Returns a list of available backend servers with metadata.
 
-**Example Response:**
+**Example request/response:**
 ```json
-{
-  "targets": [
-    {
-      "identifier": "hub-1",
-      "address": {"hostname": "10.0.1.10", "port": 25565},
-      "meta": [
-        {"key": "type", "value": "hub"},
-        {"key": "players", "value": "15"}
-      ]
-    },
-    {
-      "identifier": "survival-1",
-      "address": {"hostname": "10.0.2.10", "port": 25565},
-      "meta": [
-        {"key": "type", "value": "survival"},
-        {"key": "players", "value": "8"}
-      ]
-    }
-  ]
-}
+// Request
+{"client": {"client_address": {"hostname": "192.168.1.100", "port": 54321}, "server_address": {"hostname": "mc.example.net", "port": 25565}, "protocol_version": 769}}
+
+// Response
+{"targets": [{"identifier": "hub-1", "address": {"hostname": "10.0.1.10", "port": 25565}, "meta": [{"key": "players", "value": "15"}]}]}
 ```
 
 ---
 
-## Strategy Service
+## Discovery Action Service (`discovery_action.proto`)
 
-Selects which backend server to route a player to.
-
-### Service Definition
+Transforms the target list in the actions pipeline.
 
 ```protobuf
-service Strategy {
-    rpc SelectTarget(SelectRequest) returns (SelectResponse);
+service DiscoveryAction {
+    rpc Apply(ApplyRequest) returns (ApplyResponse);
 }
 ```
 
-### `SelectRequest`
+### `ApplyRequest`
 
 ```protobuf
-message SelectRequest {
-    Address client_address = 1;
-    Address server_address = 2;
-    uint64 protocol = 3;
-    string username = 4;
-    string user_id = 5;
-    repeated Target targets = 6;
+message ApplyRequest {
+    ClientInfo client = 1;
+    PlayerInfo player = 2;
+    repeated Target targets = 3;
 }
 ```
 
-**Fields:**
-- `client_address` (Address): The client's network address
-- `server_address` (Address): The address the client connected to
-- `protocol` (uint64): Minecraft protocol version
-- `username` (string): Player's username
-- `user_id` (string): Player's UUID (with hyphens)
-- `targets` (repeated Target): Available servers to choose from (from Discovery)
+| Field | Type | Description |
+|-------|------|-------------|
+| `client` | ClientInfo | Client connection information |
+| `player` | PlayerInfo | Player name and UUID |
+| `targets` | repeated Target | Current target list to process |
 
-**Example Request:**
-```json
-{
-  "client_address": {
-    "hostname": "192.168.1.100",
-    "port": 54321
-  },
-  "server_address": {
-    "hostname": "play.example.com",
-    "port": 25565
-  },
-  "protocol": 769,
-  "username": "Steve",
-  "user_id": "069a79f4-44e9-4726-a5be-fca90e38aaf5",
-  "targets": [
-    {
-      "identifier": "hub-1",
-      "address": {"hostname": "10.0.1.10", "port": 25565},
-      "meta": [{"key": "players", "value": "15"}]
-    },
-    {
-      "identifier": "hub-2",
-      "address": {"hostname": "10.0.1.11", "port": 25565},
-      "meta": [{"key": "players", "value": "8"}]
-    }
-  ]
-}
-```
-
----
-
-### `SelectResponse`
+### `ApplyResponse`
 
 ```protobuf
-message SelectResponse {
-    optional Target target = 1;
-}
-```
-
-**Fields:**
-- `target` (Target, optional): Selected server. If null, connection is rejected.
-
-**Example Response:**
-```json
-{
-  "target": {
-    "identifier": "hub-2",
-    "address": {"hostname": "10.0.1.11", "port": 25565},
-    "meta": [{"key": "players", "value": "8"}]
-  }
-}
-```
-
----
-
-## Implementation Guide
-
-### Code Generation
-
-Generate gRPC code for your language:
-
-#### Go
-```bash
-protoc --go_out=. --go_opt=paths=source_relative \
-    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-    proto/adapter/*.proto
-```
-
-#### Python
-```bash
-python -m grpc_tools.protoc \
-    -I. --python_out=. --grpc_python_out=. \
-    proto/adapter/*.proto
-```
-
-#### Java
-```bash
-protoc --java_out=src/main/java \
-    --grpc-java_out=src/main/java \
-    proto/adapter/*.proto
-```
-
-#### Node.js
-```bash
-grpc_tools_node_protoc \
-    --js_out=import_style=commonjs,binary:. \
-    --grpc_out=grpc_js:. \
-    proto/adapter/*.proto
-```
-
-#### Rust
-Add to `build.rs`:
-```rust
-fn main() {
-    tonic_build::configure()
-        .compile(&["proto/adapter/status.proto"], &["proto"])
-        .unwrap();
-}
-```
-
----
-
-### Server Implementation
-
-Implement the gRPC service interface:
-
-**Go Example:**
-```go
-type statusServer struct {
-    pb.UnimplementedStatusServer
-}
-
-func (s *statusServer) GetStatus(ctx context.Context, req *pb.StatusRequest) (*pb.StatusResponse, error) {
-    return &pb.StatusResponse{
-        Status: &pb.StatusData{
-            Version: &pb.ProtocolVersion{
-                Name:     "My Server",
-                Protocol: int32(req.Protocol),
-            },
-            Players: &pb.Players{
-                Online: 10,
-                Max:    100,
-            },
-            Description: `{"text":"Welcome!"}`,
-        },
-    }, nil
-}
-```
-
-**Python Example:**
-```python
-class StatusService(status_pb2_grpc.StatusServicer):
-    def GetStatus(self, request, context):
-        return status_pb2.StatusResponse(
-            status=status_pb2.StatusData(
-                version=status_pb2.ProtocolVersion(
-                    name="My Server",
-                    protocol=request.protocol
-                ),
-                players=status_pb2.Players(
-                    online=10,
-                    max=100
-                ),
-                description='{"text":"Welcome!"}'
-            )
-        )
-```
-
----
-
-### Testing with grpcurl
-
-Test your gRPC services using `grpcurl`:
-
-```bash
-# Install grpcurl
-brew install grpcurl  # macOS
-# or
-go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
-
-# Test Status service
-grpcurl -plaintext -d '{
-  "client_address": {"hostname": "127.0.0.1", "port": 12345},
-  "server_address": {"hostname": "localhost", "port": 25565},
-  "protocol": 769
-}' localhost:3030 scrayosnet.passage.adapter.Status/GetStatus
-
-# Test Discovery service
-grpcurl -plaintext -d '{
-  "username": "Steve",
-  "user_id": "069a79f4-44e9-4726-a5be-fca90e38aaf5",
-  "protocol": 769
-}' localhost:3030 scrayosnet.passage.adapter.Discovery/GetTargets
-
-# Test Strategy service
-grpcurl -plaintext -d '{
-  "username": "Steve",
-  "user_id": "069a79f4-44e9-4726-a5be-fca90e38aaf5",
-  "targets": [
-    {
-      "identifier": "hub-1",
-      "address": {"hostname": "10.0.1.10", "port": 25565}
+message ApplyResponse {
+    oneof reason {
+        Targets targets = 1;
+        string key = 2;
     }
-  ]
-}' localhost:3030 scrayosnet.passage.adapter.Strategy/SelectTarget
-```
+}
 
----
-
-## Error Handling
-
-### gRPC Status Codes
-
-Use appropriate gRPC status codes for errors:
-
-- `OK` - Success
-- `INVALID_ARGUMENT` - Invalid request data
-- `NOT_FOUND` - Resource not found
-- `UNAVAILABLE` - Service temporarily unavailable
-- `INTERNAL` - Internal server error
-
-**Go Example:**
-```go
-import "google.golang.org/grpc/codes"
-import "google.golang.org/grpc/status"
-
-func (s *strategyServer) SelectTarget(ctx context.Context, req *pb.SelectRequest) (*pb.SelectResponse, error) {
-    if req.Username == "" {
-        return nil, status.Error(codes.InvalidArgument, "username is required")
-    }
-    // ... implementation
+message Targets {
+    repeated Target targets = 1;
 }
 ```
 
-**Python Example:**
-```python
-import grpc
+| Field | Type | Description |
+|-------|------|-------------|
+| `targets` | Targets | Accept: the modified target list |
+| `key` | string | Reject: a localization key for the disconnect message |
 
-def SelectTarget(self, request, context):
-    if not request.username:
-        context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-        context.set_details('username is required')
-        return strategy_pb2.SelectResponse()
-    # ... implementation
-```
+Return exactly one of `targets` or `key`:
+- **`targets`**: Returns the modified target list (can filter, reorder, or replace targets)
+- **`key`**: Rejects the player with a localized disconnect message
 
 ---
 
-## Best Practices
+## Localization Service (`localization.proto`)
 
-### Performance
-- **Keep response times under 50ms** - Slow adapters delay player connections
-- **Use connection pooling** - Reuse database/API connections
-- **Implement caching** - Cache expensive operations
-- **Return quickly** - Avoid blocking operations
+Provides translated disconnect messages.
 
-### Reliability
-- **Always return a response** - Never timeout or hang
-- **Handle errors gracefully** - Return sensible defaults on error
-- **Log all requests** - Aid debugging and monitoring
-- **Implement health checks** - Use gRPC health checking protocol
+```protobuf
+service Localization {
+    rpc Localize(LocalizationRequest) returns (LocalizationResponse);
+}
+```
 
-### Security
-- **Validate all inputs** - Don't trust request data
-- **Use TLS in production** - Configure `https://` endpoints
-- **Authenticate requests** - Use gRPC authentication if needed
-- **Rate limit** - Protect from abuse
+### `LocalizationRequest`
+
+```protobuf
+message LocalizationRequest {
+    optional string locale = 1;
+    string key = 2;
+    map<string, string> params = 3;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `locale` | string (optional) | Player's client locale (e.g., `"en"`, `"de"`) |
+| `key` | string | Message key to localize (e.g., `"disconnect_timeout"`) |
+| `params` | map | Substitution parameters |
+
+### `LocalizationResponse`
+
+```protobuf
+message LocalizationResponse {
+    string message = 1;
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `message` | string | The localized message as a Minecraft JSON text component |
+
+---
+
+## Testing with grpcurl
+
+```bash
+# Status
+grpcurl -plaintext -import-path ./proto -proto adapter/status.proto \
+  -d '{"client_address":{"hostname":"127.0.0.1","port":12345},"server_address":{"hostname":"localhost","port":25565},"protocol":769}' \
+  localhost:50051 scrayosnet.passage.adapter.Status/GetStatus
+
+# Authentication
+grpcurl -plaintext -import-path ./proto -proto adapter/authentication.proto \
+  -d '{"client":{"client_address":{"hostname":"127.0.0.1","port":12345},"protocol_version":769},"player":{"name":"Steve","id":"069a79f4-44e9-4726-a5be-fca90e38aaf5"}}' \
+  localhost:50051 scrayosnet.passage.adapter.Authentication/Authenticate
+
+# Discovery
+grpcurl -plaintext -import-path ./proto -proto adapter/discovery.proto \
+  -d '{"client":{"client_address":{"hostname":"127.0.0.1","port":12345},"protocol_version":769}}' \
+  localhost:50051 scrayosnet.passage.adapter.Discovery/GetTargets
+
+# Discovery Action
+grpcurl -plaintext -import-path ./proto -proto adapter/discovery_action.proto \
+  -d '{"client":{"client_address":{"hostname":"127.0.0.1","port":12345}},"player":{"name":"Steve","id":"069a79f4-44e9-4726-a5be-fca90e38aaf5"},"targets":[{"identifier":"hub-1","address":{"hostname":"10.0.1.10","port":25565}}]}' \
+  localhost:50051 scrayosnet.passage.adapter.DiscoveryAction/Apply
+
+# Localization
+grpcurl -plaintext -import-path ./proto -proto adapter/localization.proto \
+  -d '{"locale":"en","key":"disconnect_timeout"}' \
+  localhost:50051 scrayosnet.passage.adapter.Localization/Localize
+```

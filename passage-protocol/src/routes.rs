@@ -7,14 +7,26 @@ use regex::Regex;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 
+/// A shared, immutable slice of routes. The inner `Arc` allows individual routes to be cloned
+/// cheaply across connections.
 pub type Routes<Stat, Disc, Auth, Loca> = Arc<[Arc<Route<Stat, Disc, Auth, Loca>>]>;
 
+/// A virtual-host routing rule that ties a hostname regex to a set of adapters.
+///
+/// Incoming connections are matched against [`Route::hostname`]; the first matching route is
+/// selected. The route then acts as the single adapter entry-point for the connection, delegating
+/// to each inner adapter in turn.
 #[derive(Clone, Debug)]
 pub struct Route<Stat, Disc, Auth, Loca> {
+    /// Regular expression matched against the server address the client sent in the handshake.
     pub hostname: Regex,
+    /// Adapter used to answer status ping requests for this route.
     pub status_adapter: Stat,
+    /// Adapter pipeline used to discover and select a backend target for this route.
     pub discovery_adapter: Disc,
+    /// Adapter used to authenticate the connecting player for this route.
     pub authentication_adapter: Auth,
+    /// Adapter used to resolve localised messages for this route.
     pub localization_adapter: Loca,
 }
 
@@ -25,6 +37,9 @@ where
     Auth: AuthenticationAdapter,
     Loca: LocalizationAdapter,
 {
+    /// Runs the full discovery pipeline and returns the single selected [`Target`].
+    ///
+    /// Returns `Err` if the pipeline produces no candidates.
     pub async fn select(&self, client: &Client, player: &Player) -> Result<Target> {
         let mut targets = Vec::new();
         self.discovery_adapter

@@ -50,7 +50,6 @@ You can find a [detailed comparison][passage-comparison] with more aspects on ou
 * Route your players to dynamic servers using Service discovery and an algorithm of your preference.
 * Stay always online and drop no player connections during your maintenance or partial outages.
 * Authenticate and validate your players with custom logic, to prevent any load from your backend servers.
-* Prepare your players even before they reach your server, making sure the desired resource packs are loaded.
 * Be ready for the next Minecraft version, without any necessity to update Passage beforehand.
 * Support Mojang chat signing for a better protection of your players and advanced chat features.
 

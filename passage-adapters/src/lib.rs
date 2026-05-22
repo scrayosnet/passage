@@ -78,6 +78,7 @@ pub struct Player {
 
 /// A target gameserver that can be connected to.
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 pub struct Target {
     /// The target's unique identifier.
     pub identifier: String,

@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=./schema.json
+
 # Server rund on minecraft default port
 address: "0.0.0.0:25565"
 
@@ -23,19 +25,20 @@ routes:
     server_id: ""
   # The discovery adapter used to find the server to connect to.
   discovery:
-    type: dns
+    type: dns_discovery
     domain: "servers.example.net"
+    record_type: srv
     # Any custom actions that further influence the discovery. At the end, the first server in
     # the list of discovered servers is selected. The actions may filter or reorder the servers
     # such that a different server is selected. They may also be used for other purposes such as
     # sending notifications. The name is optional for improved logging.
     actions:
     # Next, the servers are filtered to only include those that are online.
-    - type: filter
+    - type: meta_filter
       name: "server-filter"
       rules:
       - op: "equals"
-        field: "status"
+        key: "status"
         value: "online"
     # Next, the servers are passed to an gRPC adapter that may alter the servers in any way. This
     # could further filter the servers, inject additional information, or reorder them.
@@ -45,7 +48,5 @@ routes:
     # Lastly, the servers are sorted such that the fullest server with space remaining is selected.
     # In case there are multiple such servers, it selects a random one. This allows for incremental
     # ordering of servers.
-    - type: player_fill
+    - type: player_fill_strategy
       name: "player-fill-strategy"
-    - type: random
-      name: "random-strategy"

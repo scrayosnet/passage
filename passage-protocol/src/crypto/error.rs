@@ -9,12 +9,15 @@ pub enum Error {
     #[error("error reading or writing data: {0}")]
     IllegalRsa(#[from] rsa::Error),
 
+    /// The encoding failed.
     #[error("could not encode the public key: {0}")]
     EncodingFailed(#[from] rsa::pkcs8::spki::Error),
 
+    /// Failed to create a random value.
     #[error("failed to retrieve randomness: {0}")]
     UnavailableRandom(#[from] rand::rngs::SysError),
 
+    /// The shared secret is invalid.
     #[error("authentication request failed: {0}")]
     InvalidCipherLength(#[from] cfb8::cipher::InvalidLength),
 }
