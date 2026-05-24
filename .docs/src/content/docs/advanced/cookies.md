@@ -99,17 +99,34 @@ Tracks unique player sessions across reconnections using a UUIDv4. Not signed (n
 {
   "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "server_address": "play.example.com",
-  "server_port": 25565
+  "server_port": 25565,
+  "extra": {
+    "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+  }
 }
 ```
 
 - **id**: Unique session identifier (UUIDv4)
 - **server_address/server_port**: From handshake
+- **extra**: System-specific data. Contains the W3C Trace Context (`traceparent` header) of the active OpenTelemetry span for the connection, enabling backend servers to continue the trace without creating a new root span.
+
+### Trace Propagation
+
+When Passage creates the session cookie, it injects the current OpenTelemetry span context into `extra` using the W3C Trace Context propagator. The `traceparent` field follows the standard format:
+
+```
+00-<trace-id>-<parent-span-id>-<trace-flags>
+ │   32 hex     16 hex           01 = sampled
+ │   chars      chars
+ └── version
+```
+
+Backend servers can extract this context to continue the distributed trace as a child span, giving you an unbroken trace ID from Passage through every backend hop. See [Distributed Tracing](/advanced/tracing) for details.
 
 ### Use Cases
 
 - Track unique sessions and identify reconnections
-- Correlate logs/traces across connections
+- Correlate logs/traces across connections using the injected `traceparent`
 - Analytics for connection patterns and server preferences
 - Foundation for future session-based features
 
