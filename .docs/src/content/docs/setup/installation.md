@@ -11,7 +11,7 @@ Installation methods for Passage. For a complete setup guide, see [Getting Start
 docker run -d \
   --name passage \
   -p 25565:25565 \
-  -v ./config:/app/config \
+  -v ./config:/config \
   ghcr.io/scrayosnet/passage:latest
 ```
 
@@ -24,7 +24,7 @@ services:
     ports:
       - "25565:25565"
     volumes:
-      - ./config:/app/config
+      - ./config:/config
     restart: unless-stopped
 ```
 

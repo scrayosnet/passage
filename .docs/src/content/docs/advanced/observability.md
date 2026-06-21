@@ -184,7 +184,7 @@ RUST_LOG=passage=debug,passage_adapters=trace passage
 docker run -d \
   --name passage \
   -p 25565:25565 \
-  -v $(pwd)/config:/app/config \
+  -v $(pwd)/config:/config \
   -e RUST_LOG=debug \
   ghcr.io/scrayosnet/passage:latest
 ```

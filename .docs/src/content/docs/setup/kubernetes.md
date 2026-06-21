@@ -126,7 +126,7 @@ spec:
             cpu: "500m"
         volumeMounts:
         - name: config
-          mountPath: /app/config
+          mountPath: /config
           readOnly: true
         env:
         - name: RUST_LOG
@@ -224,7 +224,7 @@ spec:
           periodSeconds: 10
         volumeMounts:
         - name: config
-          mountPath: /app/config
+          mountPath: /config
           readOnly: true
         - name: auth-secret
           mountPath: /run/secrets
