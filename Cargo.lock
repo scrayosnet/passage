@@ -2922,7 +2922,7 @@ dependencies = [
 
 [[package]]
 name = "passage"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "config",
  "opentelemetry",
@@ -2953,7 +2953,7 @@ dependencies = [
 
 [[package]]
 name = "passage-adapters"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "num-bigint",
  "opentelemetry",
@@ -2971,7 +2971,7 @@ dependencies = [
 
 [[package]]
 name = "passage-adapters-agones"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "k8s-openapi",
  "kube",
@@ -2989,7 +2989,7 @@ dependencies = [
 
 [[package]]
 name = "passage-adapters-dns"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "hickory-resolver",
  "passage-adapters",
@@ -3001,7 +3001,7 @@ dependencies = [
 
 [[package]]
 name = "passage-adapters-grpc"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "passage-adapters",
  "prost",
@@ -3020,7 +3020,7 @@ dependencies = [
 
 [[package]]
 name = "passage-adapters-http"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "passage-adapters",
  "reqwest",
@@ -3031,7 +3031,7 @@ dependencies = [
 
 [[package]]
 name = "passage-packets"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "aes",
  "byteorder",
@@ -3051,7 +3051,7 @@ dependencies = [
 
 [[package]]
 name = "passage-protocol"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "cfb8 0.9.1",
  "criterion",
