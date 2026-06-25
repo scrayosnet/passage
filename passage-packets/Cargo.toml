@@ -29,7 +29,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 cfb8 = { version = "0.8" }
-aes = { version = "0.8" }
+aes = { version = "0.9" }
 
 [dev-dependencies]
 fake = { workspace = true, features = ["derive", "uuid"] }
