@@ -33,19 +33,17 @@ routes:
     record_type: srv
     actions:
     - type: meta_filter
-      name: "online-filter"
       rules:
       - key: "status"
         op: equals
         value: "online"
     - type: player_fill_strategy
-      name: "fill-strategy"
       field: "players"
       max_players: 50
 ```
 
 :::tip
-Every action can have an optional `name` field for improved logging and debugging. It is recommended to use descriptive names.
+Order matters. Put filters first so that later actions -- especially `player_fill_strategy` -- only see targets that are actually eligible.
 :::
 
 ---
@@ -190,7 +188,11 @@ actions:
 
 ## Player Fill Strategy
 
-Reorders targets so that the fullest server below the `max_players` capacity is selected first. Servers at or above `max_players` are ordered in reverse (fullst last). Among servers with equal player counts, one is chosen randomly.
+Reorders targets so that the fullest server below the `max_players` capacity ends up first. Servers at or above `max_players` are sorted behind all non-full servers, and among themselves from least to most full. Targets are compared by `priority` first, so this action only reorders within a priority group. After sorting, priorities are recomputed from zero.
+
+:::caution
+This action **reorders**, it never removes targets. If every server is at or above `max_players`, the least-full one is still selected. Use a [`meta_filter`](#meta-filter) beforehand if you need targets to be excluded outright.
+:::
 
 ```yaml
 actions:
@@ -204,7 +206,9 @@ actions:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `field` | string | `""` | Metadata key containing the current player count. |
-| `max_players` | integer | `0` | Maximum players per server. |
+| `max_players` | integer | `0` | Capacity threshold above which a server counts as full. |
+
+A target whose metadata lacks `field`, or whose value does not parse as an unsigned integer, is treated as having **0 players**.
 
 ### How It Works
 
@@ -214,12 +218,19 @@ hub-1: players=45, hub-2: players=38, hub-3: players=50
 ```
 
 With `max_players: 50`:
-1. `hub-3` is excluded (at capacity)
+1. `hub-3` (50 players) counts as full and is sorted behind the others
 2. `hub-1` (45 players) is preferred over `hub-2` (38 players) -- fills the fullest server first
-3. Player is transferred to `hub-1`
+3. The resulting order is `hub-1`, `hub-2`, `hub-3`, and the player is transferred to `hub-1`
 
-:::note[Player Count Source]
-The `field` value must be present in the target metadata. Static metadata in `fixed_discovery` targets won't update automatically. Use `dns_discovery`, `agones_discovery`, or `grpc_discovery` with dynamic metadata for accurate player counts.
+:::note[Where the player count comes from]
+This action reads the count from the target metadata -- it never queries your servers. Whatever produces the targets must therefore attach a live count under `field`:
+
+- `fixed_discovery` -- metadata is static and never updates on its own
+- `dns_discovery` -- DNS records carry no player counts, only `domain`, `priority` and `weight`
+- `agones_discovery` -- counts can be surfaced through the GameServer metadata you allocate on
+- `grpc_discovery` or a [gRPC action](#grpc-action) -- the natural place to inject live counts
+
+Without a live count in `field`, every target is treated as having 0 players and the action degenerates into a no-op.
 :::
 
 ---
@@ -231,7 +242,6 @@ Delegates the action to a custom gRPC service. The service receives the current 
 ```yaml
 actions:
 - type: grpc
-  name: "custom-router"
   address: "http://router-service:50051"
 ```
 
@@ -291,13 +301,11 @@ discovery:
       players: "0"
   actions:
   - type: meta_filter
-    name: "online-only"
     rules:
     - key: "status"
       op: equals
       value: "online"
   - type: player_fill_strategy
-    name: "fill"
     field: "players"
     max_players: 50
 ```
@@ -313,16 +321,13 @@ discovery:
   record_type: srv
   actions:
   - type: meta_filter
-    name: "server-filter"
     rules:
     - key: "status"
       op: equals
       value: "online"
   - type: grpc
-    name: "custom-interceptor"
     address: "http://interceptor:50051"
   - type: player_fill_strategy
-    name: "player-fill"
     field: "players"
     max_players: 50
 ```
@@ -339,6 +344,5 @@ discovery:
     address: "10.0.1.10:25565"
   actions:
   - type: player_allow_filter
-    name: "beta-whitelist"
     usernames: ["Tester1", "Tester2", "AdminPlayer"]
 ```

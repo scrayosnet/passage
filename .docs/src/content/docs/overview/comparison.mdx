@@ -35,7 +35,7 @@ This comparison may be biased, but we've done our best to give you an accurate o
 | **Version Support** |
 | Latest Minecraft version | ⚠️ After update | ⚠️ After update | ✅ Usually | ✅ Fast | ✅✅ Always |
 | Protocol independence | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Multi-version support | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Multi-version support | ✅ | ✅ | ✅ | ✅ | ⚠️ 1.20.5+ only |
 | **Development** |
 | Actively maintained | ❓ | ❌ | ✅ | ✅ | ✅ |
 | Modern codebase | ❌ | ❌ | ✅ | ✅ | ✅ |
@@ -274,7 +274,7 @@ Fewer runtime dependencies mean fewer failure modes, and because Passage is not 
 
 ### ❌ Not Recommended
 
-- **Offline mode servers** (Passage requires online mode)
+- **Offline mode networks** — the `disabled` and `fixed` [authentication adapters](/adapters/authentication/) exist for local development and testing, but Passage is designed around verified Mojang identities and the signed authentication cookie, neither of which is meaningful without online mode
 - **Pre-1.20.5 only** networks
 - **Critical proxy plugin dependencies** that can't be replaced
 

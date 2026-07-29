@@ -2,9 +2,9 @@
 members = ["passage-adapters", "passage-protocol", "passage-packets", "passage-adapters/grpc", "passage-adapters/agones", "passage-adapters/http", "passage-adapters/dns"]
 
 [workspace.package]
-version = "0.3.1"
+version = "1.0.0"
 repository = "https://github.com/scrayosnet/passage"
-documentation = "https://passage.scrayos.net/docs"
+documentation = "https://passage.scrayos.net"
 homepage = "https://passage.scrayos.net"
 edition = "2024"
 rust-version = "1.88.0"

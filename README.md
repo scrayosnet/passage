@@ -13,16 +13,17 @@ and initial router and drops the connection to the player right after the routin
 in the process.
 
 This is possible through the [transfer packet][transfer-packet] of the official Minecraft: Java Edition
-[protocol]. Passage validates connecting players, handles authentication, resource pack installation and status pings
-and then redirects the players to any dynamic backend server. Since the [transfer packet][transfer-packet] was only
-added in Minecraft [1.20.5][minecraft-1-20-5], Passage can only handle Minecraft clients starting from this version.
+[protocol][protocol-docs]. Passage validates connecting players, handles authentication, resource pack installation and
+status pings and then redirects the players to any dynamic backend server. Since the [transfer packet][transfer-packet]
+was only added in Minecraft [1.20.5][minecraft-1-20-5], Passage can only handle Minecraft clients starting from this
+version.
 
 ## Motivation
 
 Despite the universal success and reliability of conventional proxies like [Velocity][velocity-docs],
 [Waterfall][waterfall-docs] and [BungeeCord][bungeecord-docs], the general concept of a proxy that transcribes all
-packages brings a lot of problems with it. Since those problems are inherent to the concept itself, this cannot be
-solved by patching the existing proxies, but instead a new kind of network has to be created.
+packets brings a lot of problems with it. Since those problems are inherent to the concept itself, this cannot be solved
+by patching the existing proxies, but instead a new kind of network has to be created.
 
 Traditional proxies need to transcode all Minecraft packets and adjust the contents to be consistent for the player's
 connection. Switching servers is simulated by switching worlds. This means that proxies need to be updated for each
@@ -46,7 +47,8 @@ You can find a [detailed comparison][passage-comparison] with more aspects on ou
 
 ## Feature Highlights
 
-* Connect your Minecraft network without any proxy or permanent connection with excellent reliability and performance, ready within seconds.
+* Connect your Minecraft network without any proxy or permanent connection with excellent reliability and performance,
+  ready within seconds.
 * Route your players to dynamic servers using Service discovery and an algorithm of your preference.
 * Stay always online and drop no player connections during your maintenance or partial outages.
 * Authenticate and validate your players with custom logic, to prevent any load from your backend servers.
@@ -57,12 +59,15 @@ Visit [our website][passage-website] to get a full overview over Passage's featu
 
 ## Getting Started
 
-> [!WARNING]
-> Passage is under active development and may experience breaking changes until the stable version 1.0.0 is released.
-> After that version, breaking changes will be performed in adherence to [Semantic Versioning][semver-docs].
+> [!NOTE]
+> Passage is stable as of version 1.0.0. Breaking changes to the configuration format, the gRPC adapter protocol and
+> the cookie formats are performed in adherence to [Semantic Versioning][semver-docs].
 
 Install your own instance of Passage within seconds with our [Getting Started Guide][passage-guide] on our website. You
 can also find more information on how to configure, optimize and embed Passage in your network there.
+
+Passage is distributed as a [container image][github-ghcr], as prebuilt [binaries][github-releases] for Linux, macOS and
+Windows, and as a [Helm chart][helm-chart-docs] for Kubernetes deployments.
 
 ## Reporting Security Issues
 
@@ -85,21 +90,15 @@ on what that means.
 
 [passage-website]: https://passage.scrayos.net
 
-[passage-guide]: https://passage.scrayos.net/docs/getting-started
+[passage-guide]: https://passage.scrayos.net/setup/
 
-[passage-comparison]: https://passage.scrayos.net/docs/comparison
+[passage-comparison]: https://passage.scrayos.net/overview/comparison/
 
-[chat-signing-explanation]:https://gist.github.com/kennytv/ed783dd244ca0321bbd882c347892874
+[chat-signing-explanation]: https://gist.github.com/kennytv/ed783dd244ca0321bbd882c347892874
 
 [protocol-docs]: https://minecraft.wiki/w/Java_Edition_protocol/Packets
 
-[minecraft-1-20-5]: http://minecraft.wiki/w/1.20.5
-
-[rust-docs]: https://www.rust-lang.org/
-
-[kubernetes-docs]: https://kubernetes.io/
-
-[pvn-docs]: https://wiki.vg/Protocol_version_numbers
+[minecraft-1-20-5]: https://minecraft.wiki/w/1.20.5
 
 [transfer-packet]: https://minecraft.wiki/w/Java_Edition_protocol/Packets#Transfer_(configuration)
 
@@ -109,15 +108,13 @@ on what that means.
 
 [velocity-docs]: https://github.com/PaperMC/Velocity
 
-[semver-docs]: https://semver.org/lang/de/
+[semver-docs]: https://semver.org/
 
 [github-releases]: https://github.com/scrayosnet/passage/releases
 
 [github-ghcr]: https://github.com/scrayosnet/passage/pkgs/container/passage
 
-[helm-chart-docs]: https://helm.sh/
-
-[kustomize-docs]: https://kustomize.io/
+[helm-chart-docs]: https://github.com/scrayosnet/passage/tree/main/helm
 
 [security-policy]: SECURITY.md
 

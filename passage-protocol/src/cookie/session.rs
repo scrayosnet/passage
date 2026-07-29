@@ -7,8 +7,8 @@ use uuid::Uuid;
 pub const SESSION_COOKIE_KEY: &str = "passage:session";
 
 /// The [`SessionCookie`] holds any additional session information about the client. This information
-/// is not signed and may be tampered with by the client. Instead, it is ment to store additional
-/// information supplementing the [`AuthCookie`] without the additional signature bytes and being
+/// is not signed and may be tampered with by the client. Instead, it is meant to store additional
+/// information supplementing the [`AuthCookie`](super::auth::AuthCookie) without the additional signature bytes and being
 /// configurable without the need for the signing secret.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SessionCookie {

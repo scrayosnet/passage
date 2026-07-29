@@ -64,8 +64,8 @@ Caches validated player profile data to skip Mojang API calls on reconnection. B
 ### Configuration
 
 ```yaml
-auth_cookie_expiry: 60  # Recommended: 60 seconds (1 minute)
-auth_secret: "config/auth_secret"  # Path to secret file
+auth_cookie_expiry: 60       # Recommended: 60 seconds (1 minute)
+auth_secret: "<the secret>"  # The secret itself, not a path
 ```
 
 Or via environment variables:
@@ -75,9 +75,11 @@ export PASSAGE_AUTH_COOKIE_EXPIRY=60
 export AUTH_SECRET_FILE=config/auth_secret
 ```
 
-The `auth_cookie_expiry` setting controls how long cookies remain valid (in seconds). **Recommended: 60 seconds (1 minute)** for production environments. Since cookies are refreshed on every transfer, active players will never experience authentication issues. Only returning players who haven't connected within the expiry window will need to re-authenticate with Mojang.
+The `auth_cookie_expiry` setting controls how long cookies remain valid (in seconds). It defaults to `21600` (6 hours). **Recommended: 60 seconds (1 minute)** for production environments. Since cookies are refreshed on every transfer, active players will never experience authentication issues. Only returning players who haven't connected within the expiry window will need to re-authenticate with Mojang.
 
-The auth secret can be configured either via the `auth_secret` config field (path to a file containing the secret) or via the `AUTH_SECRET_FILE` environment variable.
+:::caution[`auth_secret` holds the secret, not a path]
+The `auth_secret` config field contains the secret **value**. To keep the secret out of your config file, put it in a separate file instead: Passage reads the entire contents of the file at `AUTH_SECRET_FILE` (default: `config/auth_secret`) and uses it as `auth_secret`. This is the recommended approach.
+:::
 
 Generate and secure the secret:
 

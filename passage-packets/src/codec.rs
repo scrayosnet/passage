@@ -31,7 +31,7 @@ use tracing::instrument;
 ///
 /// * `frame` - A [`PacketFrame`] containing the packet data to match against
 /// * `pattern` - A pattern to bind the decoded packet (e.g., `packet`, `_`, destructured pattern)
-/// * `PacketType` - The packet type that implements [`ReadPacket`] and [`Packet`]
+/// * `PacketType` - The packet type that implements [`ReadPacket`](crate::reader::ReadPacket) and [`Packet`](crate::Packet)
 /// * `handler_expression` - The code to execute when the packet ID matches
 /// * `fallback_pattern` - A pattern to bind the unmatched packet ID (typically `_` or a variable name)
 /// * `fallback_handler` - The code to execute when no packet types match
@@ -117,7 +117,7 @@ pub struct PacketFrame {
     /// The length of the packet in bytes, including the packet ID field.
     pub length: usize,
 
-    /// The ID of the packet. Compare against the [`Packet::ID`] constant to check if the packet is.
+    /// The ID of the packet. Compare against the [`Packet::ID`](crate::Packet::ID) constant to identify the packet.
     pub id: VarInt,
 
     /// The packet data. This should be read by the [`ReadPacket::read_packet`].
@@ -140,8 +140,8 @@ impl PacketFrame {
     }
 }
 
-/// [`PacketCodec`] is a codec for reading and writing [`Packet`] from an async reader and writer
-/// (e.g., a tokio tcp stream). The codec is mento to be used with a [`tokio_util::codec::Framed`].
+/// [`PacketCodec`] is a codec for reading and writing [`Packet`](crate::Packet) from an async reader and
+/// writer (e.g., a tokio tcp stream). The codec is meant to be used with a [`tokio_util::codec::Framed`].
 /// The framed allows for cancellation safe reads from the underlying async reader. As well as efficient
 /// writes to the underlying async writer.
 ///

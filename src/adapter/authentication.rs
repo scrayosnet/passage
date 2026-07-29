@@ -2,7 +2,9 @@ use crate::config;
 use passage_adapters::authentication::fixed::FixedAuthenticationAdapter;
 use passage_adapters::authentication::{AuthenticationAdapter, Profile};
 use passage_adapters::{Client, DisabledAuthenticationAdapter, Player};
+#[cfg(feature = "adapters-grpc")]
 use passage_adapters_grpc::authentication_adapter::GrpcAuthenticationAdapter;
+#[cfg(feature = "adapters-http")]
 use passage_adapters_http::MojangAdapter;
 use std::fmt::{Display, Formatter};
 

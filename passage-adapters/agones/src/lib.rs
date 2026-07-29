@@ -41,7 +41,7 @@ pub use error::*;
 pub struct GameServerAllocationSpec {
     /// GameServer selector from which to choose GameServers from. Defaults to all GameServers.
     /// 'matchLabels', 'matchExpressions', 'gameServerState' and player filters can be used for filtering.
-    /// See: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/ for more details
+    /// See <https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/> for more details
     /// on label selectors. An ordered list of GameServer label selectors. If the first selector is
     /// not matched, the selection attempts the second selector, and so on. This is useful for things
     /// like smoke testing of new game servers.

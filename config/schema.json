@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Config",
-  "description": "[`Config`] holds all configuration for the application. I.g. one immutable instance is created\non startup and then shared among the application components.\n\nIf both the grpc and rest server are disabled, the application will exit immediately after startup\nwith status ok.",
+  "description": "[`Config`] holds all configuration for the application. Generally, one immutable instance is\ncreated on startup and then shared among the application components.",
   "type": "object",
   "properties": {
     "address": {
-      "description": "The network address that should be used to bind the HTTP server for connection requests.",
+      "description": "The network address that the Minecraft listener binds to for incoming client connections.",
       "type": "string",
       "default": "0.0.0.0:25565"
     },
@@ -729,18 +729,19 @@
             "fr": {
               "disconnect_no_target": "{\"text\":\"Déconnecté : aucun serveur disponible pour traiter votre connexion\"}",
               "disconnect_timeout": "{\"text\":\"Déconnecté : aucune réponse du client (délai de keep-alive dépassé)\"}",
-              "disconnect_unauthenticated": "{\"text\":\"DDéconnecté : Impossible d’authentifier le client\"}",
+              "disconnect_unauthenticated": "{\"text\":\"Déconnecté : Impossible d’authentifier le client\"}",
               "locale": "Français"
             },
             "ru": {
               "disconnect_no_target": "{\"text\":\"Отключено: нет доступного сервера для обработки подключения\"}",
               "disconnect_timeout": "{\"text\":\"Отключено: нет ответа от клиента (тайм-аут keep-alive)\"}",
               "disconnect_unauthenticated": "{\"text\":\"Отключено: не удалось аутентифицировать клиента\"}",
-              "locale": "English"
+              "locale": "Русский"
             },
             "zh-CN": {
-              "disconnect_no_target": "{\"text\":\"已断开连接：无法验证客户端\"}",
-              "disconnect_timeout": "{\"text\":\"已断开连接：客 户端无响应（保持连接超时）\"}",
+              "disconnect_no_target": "{\"text\":\"已断开连接：没有可用的服务器来处理你的连接\"}",
+              "disconnect_timeout": "{\"text\":\"已断开连接：客户端无响应（保持连接超时）\"}",
+              "disconnect_unauthenticated": "{\"text\":\"已断开连接：无法验证客户端\"}",
               "locale": "简体中文"
             }
           }
@@ -954,7 +955,7 @@
           ]
         },
         "metrics": {
-          "description": "The traces configuration (disabled if empty).",
+          "description": "The metrics configuration (disabled if empty).",
           "anyOf": [
             {
               "$ref": "#/$defs/OpenTelemetryEndpoint"
@@ -982,12 +983,12 @@
       "type": "object",
       "properties": {
         "address": {
-          "description": "The address of the http/protobuf.",
+          "description": "The address of the OTLP `http/protobuf` endpoint.",
           "type": "string",
           "default": ""
         },
         "token": {
-          "description": "The base64 basic auth token.",
+          "description": "The base64-encoded basic auth token.",
           "type": "string",
           "default": ""
         }

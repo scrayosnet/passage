@@ -10,8 +10,11 @@
 //!
 //! The environment variables are the top most layer. They can be used to overwrite any previous configuration.
 //! Environment variables have the format `[ENV_PREFIX]_[field]_[sub_field]` where `ENV_PREFIX` is
-//! an environment variable defaulting to `PASSAGE`. That means the nested config field `cache.redis.enabled`
-//! can be overwritten by the environment variable `PASSAGE_CACHE_REDIS_ENABLED`.
+//! an environment variable defaulting to `PASSAGE`. That means the nested config field `rate_limiter.limit`
+//! can be overwritten by the environment variable `PASSAGE_RATE_LIMITER_LIMIT`.
+//!
+//! Environment variables are best suited for flat, top-level fields. Nested structures such as
+//! [`Routes`] and their adapters should be configured through a configuration file.
 //!
 //! ## Layer 2 (Auth Secret File) \[optional\]
 //!
@@ -36,7 +39,7 @@
 //! configuration fields layer-by-layer.
 //!
 //! ```rs
-//! let config: Config = Config::new()?;
+//! let config: Config = Config::read()?;
 //! ```
 
 #![allow(clippy::derivable_impls)]
@@ -60,16 +63,13 @@ macro_rules! hashmap {
     }};
 }
 
-/// [`Config`] holds all configuration for the application. I.g. one immutable instance is created
-/// on startup and then shared among the application components.
-///
-/// If both the grpc and rest server are disabled, the application will exit immediately after startup
-/// with status ok.
+/// [`Config`] holds all configuration for the application. Generally, one immutable instance is
+/// created on startup and then shared among the application components.
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct Config {
-    /// The network address that should be used to bind the HTTP server for connection requests.
+    /// The network address that the Minecraft listener binds to for incoming client connections.
     pub address: String,
 
     /// The timeout in seconds that is used for connection timeouts.
@@ -154,7 +154,7 @@ pub struct OpenTelemetry {
     /// The traces configuration (disabled if empty).
     pub traces: Option<OpenTelemetryEndpoint>,
 
-    /// The traces configuration (disabled if empty).
+    /// The metrics configuration (disabled if empty).
     pub metrics: Option<OpenTelemetryEndpoint>,
 
     /// The logs configuration (disabled if empty).
@@ -166,10 +166,10 @@ pub struct OpenTelemetry {
 #[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct OpenTelemetryEndpoint {
-    /// The address of the http/protobuf.
+    /// The address of the OTLP `http/protobuf` endpoint.
     pub address: String,
 
-    /// The base64 basic auth token.
+    /// The base64-encoded basic auth token.
     pub token: String,
 }
 
@@ -674,7 +674,7 @@ impl Default for FixedLocalization {
                     "locale" => "Français",
                     "disconnect_timeout" => "{\"text\":\"Déconnecté : aucune réponse du client (délai de keep-alive dépassé)\"}",
                     "disconnect_no_target" => "{\"text\":\"Déconnecté : aucun serveur disponible pour traiter votre connexion\"}",
-                    "disconnect_unauthenticated" => "{\"text\":\"DDéconnecté : Impossible d’authentifier le client\"}",
+                    "disconnect_unauthenticated" => "{\"text\":\"Déconnecté : Impossible d’authentifier le client\"}",
                 },
                 "de" => hashmap! {
                     "locale" => "Deutsch",
@@ -686,10 +686,10 @@ impl Default for FixedLocalization {
                     "locale" => "简体中文",
                     "disconnect_timeout" => "{\"text\":\"已断开连接：客户端无响应（保持连接超时）\"}",
                     "disconnect_no_target" => "{\"text\":\"已断开连接：没有可用的服务器来处理你的连接\"}",
-                    "disconnect_no_target" => "{\"text\":\"已断开连接：无法验证客户端\"}",
+                    "disconnect_unauthenticated" => "{\"text\":\"已断开连接：无法验证客户端\"}",
                 },
                 "ru" => hashmap! {
-                    "locale" => "English",
+                    "locale" => "Русский",
                     "disconnect_timeout" => "{\"text\":\"Отключено: нет ответа от клиента (тайм-аут keep-alive)\"}",
                     "disconnect_no_target" => "{\"text\":\"Отключено: нет доступного сервера для обработки подключения\"}",
                     "disconnect_unauthenticated" => "{\"text\":\"Отключено: не удалось аутентифицировать клиента\"}",
@@ -731,9 +731,11 @@ impl Config {
         s.try_deserialize()
     }
 
+    /// Renders the JSON schema of this configuration, pretty-printed so that the generated
+    /// `config/schema.json` stays readable and produces meaningful diffs.
     #[cfg(feature = "config-schema")]
     pub fn schema() -> serde_json::Result<String> {
-        serde_json::to_string(&schemars::schema_for!(Self))
+        serde_json::to_string_pretty(&schemars::schema_for!(Self))
     }
 }
 
