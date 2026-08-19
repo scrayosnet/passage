@@ -39,9 +39,13 @@ futures = { workspace = true }
 regex = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util", "rt-multi-thread", "time", "io-util"] }
 criterion = { workspace = true, features = ["async_tokio"] }
 
 [[bench]]
 name = "rate_limiter"
+harness = false
+
+[[bench]]
+name = "status_ping"
 harness = false
