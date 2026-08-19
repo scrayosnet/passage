@@ -159,7 +159,7 @@ where
                 routes,
                 connection_config,
                 client_addr,
-                shutdown,
+                shutdown.clone(),
             );
             match connection.listen().await {
                 Ok(()) | Err(Error::ConnectionClosed) => {
@@ -174,6 +174,7 @@ where
             if let Err(err) = stream.shutdown().await {
                 warn!(cause = err.to_string(), "failed to shutdown connection");
             }
+            shutdown.cancel();
             info!("closed connection");
 
             // update metrics
