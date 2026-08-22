@@ -9,7 +9,7 @@ Passage uses a pluggable **adapter system** to customize every aspect of how pla
 
 ## Adapter Categories
 
-Every route has four adapter categories:
+Every route is configured with four adapter sections -- `status`, `authentication`, `discovery` and `localization`. The `discovery` section holds two kinds of adapter: the discovery adapter itself and the actions pipeline that post-processes its results.
 
 ### Status Adapter
 
@@ -113,13 +113,11 @@ routes:
     record_type: srv
     actions:
     - type: meta_filter
-      name: "online-filter"
       rules:
       - key: "status"
         op: equals
         value: "online"
     - type: player_fill_strategy
-      name: "fill-strategy"
       field: "players"
       max_players: 50
 ```

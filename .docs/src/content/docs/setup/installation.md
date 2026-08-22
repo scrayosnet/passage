@@ -30,28 +30,40 @@ services:
 
 ## Binary
 
-Download from [GitHub Releases](https://github.com/scrayosnet/passage/releases):
+Every release publishes prebuilt archives on [GitHub Releases](https://github.com/scrayosnet/passage/releases):
+
+| Platform | Asset |
+|----------|-------|
+| Linux (x86_64, glibc) | `passage-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS (Intel) | `passage-x86_64-apple-darwin.tar.gz` |
+| Windows (x86_64) | `passage-x86_64-pc-windows-msvc.zip` |
 
 ```bash
 # Linux
-wget https://github.com/scrayosnet/passage/releases/latest/download/passage-linux-x86_64
-chmod +x passage-linux-x86_64
-mv passage-linux-x86_64 /usr/local/bin/passage
-
-# macOS (Apple Silicon)
-wget https://github.com/scrayosnet/passage/releases/latest/download/passage-darwin-aarch64
-
-# macOS (Intel)
-wget https://github.com/scrayosnet/passage/releases/latest/download/passage-darwin-x86_64
+wget https://github.com/scrayosnet/passage/releases/latest/download/passage-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf passage-x86_64-unknown-linux-gnu.tar.gz
+chmod +x passage
+sudo mv passage /usr/local/bin/passage
 ```
 
-Or build from source (requires Rust 1.88+):
+:::note[x86_64 only]
+Prebuilt binaries and the published container image are `x86_64` only -- there are currently no `aarch64` builds for Linux or Apple Silicon. On those platforms, build from source as shown below.
+:::
+
+Build from source (requires Rust 1.88 or newer and `protoc` for the gRPC adapters):
 
 ```bash
 git clone https://github.com/scrayosnet/passage.git
 cd passage
-cargo build --release
+cargo build --release --locked
 # Binary at target/release/passage
+```
+
+To build a leaner binary, disable the adapters you don't need:
+
+```bash
+# Only the built-in fixed/disabled adapters, no Sentry
+cargo build --release --no-default-features
 ```
 
 ## Kubernetes
@@ -60,7 +72,7 @@ The recommended way to deploy Passage on Kubernetes is via the official Helm Cha
 
 ```sh
 helm install passage oci://ghcr.io/scrayosnet/helm/passage \
-  --version 0.3.0 \
+  --version 1.0.0 \
   --namespace passage --create-namespace
 ```
 

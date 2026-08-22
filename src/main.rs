@@ -15,6 +15,7 @@ use opentelemetry_semantic_conventions::{
     attribute::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_VERSION},
 };
 use passage::config::Config;
+#[cfg(feature = "sentry")]
 use std::borrow::Cow::Owned;
 use std::collections::HashMap;
 use std::env;

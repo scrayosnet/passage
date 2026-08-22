@@ -34,8 +34,8 @@ routes:
 | `favicon` | string | *(built-in icon)* | Base64-encoded 64x64 PNG (`data:image/png;base64,...`) |
 | `enforces_secure_chat` | bool | `true` | Whether the server enforces secure chat |
 | `preferred_version` | integer | `769` | Protocol version shown in the server list |
-| `min_version` | integer | `0` | Minimum accepted protocol version |
-| `max_version` | integer | `1000` | Maximum accepted protocol version |
+| `min_version` | integer | `0` | Lowest protocol version reported as compatible |
+| `max_version` | integer | `1000` | Highest protocol version reported as compatible |
 
 ### MOTD Formatting
 
@@ -62,7 +62,7 @@ echo -n "data:image/png;base64,$(base64 -w 0 server-icon.png)"
 
 ### Protocol Versions
 
-Common Minecraft protocol versions:
+Some reference points:
 
 | Version | Protocol |
 |---------|----------|
@@ -71,7 +71,22 @@ Common Minecraft protocol versions:
 | 1.21 | `767` |
 | 1.20.5 | `766` |
 
-See [wiki.vg](https://wiki.vg/Protocol_version_numbers) for a complete list.
+`766` (1.20.5) is the lowest version that supports the transfer packet. See the
+[protocol version list](https://minecraft.wiki/w/Java_Edition_protocol/Protocol_version_numbers) on the
+Minecraft Wiki for the current, complete table.
+
+:::note[These fields only affect the server list]
+`min_version` and `max_version` do **not** reject logins. If the client's protocol version falls inside
+`[min_version, max_version]`, Passage echoes the client's own version back so the server list shows the
+server as compatible; otherwise it reports `preferred_version`, which makes the client display
+"Outdated client!" or "Outdated server!". A player can still attempt to log in either way.
+
+The only login that Passage itself rejects on version grounds is one below protocol `766`, which cannot
+reach the configuration phase at all. Those clients receive the
+[`disconnect_unsupported`](/advanced/localization/#disconnect_unsupported) message, whose `{preferred}`
+parameter is filled with this adapter's `name`. Set `name` to the version you want those players to
+install (e.g. `"1.21.5"`) if you rely on that message.
+:::
 
 ---
 
@@ -103,11 +118,19 @@ The endpoint must accept a GET request and return JSON matching the Minecraft st
 {
   "version": {"name": "My Network", "protocol": 769},
   "players": {"online": 42, "max": 100, "sample": []},
-  "description": {"text": "Welcome!"},
+  "description": "{\"text\":\"Welcome!\",\"color\":\"gold\"}",
   "favicon": "data:image/png;base64,...",
   "enforcesSecureChat": true
 }
 ```
+
+:::caution[`description` is a string, not an object]
+Passage expects `description` to be a JSON **string** whose content is the text component -- exactly like the
+`description` field in the configuration file. Returning a nested object (`"description": {"text": "..."}`)
+fails to deserialize and the ping is answered with an error.
+:::
+
+Only `version` is required. `players`, `description`, `favicon` and `enforcesSecureChat` may be omitted or `null`.
 
 :::tip
 The HTTP adapter is great for status pages that aggregate player counts across your backend servers or show dynamic information. Set `cache_duration` to at least 10-30 seconds to avoid overloading your status endpoint.

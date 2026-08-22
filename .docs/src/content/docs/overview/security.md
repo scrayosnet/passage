@@ -46,7 +46,7 @@ let verify_token = random_bytes(32);
 
 ```
 Passage → Player: Encryption Request {
-    server_id: "",  // Always empty string
+    server_id: "",  // The route's configured `server_id`, empty by default
     public_key: <RSA public key in DER format>,
     verify_token: <32 random bytes>
 }
@@ -168,7 +168,7 @@ Minecraft uses a special SHA-1 hash format with signed byte representation:
 ```rust
 fn minecraft_hash(server_id: &str, shared_secret: &[u8], public_key: &[u8]) -> String {
     let mut hasher = Sha1::new();
-    hasher.update(server_id);        // Always "" for online mode
+    hasher.update(server_id);        // Empty by default, configurable per route
     hasher.update(shared_secret);    // 16 bytes
     hasher.update(public_key);       // DER-encoded RSA public key
 
@@ -256,19 +256,25 @@ If valid, Passage skips Mojang authentication entirely, reducing connection time
 
 - **Signed with HMAC-SHA256**: Cannot be forged without the secret key
 - **Secret key**: Configured in `auth_secret` (loaded from file or env var)
-- **Expiry**: 6 hours by default
+- **Expiry**: 6 hours by default (`auth_cookie_expiry`)
+- **Client binding**: The cookie records the client address and is rejected if the connecting IP differs
 - **Transmitted**: In Minecraft's cookie storage packet (introduced in 1.20.5)
-- **Scope**: Per-server (cookies aren't shared across different servers)
+- **Scope**: Every server that knows the same `auth_secret` can verify the cookie. That is deliberate --
+  it lets backend servers accept the identity Passage established without contacting Mojang again.
+  Conversely, anyone holding the secret can mint valid cookies, so treat it like a signing key.
 
 ### Session Cookies
 
-Passage also uses session cookies for tracking connection state:
+Passage also issues an unsigned session cookie that carries a session UUID, the address the client
+originally connected to, and the W3C trace context for distributed tracing:
 
 ```rust
 const SESSION_COOKIE_KEY: &str = "passage:session";
-
-// Stores temporary session data (if needed)
 ```
+
+Because it is not signed, it may be tampered with by the client and must never be trusted for
+authorization decisions. See [Cookies](/advanced/cookies/) for the full field reference and for how
+backend servers should integrate with both cookies.
 
 ## Security Properties
 

@@ -281,16 +281,13 @@ routes:
     record_type: srv
     actions:
     - type: meta_filter
-      name: "online-filter"
       rules:
       - key: "status"
         op: equals
         value: "online"
     - type: grpc
-      name: "region-router"
       address: "http://localhost:50051"
     - type: player_fill_strategy
-      name: "fill"
       field: "players"
       max_players: 50
 ```
@@ -404,7 +401,10 @@ grpcurl -plaintext -import-path ./proto -proto adapter/discovery_action.proto \
 
 ### Deployment
 - **Run close to Passage** to minimize network latency
-- **Use TLS** (`https://` addresses) in production
+- **Use plaintext `http://` addresses** -- Passage's gRPC client is built without a TLS backend. An
+  `https://` address does not fail loudly; it connects in plaintext to the TLS port and every call
+  then fails. For transport encryption, terminate TLS next to the adapter with a sidecar or service
+  mesh, and keep the adapter itself reachable over a trusted network.
 - **Monitor response times** with your observability stack
 
 ### Debugging

@@ -1,17 +1,18 @@
 # yaml-language-server: $schema=./schema.json
 
-# Server rund on minecraft default port
+# Passage runs on the default Minecraft port.
 address: "0.0.0.0:25565"
 
-# The global timeout and rate limiter configuration. By default, allowing 60 requests per minute where
-# each request may take up to 120 seconds to complete. Otherwise, the client will be timed out.
+# The global timeout and rate limiter configuration. By default, allowing 60 connections per minute
+# per IP, where each connection may take up to 120 seconds to complete. Otherwise, the client is
+# timed out. The rate limiter is disabled unless this section is present.
 timeout: 120
 rate_limiter:
   duration: 60
   limit: 60
 
-# The set of routes that Passage handles. The route hostname is matched unsing a regex and may contain
-# appropriate wildcards.
+# The set of routes that Passage handles. The route hostname is matched using a regex and may contain
+# appropriate wildcards. The first matching route wins.
 routes:
 - hostname: "mc.example.net"
   # The status adapter used for getting the server status.
@@ -31,22 +32,21 @@ routes:
     # Any custom actions that further influence the discovery. At the end, the first server in
     # the list of discovered servers is selected. The actions may filter or reorder the servers
     # such that a different server is selected. They may also be used for other purposes such as
-    # sending notifications. The name is optional for improved logging.
+    # sending notifications.
     actions:
-    # Next, the servers are filtered to only include those that are online.
+    # First, the servers are filtered to only include those that are online.
     - type: meta_filter
-      name: "server-filter"
       rules:
       - op: "equals"
         key: "status"
         value: "online"
-    # Next, the servers are passed to an gRPC adapter that may alter the servers in any way. This
+    # Next, the servers are passed to a gRPC adapter that may alter the servers in any way. This
     # could further filter the servers, inject additional information, or reorder them.
     - type: grpc
-      name: "example-interceptor"
-      address: "127.0.0.1:50051"
-    # Lastly, the servers are sorted such that the fullest server with space remaining is selected.
-    # In case there are multiple such servers, it selects a random one. This allows for incremental
-    # ordering of servers.
+      address: "http://127.0.0.1:50051"
+    # Lastly, the servers are sorted such that the fullest server with space remaining ends up first
+    # and is therefore selected. This allows for incremental filling of servers. The `field` names
+    # the target metadata key holding the current player count.
     - type: player_fill_strategy
-      name: "player-fill-strategy"
+      field: "players"
+      max_players: 50

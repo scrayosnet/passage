@@ -24,11 +24,13 @@ routes:
         disconnect_timeout: '{"text":"Connection timed out","color":"red"}'
         disconnect_no_target: '{"text":"No server available","color":"yellow"}'
         disconnect_unauthenticated: '{"text":"Authentication failed","color":"red"}'
+        disconnect_unsupported: '{"text":"Please use {preferred}","color":"red"}'
       de:
         locale: "Deutsch"
         disconnect_timeout: '{"text":"Verbindung getrennt: Keine Antwort vom Client","color":"red"}'
         disconnect_no_target: '{"text":"Kein verfügbarer Server","color":"yellow"}'
         disconnect_unauthenticated: '{"text":"Authentifizierung fehlgeschlagen","color":"red"}'
+        disconnect_unsupported: '{"text":"Bitte nutze {preferred}","color":"red"}'
 ```
 
 ### Adapter Types
@@ -81,7 +83,7 @@ Passage uses **short locale keys** like `en`, `de`, `es` -- not full codes like 
 
 ## Message Keys
 
-Passage uses three built-in message keys:
+Passage uses four built-in message keys:
 
 ### `disconnect_timeout`
 
@@ -94,6 +96,18 @@ Shown when no backend server is available -- either discovery returns zero targe
 ### `disconnect_unauthenticated`
 
 Shown when player authentication fails.
+
+### `disconnect_unsupported`
+
+Shown when the client speaks a protocol version below the minimum Passage supports (Minecraft 1.20.5, protocol `766`), which is the version that introduced the configuration phase Passage depends on.
+
+| Parameter | Value |
+|-----------|-------|
+| `preferred` | The version name reported by the route's status adapter -- the same string the client sees in its server list |
+
+:::note[Default Locale Only]
+The client only reports its locale during the configuration phase, which these clients never reach. The message is therefore always resolved in the `default_locale`.
+:::
 
 ### Custom Keys
 
@@ -140,6 +154,16 @@ Formatting options: `bold`, `italic`, `underlined`, `strikethrough`, `obfuscated
 disconnect_no_target: '{"text":"","extra":[{"text":"No server available\n","color":"yellow","bold":true},{"text":"Please try again later","color":"gray"}]}'
 ```
 
+### Parameters
+
+Some message keys are resolved with parameters. A parameter is substituted wherever its name appears in curly braces, so `{preferred}` is replaced by the value of the `preferred` parameter:
+
+```yaml
+disconnect_unsupported: '{"text":"Outdated client, please use {preferred}","color":"red"}'
+```
+
+Placeholders without a matching parameter are left untouched, and parameters that the message does not use are ignored. gRPC localization adapters receive the parameters as a name-value map and may format them however they like.
+
 ---
 
 ## Example: Multi-Language Setup
@@ -156,21 +180,25 @@ routes:
         disconnect_timeout: '{"text":"Disconnected: Connection timed out","color":"red"}'
         disconnect_no_target: '{"text":"Disconnected: No server available","color":"yellow"}'
         disconnect_unauthenticated: '{"text":"Disconnected: Authentication failed","color":"red"}'
+        disconnect_unsupported: '{"text":"Disconnected: Outdated client, please use {preferred}","color":"red"}'
       es:
         locale: "Español"
         disconnect_timeout: '{"text":"Desconectado: Tiempo de espera agotado","color":"red"}'
         disconnect_no_target: '{"text":"Desconectado: No hay servidor disponible","color":"yellow"}'
         disconnect_unauthenticated: '{"text":"Desconectado: No se pudo autenticar","color":"red"}'
+        disconnect_unsupported: '{"text":"Desconectado: Cliente obsoleto, usa {preferred}","color":"red"}'
       fr:
         locale: "Français"
         disconnect_timeout: '{"text":"Déconnecté : Délai de connexion dépassé","color":"red"}'
         disconnect_no_target: '{"text":"Déconnecté : Aucun serveur disponible","color":"yellow"}'
         disconnect_unauthenticated: '{"text":"Déconnecté : Échec de l''authentification","color":"red"}'
+        disconnect_unsupported: '{"text":"Déconnecté : Client obsolète, veuillez utiliser {preferred}","color":"red"}'
       de:
         locale: "Deutsch"
         disconnect_timeout: '{"text":"Getrennt: Verbindungszeitüberschreitung","color":"red"}'
         disconnect_no_target: '{"text":"Getrennt: Kein Server verfügbar","color":"yellow"}'
         disconnect_unauthenticated: '{"text":"Getrennt: Authentifizierung fehlgeschlagen","color":"red"}'
+        disconnect_unsupported: '{"text":"Getrennt: Veralteter Client, bitte nutze {preferred}","color":"red"}'
 ```
 
 ---

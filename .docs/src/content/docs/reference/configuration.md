@@ -58,11 +58,9 @@ The network address and port that Passage binds to for incoming Minecraft client
 # Listen on all interfaces, standard Minecraft port
 address: "0.0.0.0:25565"
 
-# Listen on specific interface
-address: "192.168.1.100:25565"
-
-# Use custom port
-address: "0.0.0.0:25566"
+# Alternatives:
+#   address: "192.168.1.100:25565"   # bind to a specific interface
+#   address: "0.0.0.0:25566"         # use a custom port
 ```
 
 ---
@@ -79,8 +77,10 @@ Maximum time in seconds to wait for client responses during the connection flow.
 
 ```yaml
 timeout: 120  # 2 minutes (default)
-timeout: 60   # shorter for high-performance scenarios
-timeout: 300  # longer for slow connections
+
+# Alternatives:
+#   timeout: 60    # shorter for high-performance scenarios
+#   timeout: 300   # longer for slow connections
 ```
 
 ---
@@ -113,7 +113,9 @@ How long authentication cookies remain valid in seconds. When a player connects 
 
 ```yaml
 auth_cookie_expiry: 21600  # 6 hours (default)
-auth_cookie_expiry: 3600   # 1 hour (more frequent re-auth)
+
+# Alternative:
+#   auth_cookie_expiry: 3600   # 1 hour, forces more frequent re-authentication
 ```
 
 ---
@@ -365,8 +367,8 @@ Static server status from configuration.
 | `favicon` | string (optional) | Passage logo | Base64-encoded PNG (`data:image/png;base64,...`). |
 | `enforces_secure_chat` | boolean (optional) | `true` | Whether secure chat is enforced. |
 | `preferred_version` | integer | `769` (1.21.4) | Protocol version shown to clients. |
-| `min_version` | integer | `0` | Minimum supported protocol version. 0 = no minimum. |
-| `max_version` | integer | `1000` | Maximum supported protocol version. |
+| `min_version` | integer | `0` | Lowest protocol version reported as compatible in the server list. |
+| `max_version` | integer | `1000` | Highest protocol version reported as compatible in the server list. |
 
 ```yaml
 status:
@@ -469,15 +471,19 @@ Discovers targets via DNS SRV or A/AAAA records with periodic refresh.
 | `record_type` | string | `"srv"` | Record type: `"srv"` or `"a"`. |
 | `port` | integer | `25565` | Default port (only for `record_type: a`). |
 
+SRV records:
+
 ```yaml
-# SRV records
 discovery:
   type: dns_discovery
   domain: "_minecraft._tcp.servers.example.net"
   record_type: srv
   refresh_interval: 30
+```
 
-# A/AAAA records
+A/AAAA records:
+
+```yaml
 discovery:
   type: dns_discovery
   domain: "mc.example.net"
@@ -651,13 +657,11 @@ routes:
     record_type: srv
     actions:
     - type: meta_filter
-      name: "server-filter"
       rules:
       - key: "status"
         op: equals
         value: "online"
     - type: player_fill_strategy
-      name: "player-fill"
       field: "players"
       max_players: 50
   localization:

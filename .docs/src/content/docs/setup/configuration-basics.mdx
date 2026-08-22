@@ -125,11 +125,11 @@ address: "0.0.0.0:25565"
 # Connection timeout in seconds (default: 120)
 timeout: 120
 
-# Maximum packet size in bytes (default: 2097152 / 2 MiB)
-max_packet_length: 2097152
+# Maximum packet size in bytes (default: 10000)
+max_packet_length: 10000
 
-# Authentication cookie expiry in seconds (default: 30)
-auth_cookie_expiry: 30
+# Authentication cookie expiry in seconds (default: 21600 / 6 hours)
+auth_cookie_expiry: 21600
 ```
 
 ### Rate Limiting
@@ -287,13 +287,11 @@ routes:
     record_type: srv
     actions:
     - type: meta_filter
-      name: "online-filter"
       rules:
       - key: "status"
         op: equals
         value: "online"
     - type: player_fill_strategy
-      name: "fill-strategy"
       field: "players"
       max_players: 50
 ```
@@ -322,7 +320,6 @@ routes:
     address: "http://discovery-service:50051"
     actions:
     - type: grpc
-      name: "custom-router"
       address: "http://router-service:50051"
 ```
 
@@ -348,4 +345,4 @@ Common issues:
 - **Don't commit** your config file to version control if it contains secrets
 - **Enable rate limiting** in production to prevent connection floods
 - **Set reasonable timeouts** (60-300 seconds depending on your network)
-- **Use descriptive names** for discovery actions to simplify debugging
+- **Order discovery actions deliberately** -- filters belong before selection strategies

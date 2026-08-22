@@ -1,6 +1,7 @@
 use crate::config;
 use passage_adapters::FixedLocalizationAdapter;
 use passage_adapters::localization::LocalizationAdapter;
+#[cfg(feature = "adapters-grpc")]
 use passage_adapters_grpc::GrpcLocalizationAdapter;
 use std::fmt::{Display, Formatter};
 

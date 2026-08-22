@@ -3,7 +3,7 @@ use passage_adapters::authentication::Profile;
 use passage_adapters::discovery::DiscoveryAdapter;
 use passage_adapters::{
     Client, FixedAuthenticationAdapter, FixedDiscoveryAdapter, FixedLocalizationAdapter,
-    FixedStatusAdapter, Target,
+    FixedStatusAdapter, ServerStatus, ServerVersion, Target,
 };
 use passage_packets::codec::PacketCodec;
 use passage_packets::configuration::clientbound as conf_out;
@@ -14,10 +14,10 @@ use passage_packets::login::serverbound as login_in;
 use passage_packets::reader::ReadPacket;
 use passage_packets::status::clientbound as status_out;
 use passage_packets::status::serverbound as status_in;
-use passage_packets::{ChatMode, DisplayedSkinParts, MainHand, ParticleStatus, State};
+use passage_packets::{ChatMode, DisplayedSkinParts, MainHand, ParticleStatus, State, VarInt};
 use passage_protocol::Error;
 use passage_protocol::config::Config;
-use passage_protocol::connection::{Connection, KEEP_ALIVE_INTERVAL};
+use passage_protocol::connection::{Connection, KEEP_ALIVE_INTERVAL, MIN_PROTOCOL_VERSION};
 use passage_protocol::cookie::{
     AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign,
 };
@@ -29,6 +29,7 @@ use regex::Regex;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::rand_core::UnwrapErr;
 use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -37,6 +38,10 @@ use tokio::io::{AsyncRead, AsyncWriteExt};
 use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
 use uuid::uuid;
+
+/// The protocol version the simulated clients claim to speak (Minecraft 1.21.5). Any version at or
+/// above [`MIN_PROTOCOL_VERSION`] passes the version check in the login phase.
+const PROTOCOL_VERSION: VarInt = 770;
 
 trait PacketStreamExt {
     async fn next_packet<T: ReadPacket>(&mut self) -> Result<T, Error>;
@@ -245,7 +250,7 @@ async fn simulate_transfer_no_configuration() {
     // simulate client
     client_stream
         .send(hand_in::HandshakePacket {
-            protocol_version: 0,
+            protocol_version: PROTOCOL_VERSION,
             server_address: "".to_string(),
             server_port: 0,
             next_state: State::Transfer,
@@ -415,7 +420,7 @@ async fn simulate_slow_transfer_no_configuration() {
     // simulate client
     client_stream
         .send(hand_in::HandshakePacket {
-            protocol_version: 0,
+            protocol_version: PROTOCOL_VERSION,
             server_address: "".to_string(),
             server_port: 0,
             next_state: State::Transfer,
@@ -607,7 +612,7 @@ async fn simulate_login_no_configuration() {
     // simulate client
     client_stream
         .send(hand_in::HandshakePacket {
-            protocol_version: 0,
+            protocol_version: PROTOCOL_VERSION,
             server_address: "".to_string(),
             server_port: 0,
             next_state: State::Login,
@@ -706,6 +711,171 @@ async fn simulate_login_no_configuration() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn simulate_login_unsupported_version() {
+    let user_name = "Hydrofin".to_owned();
+    let user_id = uuid!("09879557-e479-45a9-b434-a56377674627");
+
+    // create stream
+    let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = Framed::new(client_stream, PacketCodec::new(1_000));
+
+    // the status version name is the version the client is pointed to in the disconnect message
+    let status = ServerStatus {
+        version: ServerVersion {
+            name: "1.21.5".to_owned(),
+            protocol: PROTOCOL_VERSION,
+        },
+        players: None,
+        description: None,
+        favicon: None,
+        enforces_secure_chat: None,
+    };
+
+    // build supplier
+    let routes = vec![Arc::new(Route {
+        hostname: Regex::new(".*").expect("valid regex"),
+        status_adapter: FixedStatusAdapter::new(
+            Some(status),
+            PROTOCOL_VERSION,
+            MIN_PROTOCOL_VERSION,
+            VarInt::MAX,
+        ),
+        discovery_adapter: FixedDiscoveryAdapter::new(vec![]),
+        authentication_adapter: FixedAuthenticationAdapter::default(),
+        localization_adapter: FixedLocalizationAdapter::new(
+            "en".to_owned(),
+            HashMap::from([(
+                "en".to_owned(),
+                HashMap::from([(
+                    "disconnect_unsupported".to_owned(),
+                    "{\"text\":\"Disconnected: please use {preferred}\"}".to_owned(),
+                )]),
+            )]),
+            true,
+        ),
+    })];
+
+    // build connection
+    let shutdown = CancellationToken::new();
+    let mut server = Connection::new(
+        server_stream,
+        routes.into(),
+        Config::default(),
+        client_address,
+        shutdown,
+    );
+
+    // start the server in its own thread
+    let server = tokio::spawn(async move {
+        server.listen().await.expect("server listen failed");
+    });
+
+    // simulate a client that is one version below the minimum supported version
+    client_stream
+        .send(hand_in::HandshakePacket {
+            protocol_version: MIN_PROTOCOL_VERSION - 1,
+            server_address: "".to_string(),
+            server_port: 0,
+            next_state: State::Login,
+        })
+        .await
+        .expect("send handshake failed");
+
+    client_stream
+        .send(login_in::LoginStartPacket {
+            user_name: user_name.clone(),
+            user_id,
+        })
+        .await
+        .expect("send login start failed");
+
+    // disconnect as the client version is unsupported, naming the preferred version
+    let disconnect_packet: login_out::DisconnectPacket = client_stream
+        .next_packet()
+        .await
+        .expect("disconnect packet read failed");
+    assert_eq!(
+        disconnect_packet.reason,
+        "{\"text\":\"Disconnected: please use 1.21.5\"}"
+    );
+
+    // wait for the server to finish
+    server.await.expect("server run failed");
+}
+
+#[tokio::test(start_paused = true)]
+async fn simulate_login_minimum_version() {
+    let user_name = "Hydrofin".to_owned();
+    let user_id = uuid!("09879557-e479-45a9-b434-a56377674627");
+
+    // create stream
+    let client_address = SocketAddr::from_str("127.0.0.1:25564").expect("invalid address");
+    let (client_stream, server_stream) = tokio::io::duplex(1024);
+    let mut client_stream = Framed::new(client_stream, PacketCodec::new(1_000));
+
+    // build supplier
+    let routes = vec![Arc::new(Route {
+        hostname: Regex::new(".*").expect("valid regex"),
+        status_adapter: FixedStatusAdapter::default(),
+        discovery_adapter: FixedDiscoveryAdapter::new(vec![]),
+        authentication_adapter: FixedAuthenticationAdapter::default(),
+        localization_adapter: FixedLocalizationAdapter::default(),
+    })];
+
+    // build connection
+    let shutdown = CancellationToken::new();
+    let mut server = Connection::new(
+        server_stream,
+        routes.into(),
+        Config::default(),
+        client_address,
+        shutdown,
+    );
+
+    // start the server in its own thread
+    let server = tokio::spawn(async move {
+        let result = server.listen().await;
+        match result {
+            Err(Error::ConnectionClosed) => {}
+            other => panic!("expected connection closed, got {:?}", other),
+        }
+    });
+
+    // simulate a client that is exactly at the minimum supported version
+    client_stream
+        .send(hand_in::HandshakePacket {
+            protocol_version: MIN_PROTOCOL_VERSION,
+            server_address: "".to_string(),
+            server_port: 0,
+            next_state: State::Login,
+        })
+        .await
+        .expect("send handshake failed");
+
+    client_stream
+        .send(login_in::LoginStartPacket {
+            user_name: user_name.clone(),
+            user_id,
+        })
+        .await
+        .expect("send login start failed");
+
+    // the login continues instead of being disconnected for an unsupported version
+    let cookie_request_packet: login_out::CookieRequestPacket = client_stream
+        .next_packet()
+        .await
+        .expect("session cookie request packet read failed");
+    assert_eq!(&cookie_request_packet.key, SESSION_COOKIE_KEY);
+
+    // simulate connection closed after the session cookie request
+    drop(client_stream);
+
+    // wait for the server to finish
+    server.await.expect("server run failed");
+}
+
+#[tokio::test(start_paused = true)]
 async fn sends_keep_alive() {
     let shared_secret = b"verysecuresecret";
     let user_name = "Hydrofin".to_owned();
@@ -748,7 +918,7 @@ async fn sends_keep_alive() {
     // simulate client
     client_stream
         .send(hand_in::HandshakePacket {
-            protocol_version: 0,
+            protocol_version: PROTOCOL_VERSION,
             server_address: "".to_string(),
             server_port: 0,
             next_state: State::Transfer,
@@ -924,7 +1094,7 @@ async fn no_respond_keep_alive() {
     // simulate client
     client_stream
         .send(hand_in::HandshakePacket {
-            protocol_version: 0,
+            protocol_version: PROTOCOL_VERSION,
             server_address: "".to_string(),
             server_port: 0,
             next_state: State::Transfer,

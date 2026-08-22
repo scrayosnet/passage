@@ -157,7 +157,6 @@ routes:
     address: "http://discovery-service:50051"
     actions:
     - type: grpc
-      name: "region-router"
       address: "http://router-service:50051"
 ```
 
@@ -171,4 +170,4 @@ routes:
 - **Start with fixed adapters** and upgrade as your needs grow
 - **Monitor adapter performance** with OpenTelemetry
 - **Test configuration changes** in a staging environment before production
-- **Use descriptive `name` fields** on discovery actions for easier debugging
+- **Order discovery actions deliberately** -- filters belong before selection strategies

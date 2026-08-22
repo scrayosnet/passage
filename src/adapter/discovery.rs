@@ -1,5 +1,6 @@
 use crate::adapter::{opt_to_regex, opt_vec_to_uuid};
 use crate::config;
+#[cfg(feature = "adapters-dns")]
 use crate::config::DnsDiscoveryRecordType;
 use passage_adapters::discovery_action::meta_filter::{FilterOperation, FilterRule};
 use passage_adapters::{
@@ -8,6 +9,7 @@ use passage_adapters::{
 };
 #[cfg(feature = "adapters-agones")]
 use passage_adapters_agones::AgonesDiscoveryAdapter;
+#[cfg(feature = "adapters-agones")]
 use passage_adapters_agones::AgonesDiscoveryAdapterConfig;
 #[cfg(feature = "adapters-dns")]
 use passage_adapters_dns::{DnsDiscoveryAdapter, RecordType};

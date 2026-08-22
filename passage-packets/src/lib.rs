@@ -1,3 +1,14 @@
+//! The packet definitions and binary (de)serialization for the Minecraft: Java Edition protocol.
+//!
+//! Packets are grouped by the protocol state they belong to -- [`handshake`], [`status`], [`login`]
+//! and [`configuration`] -- and are read and written through the [`reader`] and [`writer`] traits.
+//! [`codec`] implements the primitive wire types of the protocol, most notably [`VarInt`] and
+//! [`VarLong`].
+//!
+//! This crate only covers the packets Passage itself needs: everything up to and including the
+//! transfer packet. Play-state packets are intentionally out of scope, because Passage drops the
+//! connection before the play state is ever reached.
+
 #[cfg(test)]
 use fake::Dummy;
 use std::fmt::{Debug, Display};

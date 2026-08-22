@@ -241,6 +241,8 @@ See [Kubernetes Guide](/setup/kubernetes/) for full setup.
 
 Ensure your Minecraft client is **1.20.5 or higher**. Passage uses the transfer packet introduced in that version.
 
+Clients below that version are disconnected right after login with the [`disconnect_unsupported`](/advanced/localization/#disconnect_unsupported) message, which names the version they should use instead.
+
 ### Player connects then immediately disconnects
 
 1. Verify the backend server address in your config

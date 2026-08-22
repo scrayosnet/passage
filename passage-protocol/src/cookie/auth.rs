@@ -12,7 +12,7 @@ pub const AUTH_COOKIE_KEY: &str = "passage:authentication";
 /// is signed using a shared secret. As such, servers the client connects to may skip any additional
 /// authentication and use this instead. It also may include the transfer target for further security.
 ///
-/// Generally, the cookie should be checked for expiry to prevent reply attacks. Use the cookie creation
+/// Generally, the cookie should be checked for expiry to prevent replay attacks. Use the cookie creation
 /// time to check.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthCookie {

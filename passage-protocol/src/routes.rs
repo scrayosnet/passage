@@ -39,6 +39,10 @@ where
 {
     /// Runs the full discovery pipeline and returns the single selected [`Target`].
     ///
+    /// The first target of the resulting list is selected, matching the priority semantics of
+    /// [`Target::priority`] where lower values are preferred. Discovery actions are therefore
+    /// expected to order their most preferred target first.
+    ///
     /// Returns `Err` if the pipeline produces no candidates.
     pub async fn select(&self, client: &Client, player: &Player) -> Result<Target> {
         let mut targets = Vec::new();
@@ -46,7 +50,8 @@ where
             .apply(client, player, &mut targets)
             .await?;
         targets
-            .pop()
+            .into_iter()
+            .next()
             .ok_or_else(|| reject_reason("adapters", "disconnect_no_target"))
     }
 }

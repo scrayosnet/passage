@@ -17,7 +17,7 @@ pub mod clientbound {
 
     /// The [`StatusResponsePacket`].
     ///
-    /// This packet can be received only after a [`StatusRequestPacket`] and will not close the connection, allowing for a
+    /// This packet can be received only after a [`StatusRequestPacket`](super::serverbound::StatusRequestPacket) and will not close the connection, allowing for a
     /// ping sequence to be exchanged afterward.
     ///
     /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Status_Response)
@@ -61,9 +61,9 @@ pub mod clientbound {
         }
     }
 
-    /// This is the response to a specific [`PingPacket`] that can be used to measure the server ping.
+    /// This is the response to a specific [`PingPacket`](super::serverbound::PingPacket) that can be used to measure the server ping.
     ///
-    /// This packet will be sent after a corresponding [`PingPacket`] and will have the same payload as the request. This
+    /// This packet will be sent after a corresponding [`PingPacket`](super::serverbound::PingPacket) and will have the same payload as the request. This
     /// also consumes the connection, ending the Server List Ping sequence.
     #[derive(Debug, Clone, Eq, PartialEq)]
     #[cfg_attr(test, derive(Dummy))]

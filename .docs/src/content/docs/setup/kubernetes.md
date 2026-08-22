@@ -20,7 +20,7 @@ The official Helm chart is the easiest way to deploy Passage:
 
 ```sh
 helm install passage oci://ghcr.io/scrayosnet/helm/passage \
-  --version 0.3.0 \
+  --version 1.0.0 \
   --namespace passage --create-namespace
 ```
 
@@ -28,7 +28,7 @@ To expose Passage via a cloud load balancer:
 
 ```sh
 helm install passage oci://ghcr.io/scrayosnet/helm/passage \
-  --version 0.3.0 \
+  --version 1.0.0 \
   --namespace passage --create-namespace \
   --set service.type=LoadBalancer
 ```
@@ -54,7 +54,7 @@ rbac:
 
 ```sh
 helm install passage oci://ghcr.io/scrayosnet/helm/passage \
-  --version 0.3.0 \
+  --version 1.0.0 \
   --namespace passage --create-namespace \
   -f values.yaml
 ```
@@ -201,7 +201,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
       - name: passage
-        image: ghcr.io/scrayosnet/passage:v0.1.24
+        image: ghcr.io/scrayosnet/passage:1.0.0  # pin an explicit version in production
         ports:
         - containerPort: 25565
           protocol: TCP
@@ -339,7 +339,6 @@ data:
         scheduling: "Packed"
         actions:
         - type: player_fill_strategy
-          name: "fill"
           field: "players"
           max_players: 50
 ```

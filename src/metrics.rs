@@ -10,8 +10,8 @@ static METER: LazyLock<Meter> = LazyLock::new(|| {
     global::meter_with_scope(scope)
 });
 
-/// The set of system metrics. The system metrics have to be refreshed manually or by using the [system::observe]
-/// function which starts a background task that periodically updates the metrics.
+/// The set of system metrics. The system metrics have to be refreshed manually or by using
+/// [`system::Observer::new`], which starts a background task that periodically updates the metrics.
 pub mod system {
     use std::time::Duration;
     use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};

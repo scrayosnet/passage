@@ -13,6 +13,10 @@ const ADAPTER_TYPE: &str = "fixed_localization_adapter";
 /// When a locale is not found, the adapter falls back to progressively shorter locale prefixes
 /// (e.g. `"en_US"` → `"en"`) and ultimately to `default_locale`. If the key is still not found, the
 /// key itself is returned as the message.
+///
+/// Params are substituted into the template by their name wrapped in curly braces, so the param
+/// `("preferred", "1.21.5")` replaces every occurrence of `{preferred}`. Placeholders without a
+/// matching param are left in the message as-is.
 #[derive(Debug)]
 pub struct FixedLocalizationAdapter {
     default_locale: String,
@@ -107,7 +111,7 @@ impl LocalizationAdapter for FixedLocalizationAdapter {
 
         let mut message = template.clone();
         for (param_key, param_val) in params {
-            message = message.replace(param_key, param_val);
+            message = message.replace(&format!("{{{param_key}}}"), param_val);
         }
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
         Ok(message)

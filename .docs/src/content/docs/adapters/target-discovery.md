@@ -119,6 +119,21 @@ discovery:
 | `port` | integer | `25565` | Port to use with A/AAAA records (ignored for SRV) |
 | `refresh_interval` | integer | `30` | How often to re-query DNS, in seconds |
 
+### Attached Metadata
+
+Discovered targets carry metadata derived from the DNS records, which you can use in a
+[`meta_filter`](/adapters/discovery-actions/#meta-filter):
+
+| Key | Record types | Description |
+|-----|--------------|-------------|
+| `domain` | SRV, A/AAAA | The domain that was queried |
+| `priority` | SRV | The SRV record's priority field |
+| `weight` | SRV | The SRV record's weight field |
+
+Note that DNS records carry no player counts, so `player_fill_strategy` cannot be used with DNS discovery
+unless a later action (for example a [gRPC action](/adapters/discovery-actions/#grpc-action)) injects the
+counts into the target metadata.
+
 :::tip[When to Use DNS Discovery]
 DNS discovery works well when your backend servers are registered in DNS (e.g., via Kubernetes Services, Consul, or manual DNS entries). SRV records are preferred because they carry port information and priority.
 :::
@@ -177,12 +192,25 @@ discovery:
       lastClient: "{{ .Client.Address }}"
   scheduling: "Packed"
   backoff:
-    initial_interval: 500
-    max_interval: 5000
-    max_elapsed_time: 30000
-    multiplier: 1.5
-    randomization_factor: 0.5
+    initial_secs: 2
+    max_secs: 60
+    max_attempts: 10
+    factor: 2.0
+    jitter: 0.1
 ```
+
+### Backoff Fields
+
+Retries of failed allocation requests are governed by an exponential backoff. Each attempt waits
+`initial_secs × factor^attempt` seconds, capped at `max_secs`, plus a random jitter.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `initial_secs` | integer | `2` | Wait time in seconds before the first retry |
+| `max_secs` | integer | `60` | Maximum wait time in seconds between retries |
+| `max_attempts` | integer | `10` | Maximum number of attempts before giving up |
+| `factor` | float | `2.0` | Multiplicative factor applied after each attempt |
+| `jitter` | float | `0.1` | Upper bound of the random jitter added to each wait, in seconds |
 
 :::note[RBAC Requirements]
 The Agones discovery adapter requires Kubernetes RBAC permissions to create `GameServerAllocation` resources. See the [Kubernetes Guide](/setup/kubernetes/) for the required ClusterRole configuration.
@@ -212,15 +240,18 @@ The service must implement the `Discovery` service from `discovery.proto`:
 
 ```protobuf
 service Discovery {
-    rpc GetTargets(TargetRequest) returns (TargetResponse);
+    rpc GetTargets(TargetRequest) returns (TargetsResponse);
 }
 ```
 
 The `TargetRequest` includes:
 - `client` (`ClientInfo`): Client address, server address, protocol version
-- `player` (`PlayerInfo`): Player name and UUID
 
-The `TargetResponse` returns a list of `Target` messages, each with an identifier, address, priority, and metadata.
+:::note
+Discovery is deliberately player-independent, so `TargetRequest` carries no player information. If your routing depends on the player's identity, implement a [gRPC discovery action](/adapters/discovery-actions/#grpc-action) instead -- its `ApplyRequest` includes `PlayerInfo`.
+:::
+
+The `TargetsResponse` returns a list of `Target` messages, each with an identifier, address, priority, and metadata.
 
 See the [gRPC Protocol Reference](/reference/grpc-protocol/) for full message definitions and the [Custom gRPC Adapters](/advanced/grpc-adapters/) guide for implementation examples.
 

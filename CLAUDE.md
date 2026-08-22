@@ -40,7 +40,7 @@ cargo audit
 
 ## Workspace Structure
 
-A 7-crate workspace. The crates have clear layering:
+The root `passage` binary plus 7 workspace member crates. The crates have clear layering:
 
 | Crate                     | Role                                                                             |
 |---------------------------|----------------------------------------------------------------------------------|

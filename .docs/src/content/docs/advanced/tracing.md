@@ -32,7 +32,7 @@ Every trace and metric Passage emits is tagged with the following labels so you 
 |-------|-------|
 | Service name | `passage` |
 | Service namespace | `scrayosnet` |
-| Service version | Passage version (e.g. `0.3.0`) |
+| Service version | Passage version (e.g. `1.0.0`) |
 | Environment | Your `otel.environment` config value (e.g. `production`) |
 
 ## Metrics Reference
@@ -46,10 +46,20 @@ These metrics give you a real-time view of traffic flowing through Passage.
 | `listener_requests` | Total incoming connections. The `decision` label splits this into `accepted` (processed normally) and `rejected` (dropped by the rate limiter or a proxy protocol error). |
 | `open_connections` | How many player connections are currently being handled. |
 | `connection_duration` | How long connections take from start to finish, in seconds. Watch the p95/p99 here — a rise indicates something is slowing down the authentication or discovery phase. |
-| `transfer_connections` | Connections grouped by type: `status` (server-list pings), `login` (new player logins), or `transfer` (reconnecting players using a transfer cookie). |
+| `transfer_connections` | Connections split by the `state` label: `status` (server-list pings), `login` (new player logins), or `transfer` (reconnecting players using a transfer cookie). |
 | `rate_limiter_size` | The number of IPs currently tracked by the rate limiter. This should stay small during normal operation and reset itself automatically. A high value may indicate a connection flood. |
 | `client_locales` | Distribution of player client languages. Useful for knowing which languages to prioritize for localized disconnect messages. |
 | `client_view_distances` | Distribution of view distances reported by clients during login. |
+
+### Adapter and Protocol Metrics
+
+These metrics show where connection time is actually spent and how much data crosses the wire.
+
+| Metric | What it measures |
+|--------|-----------------|
+| `adapter_duration` | How long an adapter call took, in seconds. The `adapter` label identifies which adapter was invoked, making it easy to spot a single slow status, authentication or discovery backend. |
+| `packet_size` | Distribution of individual Minecraft packet sizes in bytes. The `action` label splits this into `encoded` (sent) and `decoded` (received). |
+| `packet_bytes` | Total bytes encoded and decoded, again split by the `action` label. Useful for bandwidth accounting. |
 
 ### System Metrics
 

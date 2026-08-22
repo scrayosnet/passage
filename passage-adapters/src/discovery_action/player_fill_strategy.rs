@@ -20,7 +20,7 @@ pub struct PlayerFillStrategyAdapter {
 impl PlayerFillStrategyAdapter {
     /// Creates a new `PlayerFillStrategyAdapter`.
     ///
-    /// `field` is the metadata key on each [`Target`](crate::Target) that holds the current player
+    /// `field` is the metadata key on each [`Target`] that holds the current player
     /// count as a parseable `u32`. `max_players` is the capacity threshold.
     pub fn new(field: String, max_players: u32) -> Self {
         Self { field, max_players }

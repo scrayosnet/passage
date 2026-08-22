@@ -12,7 +12,8 @@ use passage_adapters::Error::Rejected;
 use passage_adapters::authentication::{AuthenticationAdapter, Profile};
 use passage_adapters::localization::LocalizationAdapter;
 use passage_adapters::{
-    Client, DiscoveryActionAdapter, Player, ServerStatus, reject_reason, status::StatusAdapter,
+    Client, DiscoveryActionAdapter, Player, Protocol, ServerStatus, reject_reason,
+    status::StatusAdapter,
 };
 use passage_packets::codec::{PacketCodec, PacketFrame};
 use passage_packets::configuration::clientbound as conf_out;
@@ -45,6 +46,10 @@ pub const DEFAULT_AUTH_COOKIE_EXPIRY: u64 = 6 * 60 * 60;
 /// The interval in seconds at which keep-alive packets are sent. Has to be between 15 and 20 seconds,
 /// such that at most one keep-alive packet is in transit at any point.
 pub const KEEP_ALIVE_INTERVAL: u64 = 16;
+
+/// The minimum protocol version (Minecraft 1.20.5) that Passage supports. This version introduced
+/// the configuration phase which passage depends on.
+pub const MIN_PROTOCOL_VERSION: Protocol = 766;
 
 /// A connection wraps a packet stream and implements the Minecraft (Java) protocol. The connection
 /// is automatically closed at the next appropriate instant once the cancellation token has been canceled.
@@ -341,6 +346,35 @@ where
             name: login_start.user_name,
             id: login_start.user_id,
         };
+
+        // Verify that the uses have at least minecraft version 1.20.5 as this introduced the configuration
+        // phase which passage depends on. Older clients are told which version to use instead. The
+        // version to point them to is taken from the status adapter, as that is the very same version
+        // that is advertised in the server list.
+        if client.protocol_version < MIN_PROTOCOL_VERSION {
+            info!(
+                client_protocol_version = client.protocol_version,
+                player_name = player.name,
+                player_id = %player.id,
+                "client tried to connect with unsupported protocol version, closing connection",
+            );
+
+            debug!("getting status from supplier");
+            let status = self.get_status(&route, &client).await?;
+
+            // The client locale is only known after the configuration phase, which cannot be reached
+            // by these clients, so the disconnect reason is always localized in the default locale.
+            let reason = route
+                .localize(
+                    self.client_locale.as_deref(),
+                    "disconnect_unsupported",
+                    &[("preferred", status.version.name)],
+                )
+                .await?;
+            self.send_packet(login_out::DisconnectPacket { reason })
+                .await?;
+            return Ok(());
+        }
 
         // check session
         debug!("sending session cookie request packet");

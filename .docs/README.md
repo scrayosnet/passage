@@ -1,49 +1,39 @@
-# Starlight Starter Kit: Basics
+# Passage Documentation
 
-[![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
+The source of [passage.scrayos.net](https://passage.scrayos.net), built with [Astro](https://astro.build) and
+[Starlight](https://starlight.astro.build).
 
-```
-pnpm create astro@latest -- --template starlight
-```
+## Structure
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+All pages live in `src/content/docs/` and are routed by their file path — `src/content/docs/setup/installation.md`
+becomes `/setup/installation/`. The sidebar is generated automatically per directory; use the `sidebar.order`
+frontmatter field to control the position of a page within its group.
 
-## 🚀 Project Structure
+| Directory   | Content                                                             |
+|-------------|---------------------------------------------------------------------|
+| `overview/` | Introduction, architecture, security and proxy comparison            |
+| `setup/`    | Installation, configuration basics and Kubernetes deployment         |
+| `adapters/` | Reference for the status, authentication and discovery adapters      |
+| `advanced/` | Cookies, localization, observability, tracing, scaling, gRPC adapters |
+| `reference/`| Full configuration and gRPC protocol reference                       |
 
-Inside of your Astro + Starlight project, you'll see the following folders and files:
+Images belong in `src/assets/` (referenced relatively from Markdown), static files such as the favicon and
+`robots.txt` in `public/`. Site-wide settings — title, sidebar groups, social links, plugins — are configured in
+`astro.config.mjs`.
 
-```
-.
-├── public/
-├── src/
-│   ├── assets/
-│   ├── content/
-│   │   └── docs/
-│   └── content.config.ts
-├── astro.config.mjs
-├── package.json
-└── tsconfig.json
-```
+## Commands
 
-Starlight looks for `.md` or `.mdx` files in the `src/content/docs/` directory. Each file is exposed as a route based on its file name.
+Run from this directory (`.docs/`):
 
-Images can be added to `src/assets/` and embedded in Markdown with a relative link.
+| Command        | Action                                              |
+|----------------|-----------------------------------------------------|
+| `pnpm install` | Install dependencies                                |
+| `pnpm dev`     | Start the dev server at `localhost:4321`            |
+| `pnpm build`   | Build the production site to `./dist/`              |
+| `pnpm preview` | Preview the production build locally                |
 
-Static assets, like favicons, can be placed in the `public/` directory.
+## Contributing
 
-## 🧞 Commands
-
-All commands are run from the root of the project, from a terminal:
-
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `pnpm install`             | Installs dependencies                            |
-| `pnpm dev`             | Starts local dev server at `localhost:4321`      |
-| `pnpm build`           | Build your production site to `./dist/`          |
-| `pnpm preview`         | Preview your build locally, before deploying     |
-| `pnpm astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `pnpm astro -- --help` | Get help using the Astro CLI                     |
-
-## 👀 Want to learn more?
-
-Check out [Starlight’s docs](https://starlight.astro.build/), read [the Astro documentation](https://docs.astro.build), or jump into the [Astro Discord server](https://astro.build/chat).
+Documentation changes follow the same process as code changes — see [CONTRIBUTING.md](../CONTRIBUTING.md). When you
+document a configuration field, verify it against `src/config.rs` and the generated `config/schema.json`, so the
+reference and the implementation stay in sync.

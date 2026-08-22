@@ -27,11 +27,17 @@ Traditional Proxy (per instance):
 └─ State synchronization complexity
 
 Passage (per instance):
-├─ 50,000+ concurrent handshakes/minute
-├─ 2-5 MB RAM baseline
+├─ Low double-digit MB at idle
 ├─ Zero packet transcoding
 └─ No state synchronization needed
 ```
+
+:::note[On throughput numbers]
+We deliberately don't publish a connections-per-second figure here. Throughput is dominated by what
+your adapters do -- a route on `fixed_discovery` behaves nothing like one that calls out to Mojang and
+a gRPC service on every login. Measure your own configuration with the `connection_duration` and
+`listener_requests` metrics rather than planning against a synthetic number.
+:::
 
 ## Horizontal Scaling Architecture
 
@@ -51,7 +57,7 @@ flowchart TD
 
 **Recommended Resources**:
 - CPU: 1 core
-- RAM: 5 MB
+- RAM: 64 MB (the baseline is a few MB; leave headroom for connection bursts)
 - Network: 1 Gbps
 
 ### Multi-Instance (Production/Large Networks)
@@ -161,16 +167,26 @@ spec:
   - type: Pods
     pods:
       metric:
-        name: passage_connections_per_second
+        name: passage_listener_requests_per_second
       target:
         type: AverageValue
         averageValue: "100"  # 100 connections/sec per pod
 ```
 
-**Prometheus Query**:
+The underlying signal is the `listener_requests` counter Passage exports (see the
+[metrics reference](/advanced/tracing/#metrics-reference)). Exposed through an OTLP-to-Prometheus
+pipeline it becomes a counter you can derive a rate from:
+
 ```promql
-rate(passage_connections_total[1m])
+# Accepted connections per second, per pod
+sum by (pod) (rate(listener_requests_total{decision="accepted"}[1m]))
 ```
+
+:::note
+The exact Prometheus metric name depends on your collector's OTLP-to-Prometheus translation, which
+typically appends `_total` to counters. Check what your pipeline actually produces before wiring up
+the HPA, and register the result as a custom metric via the Prometheus Adapter or KEDA.
+:::
 
 ### Pod Disruption Budget
 
@@ -328,9 +344,9 @@ AWS WAF with rate limiting:
 For custom rate limiting logic, integrate Redis (requires custom gRPC adapter):
 
 ```go
-// Example: gRPC adapter with Redis rate limiting
-func (s *server) SelectTarget(ctx context.Context, req *pb.SelectTargetRequest) (*pb.SelectTargetResponse, error) {
-    clientIP := req.GetMetadata()["client_ip"]
+// Example: a DiscoveryAction adapter that rate limits per client IP in Redis.
+func (s *server) Apply(ctx context.Context, req *pb.ApplyRequest) (*pb.ApplyResponse, error) {
+    clientIP := req.GetClient().GetClientAddress().GetHostname()
 
     // Check rate limit in Redis
     key := fmt.Sprintf("ratelimit:%s", clientIP)
@@ -344,12 +360,24 @@ func (s *server) SelectTarget(ctx context.Context, req *pb.SelectTargetRequest) 
     }
 
     if count > 100 {
-        return nil, status.Error(codes.ResourceExhausted, "rate limit exceeded")
+        // Reject the player with a localization key resolved by the route's
+        // localization adapter, instead of returning targets.
+        return &pb.ApplyResponse{
+            Reason: &pb.ApplyResponse_Key{Key: "disconnect_rate_limited"},
+        }, nil
     }
 
-    // ... target selection logic
+    // Otherwise pass the target list through unchanged.
+    return &pb.ApplyResponse{
+        Reason: &pb.ApplyResponse_Targets{
+            Targets: &pb.Targets{Targets: req.GetTargets()},
+        },
+    }, nil
 }
 ```
+
+Remember to add the `disconnect_rate_limited` key to your
+[localization messages](/advanced/localization/#custom-keys), otherwise the player sees the raw key.
 
 ## Performance Optimization
 
@@ -432,69 +460,88 @@ routes:
 
 ### Key Metrics to Track
 
+Passage exports these via OTLP. The [metrics reference](/advanced/tracing/#metrics-reference) documents
+every instrument and its labels; the ones that matter most for scaling decisions are:
+
 **Connection Metrics**:
-- `passage_connections_total` - Total connections processed
-- `passage_connections_active` - Current active connections
-- `passage_rate_limiter_size` - Number of tracked IPs in rate limiter
+- `listener_requests` — incoming connections, split by the `decision` label into `accepted` and `rejected`
+- `open_connections` — currently handled connections
+- `connection_duration` — connection time in seconds (histogram)
+- `transfer_connections` — connections by `state` (`status`, `login`, `transfer`)
+- `rate_limiter_size` — number of IPs currently tracked by the rate limiter
 
 **Adapter Metrics**:
-- `passage_adapter_status_duration_seconds` - Status adapter latency
-- `passage_adapter_discovery_duration_seconds` - Discovery adapter latency
-- `passage_adapter_strategy_duration_seconds` - Strategy adapter latency
+- `adapter_duration` — adapter call latency in seconds, with the `adapter` label identifying which
+  adapter was invoked (status, authentication, discovery, each discovery action)
 
-**System Metrics**:
-- CPU utilization per pod
-- Memory usage per pod
-- Network throughput (bytes in/out)
+**System Metrics** (require `system_observer_interval`):
+- `cpu_usage`, `used_memory`, `available_memory`, `used_swap`
+
+:::caution[Metric names in Prometheus]
+The names above are the OTLP instrument names. Your OTLP-to-Prometheus pipeline will usually rewrite
+them — counters typically gain a `_total` suffix and histograms are split into `_bucket`, `_sum` and
+`_count`. The queries below assume that convention; verify against what your collector actually
+exposes.
+:::
 
 ### Prometheus Queries
 
-**Connections per second**:
+**Accepted connections per second**:
 ```promql
-rate(passage_connections_total[1m])
+sum(rate(listener_requests_total{decision="accepted"}[1m]))
 ```
 
 **Average connection duration**:
 ```promql
-rate(passage_connection_duration_seconds_sum[5m])
-/
-rate(passage_connection_duration_seconds_count[5m])
+rate(connection_duration_sum[5m]) / rate(connection_duration_count[5m])
 ```
 
-**Rate limiter effectiveness**:
+**Rejection rate (rate limiter and proxy protocol failures)**:
 ```promql
-rate(passage_rate_limit_exceeded_total[5m])
+sum(rate(listener_requests_total{decision="rejected"}[5m]))
+```
+
+**Auth cookie effectiveness** — the share of connections skipping Mojang authentication:
+```promql
+sum(rate(transfer_connections_total{state="transfer"}[5m]))
+/
+sum(rate(transfer_connections_total{state=~"login|transfer"}[5m]))
 ```
 
 **Instance load distribution**:
 ```promql
-sum(rate(passage_connections_total[1m])) by (pod)
+sum by (pod) (rate(listener_requests_total[1m]))
+```
+
+**Slowest adapter**:
+```promql
+topk(3, rate(adapter_duration_sum[5m]) / rate(adapter_duration_count[5m]))
 ```
 
 ### Alerting Rules
 
-**High Error Rate**:
+**High Rejection Rate**:
 ```yaml
-- alert: PassageHighErrorRate
+- alert: PassageHighRejectionRate
   expr: |
-    rate(passage_errors_total[5m]) > 10
+    sum(rate(listener_requests_total{decision="rejected"}[5m]))
+    /
+    sum(rate(listener_requests_total[5m])) > 0.1
   for: 5m
   annotations:
-    summary: "High error rate in Passage"
-    description: "{{ $value }} errors/sec in namespace {{ $labels.namespace }}"
+    summary: "More than 10% of connections to Passage are rejected"
+    description: "Possible connection flood or a misconfigured PROXY protocol setup"
 ```
 
 **High Latency**:
 ```yaml
 - alert: PassageHighLatency
   expr: |
-    histogram_quantile(0.99,
-      rate(passage_connection_duration_seconds_bucket[5m])
-    ) > 2
+    histogram_quantile(0.99, rate(connection_duration_bucket[5m])) > 2
   for: 5m
   annotations:
     summary: "High connection latency in Passage"
-    description: "P99 latency is {{ $value }}s"
+    description: "P99 latency is {{ $value }}s — check adapter_duration for the slow adapter"
 ```
 
 **Pod Unavailable**:
@@ -537,12 +584,16 @@ Recommended with HA: 6 instances (3 for load, 3 for redundancy)
 
 ### Instance Sizing Guide
 
-| Network Size | Peak Players | Instances | CPU per Pod | RAM per Pod |
-|--------------|--------------|-----------|-------------|-------------|
-| Small        | < 500        | 1         | 0.5 cores   | 3 MB        |
-| Medium       | 500-2,000    | 1-3       | 1 core      | 5 MB        |
-| Large        | 2,000-10,000 | 2-3       | 2 cores     | 10 MB       |
-| Enterprise   | 10,000+      | 3-5       | 2 cores     | 15 MB       |
+| Network Size | Peak Players | Instances | CPU per Pod | Memory limit per Pod |
+|--------------|--------------|-----------|-------------|----------------------|
+| Small        | < 500        | 1         | 0.5 cores   | 64 Mi                |
+| Medium       | 500-2,000    | 1-3       | 1 core      | 128 Mi               |
+| Large        | 2,000-10,000 | 2-3       | 2 cores     | 256 Mi               |
+| Enterprise   | 10,000+      | 3-5       | 2 cores     | 256 Mi               |
+
+Passage's idle footprint is only a few MB, but memory *limits* must leave room for connection bursts
+and the rate limiter's IP table — sizing a limit at the idle footprint will get pods OOMKilled under
+load.
 
 **Headroom Recommendation**: Always provision 50% extra capacity for traffic spikes and failover scenarios.
 
@@ -656,7 +707,7 @@ Before deploying Passage at scale, verify:
 
 ### Issue: High Memory Usage
 
-**Symptoms**: Pods consuming > 10 MB RAM, OOMKilled events
+**Symptoms**: Memory growing well beyond the low double-digit MB range, OOMKilled events
 
 **Causes**:
 - Rate limiter tracking too many IPs
