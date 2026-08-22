@@ -80,6 +80,12 @@ Minecraft Wiki for the current, complete table.
 `[min_version, max_version]`, Passage echoes the client's own version back so the server list shows the
 server as compatible; otherwise it reports `preferred_version`, which makes the client display
 "Outdated client!" or "Outdated server!". A player can still attempt to log in either way.
+
+The only login that Passage itself rejects on version grounds is one below protocol `766`, which cannot
+reach the configuration phase at all. Those clients receive the
+[`disconnect_unsupported`](/advanced/localization/#disconnect_unsupported) message, whose `{preferred}`
+parameter is filled with this adapter's `name`. Set `name` to the version you want those players to
+install (e.g. `"1.21.5"`) if you rely on that message.
 :::
 
 ---

@@ -712,36 +712,42 @@
               "disconnect_no_target": "{\"text\":\"Verbindung getrennt: Kein verfügbarer Server für diese Verbindung\"}",
               "disconnect_timeout": "{\"text\":\"Verbindung getrennt: Keine Antwort vom Client (Keep-Alive-Timeout)\"}",
               "disconnect_unauthenticated": "{\"text\":\"Verbindung getrennt: Client konnte nicht authentifiziert werden\"}",
+              "disconnect_unsupported": "{\"text\":\"Verbindung getrennt: Deine Minecraft-Version wird nicht mehr unterstützt, bitte nutze {preferred}\"}",
               "locale": "Deutsch"
             },
             "en": {
               "disconnect_no_target": "{\"text\":\"Disconnected: No available server to handle your connection\"}",
               "disconnect_timeout": "{\"text\":\"Disconnected: No response from client (keep-alive timeout)\"}",
               "disconnect_unauthenticated": "{\"text\":\"Disconnected: Could not authenticate client\"}",
+              "disconnect_unsupported": "{\"text\":\"Disconnected: Your Minecraft version is no longer supported, please use {preferred}\"}",
               "locale": "English"
             },
             "es": {
               "disconnect_no_target": "{\"text\":\"Desconectado: No hay un servidor disponible para manejar tu conexión\"}",
               "disconnect_timeout": "{\"text\":\"Desconectado: No hubo respuesta del cliente (tiempo de espera agotado)\"}",
               "disconnect_unauthenticated": "{\"text\":\"Desconectado: No se pudo autenticar el cliente\"}",
+              "disconnect_unsupported": "{\"text\":\"Desconectado: Tu versión de Minecraft ya no es compatible, usa {preferred}\"}",
               "locale": "Español"
             },
             "fr": {
               "disconnect_no_target": "{\"text\":\"Déconnecté : aucun serveur disponible pour traiter votre connexion\"}",
               "disconnect_timeout": "{\"text\":\"Déconnecté : aucune réponse du client (délai de keep-alive dépassé)\"}",
               "disconnect_unauthenticated": "{\"text\":\"Déconnecté : Impossible d’authentifier le client\"}",
+              "disconnect_unsupported": "{\"text\":\"Déconnecté : votre version de Minecraft n’est plus prise en charge, veuillez utiliser {preferred}\"}",
               "locale": "Français"
             },
             "ru": {
               "disconnect_no_target": "{\"text\":\"Отключено: нет доступного сервера для обработки подключения\"}",
               "disconnect_timeout": "{\"text\":\"Отключено: нет ответа от клиента (тайм-аут keep-alive)\"}",
               "disconnect_unauthenticated": "{\"text\":\"Отключено: не удалось аутентифицировать клиента\"}",
+              "disconnect_unsupported": "{\"text\":\"Отключено: ваша версия Minecraft больше не поддерживается, используйте {preferred}\"}",
               "locale": "Русский"
             },
             "zh-CN": {
               "disconnect_no_target": "{\"text\":\"已断开连接：没有可用的服务器来处理你的连接\"}",
               "disconnect_timeout": "{\"text\":\"已断开连接：客户端无响应（保持连接超时）\"}",
               "disconnect_unauthenticated": "{\"text\":\"已断开连接：无法验证客户端\"}",
+              "disconnect_unsupported": "{\"text\":\"已断开连接：你的 Minecraft 版本已不再支持，请使用 {preferred}\"}",
               "locale": "简体中文"
             }
           }

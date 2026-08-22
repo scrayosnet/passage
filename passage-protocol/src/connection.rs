@@ -11,7 +11,10 @@ use opentelemetry::global;
 use passage_adapters::Error::Rejected;
 use passage_adapters::authentication::{AuthenticationAdapter, Profile};
 use passage_adapters::localization::LocalizationAdapter;
-use passage_adapters::{reject_reason, status::StatusAdapter, Client, DiscoveryActionAdapter, Player, Protocol, ServerStatus};
+use passage_adapters::{
+    Client, DiscoveryActionAdapter, Player, Protocol, ServerStatus, reject_reason,
+    status::StatusAdapter,
+};
 use passage_packets::codec::{PacketCodec, PacketFrame};
 use passage_packets::configuration::clientbound as conf_out;
 use passage_packets::configuration::serverbound as conf_in;
@@ -345,7 +348,9 @@ where
         };
 
         // Verify that the uses have at least minecraft version 1.20.5 as this introduced the configuration
-        // phase which passage depends on.
+        // phase which passage depends on. Older clients are told which version to use instead. The
+        // version to point them to is taken from the status adapter, as that is the very same version
+        // that is advertised in the server list.
         if client.protocol_version < MIN_PROTOCOL_VERSION {
             info!(
                 client_protocol_version = client.protocol_version,
@@ -356,6 +361,9 @@ where
 
             debug!("getting status from supplier");
             let status = self.get_status(&route, &client).await?;
+
+            // The client locale is only known after the configuration phase, which cannot be reached
+            // by these clients, so the disconnect reason is always localized in the default locale.
             let reason = route
                 .localize(
                     self.client_locale.as_deref(),
@@ -363,8 +371,9 @@ where
                     &[("preferred", status.version.name)],
                 )
                 .await?;
-            self.send_packet(login_out::DisconnectPacket { reason }).await?;
-            return Ok(())
+            self.send_packet(login_out::DisconnectPacket { reason })
+                .await?;
+            return Ok(());
         }
 
         // check session
