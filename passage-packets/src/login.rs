@@ -121,6 +121,10 @@ pub mod clientbound {
             // no properties in the array
             dst.write_varint(0)?;
 
+            // TODO elevate to packet field in the future (with backward compatability)
+            // write a zero uuid
+            dst.write_uuid(&Uuid::new_v4())?;
+
             Ok(())
         }
     }
@@ -133,6 +137,11 @@ pub mod clientbound {
             let user_name = src.read_string()?;
             // expect no properties in the array
             let _properties = src.read_varint()?;
+
+            // TODO this is only mento to fix the tests, the actual implementation has to read the properties first
+            // TODO elevate to packet field in the future (with backward compatability)
+            // read the session ID
+            _ = src.read_uuid()?;
 
             Ok(Self { user_id, user_name })
         }
