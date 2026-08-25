@@ -1,6 +1,7 @@
 //! This module contains the adapter logic and the individual implementations of the adapters with
 //! different responsibilities.
 
+use bytestring::ByteString;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
 use std::collections::HashMap;
@@ -26,6 +27,7 @@ pub use localization::LocalizationAdapter;
 pub use status::StatusAdapter;
 
 // reexport adapters
+use crate::authentication::ProfileProperty;
 pub use authentication::disabled::DisabledAuthenticationAdapter;
 pub use authentication::fixed::FixedAuthenticationAdapter;
 pub use discovery::fixed::FixedDiscoveryAdapter;
@@ -34,19 +36,20 @@ pub use discovery_action::player_allow_filter::PlayerAllowFilterAdapter;
 pub use discovery_action::player_block_filter::PlayerBlockFilterAdapter;
 pub use discovery_action::player_fill_strategy::PlayerFillStrategyAdapter;
 pub use localization::fixed::FixedLocalizationAdapter;
+use passage_core::{ProtocolVersion, versions};
 pub use status::fixed::FixedStatusAdapter;
 
 /// The Minecraft protocol version type.
-pub type Protocol = i32;
+pub type Protocol = ProtocolVersion;
 
 /// Contains the client information sent to the server on the initial handshake.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Client {
     /// The pretended protocol version.
-    pub protocol_version: Protocol,
+    pub protocol_version: ProtocolVersion,
 
-    /// The pretended server address.
-    pub server_address: String,
+    /// The pretended server address, as it came off the handshake.
+    pub server_address: ByteString,
 
     /// The pretended server port.
     pub server_port: u16,
@@ -58,8 +61,8 @@ pub struct Client {
 impl Default for Client {
     fn default() -> Self {
         Self {
-            protocol_version: 775,
-            server_address: "mc.justchunks.net".to_owned(),
+            protocol_version: versions::V1_20_5,
+            server_address: "mc.justchunks.net".into(),
             server_port: 25565,
             address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
         }
@@ -67,13 +70,16 @@ impl Default for Client {
 }
 
 /// Contains the player information.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct Player {
     /// The name of the player.
     pub name: String,
 
     /// The id of the player.
     pub id: uuid::Uuid,
+
+    /// The profile properties of the player.
+    pub profile_properties: Vec<ProfileProperty>,
 }
 
 /// A target gameserver that can be connected to.
@@ -102,7 +108,7 @@ pub struct ServerVersion {
     #[serde(default = "default_name")]
     pub name: String,
     /// The numeric protocol version (for compatibility checking).
-    pub protocol: Protocol,
+    pub protocol: ProtocolVersion,
 }
 
 /// The information on a single, sampled player entry.

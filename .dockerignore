@@ -7,5 +7,5 @@
 !passage-adapters/agones
 !passage-adapters/grpc
 !passage-adapters/http
-!passage-packets/
-!passage-protocol/
+!passage-core/
+!passage-router/

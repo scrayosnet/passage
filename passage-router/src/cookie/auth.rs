@@ -1,0 +1,71 @@
+use crate::cookie::{Cookie, CookieError, HASH_LEN, sign, verify};
+use passage_adapters::authentication::ProfileProperty;
+use passage_core::wire::{ByteString, Bytes};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use tokio_util::bytes::{BufMut, BytesMut};
+use uuid::Uuid;
+
+/// The auth cookie key.
+pub const AUTH_COOKIE_KEY: &str = "passage:authentication";
+
+/// The [`AuthCookie`] holds the authenticated player information for the connecting client. The cookie
+/// is signed using a shared secret. As such, servers the client connects to may skip any additional
+/// authentication and use this instead. It also may include the transfer target for further security.
+///
+/// Generally, the cookie should be checked for expiry to prevent replay attacks. Use the cookie creation
+/// time to check.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AuthCookie {
+    /// The time at which the auth cookie was created.
+    pub timestamp: u64,
+
+    /// The address of the client that (initially) connected.
+    pub client_addr: SocketAddr,
+
+    /// The (authenticated) name of the player.
+    pub user_name: ByteString,
+
+    /// The (authenticated) id of the player.
+    pub user_id: Uuid,
+
+    /// The (optional) target the client is transferred to. This will be set by passage but may be
+    /// omitted by other tools.
+    pub target: Option<ByteString>,
+
+    /// The (authenticated) profile properties of the player.
+    pub profile_properties: Vec<ProfileProperty>,
+
+    /// Any additional system-specific (secured) information. This includes the OpenTelemetry tracing
+    /// information.
+    #[serde(default)]
+    pub extra: HashMap<String, String>,
+}
+
+impl Cookie for AuthCookie {
+    const KEY: &'static str = AUTH_COOKIE_KEY;
+
+    fn encode(&self, secret: Option<&[u8]>) -> Result<Bytes, CookieError> {
+        let Some(secret) = secret else {
+            return Err(CookieError::SecretRequired);
+        };
+
+        let mut bytes = BytesMut::with_capacity(HASH_LEN + 64);
+        bytes.put_bytes(0, HASH_LEN);
+        serde_json::to_writer((&mut bytes).writer(), self)?;
+        sign(&mut bytes, secret);
+        Ok(bytes.freeze())
+    }
+
+    fn decode(secret: Option<&[u8]>, signed: &[u8]) -> Result<Option<Self>, CookieError> {
+        let Some(secret) = secret else {
+            return Err(CookieError::SecretRequired);
+        };
+
+        let Some(bytes) = verify(signed, secret) else {
+            return Ok(None);
+        };
+        Ok(Some(serde_json::from_slice(bytes)?))
+    }
+}

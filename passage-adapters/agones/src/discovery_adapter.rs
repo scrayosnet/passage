@@ -5,7 +5,7 @@ use kube::{Api, Client};
 use opentelemetry::trace::TraceContextExt;
 use passage_adapters::backoff::ExponentialBackoff;
 use passage_adapters::discovery::DiscoveryAdapter;
-use passage_adapters::{Error, Target, metrics};
+use passage_adapters::{AdapterError, Target, metrics};
 use serde_json::Value;
 use std::fmt::{Debug, Formatter};
 use std::time::Duration;
@@ -55,7 +55,7 @@ impl AgonesDiscoveryAdapter {
     pub async fn new_with_client(
         client: Client,
         config: AgonesDiscoveryAdapterConfig,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, AdapterError> {
         // Build the client with the optional namespace.
         let api: Api<GameServerAllocation> = if let Some(namespace) = &config.namespace {
             Api::namespaced(client, namespace)
@@ -67,14 +67,15 @@ impl AgonesDiscoveryAdapter {
     }
 
     /// Creates a new adapter using the default in-cluster Kubernetes configuration.
-    pub async fn new(config: AgonesDiscoveryAdapterConfig) -> Result<Self, Error> {
+    pub async fn new(config: AgonesDiscoveryAdapterConfig) -> Result<Self, AdapterError> {
         // Build the client from the default config.
-        let client = Client::try_default()
-            .await
-            .map_err(|err| Error::FailedInitialization {
-                adapter_type: ADAPTER_TYPE,
-                cause: err.into(),
-            })?;
+        let client =
+            Client::try_default()
+                .await
+                .map_err(|err| AdapterError::FailedInitialization {
+                    adapter_type: ADAPTER_TYPE,
+                    cause: err.into(),
+                })?;
         Self::new_with_client(client, config).await
     }
 
@@ -85,7 +86,7 @@ impl AgonesDiscoveryAdapter {
     pub async fn allocate(
         &self,
         client: &passage_adapters::Client,
-    ) -> Result<Option<Target>, Error> {
+    ) -> Result<Option<Target>, AdapterError> {
         // Build the allocation request.
         let trace_id = tracing::Span::current()
             .context()
@@ -136,7 +137,7 @@ impl AgonesDiscoveryAdapter {
                 .api
                 .create(&kube::api::PostParams::default(), &allocation)
                 .await
-                .map_err(|err| Error::FailedFetch {
+                .map_err(|err| AdapterError::FailedFetch {
                     adapter_type: ADAPTER_TYPE,
                     cause: Box::new(err),
                 })?;
@@ -148,7 +149,7 @@ impl AgonesDiscoveryAdapter {
             // Convert the allocation (if any) into a target.
             match status.state.as_deref() {
                 Some("Allocated") => {
-                    let target = result.try_into().map_err(|err| Error::FailedParse {
+                    let target = result.try_into().map_err(|err| AdapterError::FailedParse {
                         adapter_type: ADAPTER_TYPE,
                         cause: Box::new(err),
                     })?;

@@ -1,0 +1,425 @@
+use crate::codec::CodecError;
+use crate::connection::{ConnRef, ConnectionError};
+use bytes::Bytes;
+use futures::future::BoxFuture;
+use std::fmt;
+
+/// Who caused a handler failure.
+///
+/// The driver cannot know whether a failed authentication is the peer's fault, ours, or a
+/// dependency's, so the handler that raised it says. This is what decides the log level and whether
+/// a failure is worth reporting: see [`ConnectionError::is_peer_error`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum Class {
+    /// The peer sent something illegal or stopped playing along. Expected in the wild (scanners,
+    /// mods, bots, timeouts): count it, log it at `debug`, never page anyone.
+    Peer,
+
+    /// A bug on our side, or a dependency failing. Log it at `warn`/`error` and report it. The
+    /// default, because an unclassified failure is one nobody has thought about yet.
+    #[default]
+    Internal,
+}
+
+/// An error raised by a [`Dispatcher`]'s handlers.
+///
+/// The source is an [`anyhow::Error`] because the driver cannot list what a custom handler will
+/// fail with. What it *can* ask for is the two things telemetry needs and a handler always knows:
+/// who is to blame ([`class`](DispatchError::class)) and a stable metric label
+/// ([`label`](DispatchError::label)). A plain `?` on an [`anyhow::Error`] fills both with the
+/// conservative default, so handlers that do not care pay nothing.
+#[derive(Debug)]
+pub struct DispatchError {
+    /// Who is to blame.
+    pub class: Class,
+
+    /// A stable, low-cardinality metric label. Never peer-controlled.
+    pub label: &'static str,
+
+    /// The underlying error.
+    pub source: anyhow::Error,
+}
+
+/// The label a [`DispatchError`] carries when a handler did not choose one.
+const DEFAULT_LABEL: &str = "dispatch";
+
+impl DispatchError {
+    /// Raises a handler error the peer is to blame for: a rejection, a timeout, a failed check.
+    #[must_use]
+    pub fn peer(label: &'static str, source: impl Into<anyhow::Error>) -> Self {
+        Self {
+            class: Class::Peer,
+            label,
+            source: source.into(),
+        }
+    }
+
+    /// Raises a handler error we are to blame for: a bug, a misconfiguration, a failing dependency.
+    #[must_use]
+    pub fn internal(label: &'static str, source: impl Into<anyhow::Error>) -> Self {
+        Self {
+            class: Class::Internal,
+            label,
+            source: source.into(),
+        }
+    }
+
+    /// The stable, low-cardinality label this failure is counted under. Never peer-controlled. A
+    /// handler that does not classify its own gets `dispatch`.
+    #[must_use]
+    pub fn reason(&self) -> &'static str {
+        self.label
+    }
+
+    /// Whether the peer is to blame for this error.
+    #[must_use]
+    pub fn is_peer_error(&self) -> bool {
+        self.class == Class::Peer
+    }
+}
+
+impl fmt::Display for DispatchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.source, f)
+    }
+}
+
+impl std::error::Error for DispatchError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+/// So that a handler can `?` an [`anyhow::Error`] without classifying it. An unclassified failure is
+/// [`Class::Internal`], because assuming the peer's fault would hide our own bugs.
+impl From<anyhow::Error> for DispatchError {
+    fn from(source: anyhow::Error) -> Self {
+        Self {
+            class: Class::Internal,
+            label: DEFAULT_LABEL,
+            source,
+        }
+    }
+}
+
+/// So that a handler can `?` what it does to its own connection -- `conn.send(..)` and friends
+/// return a [`ConnectionError`]. The classification the connection already made is carried across
+/// rather than flattened to the default.
+impl From<ConnectionError> for DispatchError {
+    fn from(error: ConnectionError) -> Self {
+        Self {
+            class: if error.is_peer_error() {
+                Class::Peer
+            } else {
+                Class::Internal
+            },
+            label: error.reason(),
+            source: anyhow::Error::new(error),
+        }
+    }
+}
+
+/// So that the socket's own failures reach the same place by the same route. A codec error is a
+/// connection error before it is anything else, which is what decides whether the peer is to blame.
+impl From<CodecError> for DispatchError {
+    fn from(error: CodecError) -> Self {
+        ConnectionError::from(error).into()
+    }
+}
+
+/// The dispatch result type, defaulting to [`DispatchError`]. Private, so that the crate has one
+/// exported `Result` alias ([`ConnectionError`]'s) rather than two that shadow each other.
+type Result<T, E = DispatchError> = std::result::Result<T, E>;
+
+/// Returns a completed future with `Ok(())`.
+fn done<'a>() -> BoxFuture<'a, Result<()>> {
+    Box::pin(std::future::ready(Ok(())))
+}
+
+/// A [`Dispatcher`] is used by the connection to handle incoming packets. It is implemented for
+/// [`Box`] and [`Option`].
+///
+/// Every method has a default that does nothing, so an implementation only writes the hooks it
+/// cares about.
+///
+/// [`on_open`](Dispatcher::on_open) and [`on_frame`](Dispatcher::on_frame) hand back a future the
+/// connection drives alongside everything else it is doing. One that resolves without waiting
+/// finishes at dispatch, before the next frame is read; one that waits keeps running until it is
+/// done or the connection ends.
+pub trait Dispatcher<S> {
+    /// Called when the connection changes the protocol version. This can be used to update internal
+    /// dispatch tables.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever the implementation raises while rebinding. An error here fails the
+    /// connection.
+    fn on_version(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
+        let _ = conn;
+        Ok(())
+    }
+
+    /// Handles the connection opening. Called once, before the connection reads the first frame.
+    ///
+    /// The connection has no clock of its own beyond its deadline, so a future that keeps running
+    /// is where a driver puts its keep-alives, and where it answers a shutdown or a deadline it
+    /// wants the peer to be told about.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever the handler raises. An error here ends the connection.
+    fn on_open<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<()>> {
+        let _ = conn;
+        done()
+    }
+
+    /// Handles an incoming packet. `payload` leads with the ID varint the frame was routed by.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever the handler raises. An error here ends the connection. A handler that wants
+    /// the peer told why sends the message itself before it returns.
+    fn on_frame<'a>(
+        &self,
+        conn: ConnRef<'a, S>,
+        id: i32,
+        payload: Bytes,
+    ) -> BoxFuture<'a, Result<()>> {
+        let _ = (conn, id, payload);
+        done()
+    }
+}
+
+impl<S> Dispatcher<S> for () {}
+
+impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
+    fn on_version(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
+        (**self).on_version(conn)
+    }
+
+    fn on_open<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<()>> {
+        (**self).on_open(conn)
+    }
+
+    fn on_frame<'a>(
+        &self,
+        conn: ConnRef<'a, S>,
+        id: i32,
+        payload: Bytes,
+    ) -> BoxFuture<'a, Result<()>> {
+        (**self).on_frame(conn, id, payload)
+    }
+}
+
+// There is deliberately no impl for `Arc<D>`. `on_version` takes `&mut self`, so a shared dispatcher
+// could not rebind its table -- it would silently keep serving every connection from the table it
+// started on, which is exactly the bug the connection calls `on_version` to prevent.
+impl<S, D: Dispatcher<S>> Dispatcher<S> for Option<D> {
+    fn on_version(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
+        let Some(this) = self else {
+            return Ok(());
+        };
+        this.on_version(conn)
+    }
+
+    fn on_open<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<()>> {
+        let Some(this) = self else {
+            return done();
+        };
+        this.on_open(conn)
+    }
+
+    fn on_frame<'a>(
+        &self,
+        conn: ConnRef<'a, S>,
+        id: i32,
+        payload: Bytes,
+    ) -> BoxFuture<'a, Result<()>> {
+        let Some(this) = self else {
+            return done();
+        };
+        this.on_frame(conn, id, payload)
+    }
+}
+
+/// [`MakeDispatcher`] is a builder for [`Dispatcher`]s. In general, a connection [`Dispatcher`] is
+/// stateful. This builder allows the driver to create a new dispatcher for each request.
+pub trait MakeDispatcher<S>: Send + 'static {
+    /// The dispatcher this produces.
+    type Dispatcher: Dispatcher<S> + Send + 'static;
+
+    /// Makes one, for one connection.
+    fn make(&self) -> Self::Dispatcher;
+}
+
+impl<S: 'static> MakeDispatcher<S> for () {
+    type Dispatcher = ();
+
+    fn make(&self) {}
+}
+
+/// A [`MakeDispatcherFn`] builds a dispatcher from a closure. See [`make_with`].
+pub struct MakeDispatcherFn<F>(F);
+
+impl<S, D, F> MakeDispatcher<S> for MakeDispatcherFn<F>
+where
+    F: Fn() -> D + Send + 'static,
+    D: Dispatcher<S> + Send + 'static,
+{
+    type Dispatcher = D;
+
+    fn make(&self) -> D {
+        self.0()
+    }
+}
+
+/// Makes a dispatcher from a closure. Useful for stateless dispatchers.
+pub fn make_with<F>(make: F) -> MakeDispatcherFn<F> {
+    MakeDispatcherFn(make)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::Phase;
+    use crate::common::versions;
+    use crate::connection::ConnCell;
+    use crate::wire::Options;
+    use anyhow::anyhow;
+    use std::sync::{Arc, Mutex};
+
+    /// Which hooks a dispatcher was asked to run, in order.
+    #[derive(Default)]
+    struct Recorder {
+        seen: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl Recorder {
+        fn note(&self, what: &'static str) {
+            self.seen.lock().expect("not poisoned").push(what);
+        }
+    }
+
+    impl Dispatcher<()> for Recorder {
+        fn on_version(&mut self, _conn: ConnRef<'_, ()>) -> Result<()> {
+            self.note("version");
+            Ok(())
+        }
+
+        fn on_open<'a>(&self, _conn: ConnRef<'a, ()>) -> BoxFuture<'a, Result<()>> {
+            self.note("open");
+            done()
+        }
+
+        fn on_frame<'a>(
+            &self,
+            _conn: ConnRef<'a, ()>,
+            _id: i32,
+            _payload: Bytes,
+        ) -> BoxFuture<'a, Result<()>> {
+            self.note("frame");
+            done()
+        }
+    }
+
+    /// Runs every hook on `dispatcher`, so a test only has to say what it expects to be recorded.
+    async fn run_every_hook(mut dispatcher: impl Dispatcher<()>) {
+        let cell = ConnCell::new((), versions::V26_1, Phase::Login, Options::default());
+        let conn = cell.as_ref();
+
+        dispatcher.on_open(conn).await.expect("opens");
+        dispatcher.on_version(conn).expect("rebinds");
+        dispatcher
+            .on_frame(conn, 0x00, Bytes::new())
+            .await
+            .expect("dispatches");
+    }
+
+    #[tokio::test]
+    async fn a_dispatcher_that_implements_nothing_does_nothing() {
+        // Every method has a default that returns `Ok`, so an implementation only writes the hooks
+        // it cares about -- and the call itself is the assertion.
+        run_every_hook(()).await;
+    }
+
+    #[tokio::test]
+    async fn a_boxed_dispatcher_forwards_every_hook() {
+        // Which dispatcher runs is a value, not a type -- and a `Box` that dropped a hook would be
+        // a silent bug in exactly the case the hook exists to prevent.
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let dispatcher: Box<dyn Dispatcher<()>> = Box::new(Recorder {
+            seen: Arc::clone(&seen),
+        });
+        run_every_hook(dispatcher).await;
+        assert_eq!(
+            *seen.lock().expect("not poisoned"),
+            vec!["open", "version", "frame"],
+        );
+    }
+
+    #[tokio::test]
+    async fn an_optional_dispatcher_forwards_every_hook_it_has() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        run_every_hook(Some(Recorder {
+            seen: Arc::clone(&seen),
+        }))
+        .await;
+        assert_eq!(
+            *seen.lock().expect("not poisoned"),
+            vec!["open", "version", "frame"],
+        );
+
+        run_every_hook(None::<Recorder>).await;
+        assert_eq!(
+            seen.lock().expect("not poisoned").len(),
+            3,
+            "nothing was added"
+        );
+    }
+
+    #[test]
+    fn an_unclassified_failure_is_ours() {
+        // A plain `?` on an `anyhow::Error` fills both fields with the conservative default, so
+        // handlers that do not care pay nothing -- and a failure nobody thought about is not
+        // quietly blamed on the peer.
+        let error = DispatchError::from(anyhow!("something went wrong"));
+        assert_eq!(error.class, Class::Internal);
+        assert_eq!(error.label, DEFAULT_LABEL);
+        assert!(!error.is_peer_error());
+        assert_eq!(error.to_string(), "something went wrong");
+        assert_eq!(Class::default(), Class::Internal);
+    }
+
+    #[test]
+    fn a_handler_says_who_is_to_blame_because_only_it_knows() {
+        let peer = DispatchError::peer("bad_client", anyhow!("unsupported version"));
+        assert!(peer.is_peer_error());
+        assert_eq!(peer.label, "bad_client");
+
+        let ours = DispatchError::internal("upstream", anyhow!("the database is down"));
+        assert!(!ours.is_peer_error());
+        assert_eq!(ours.label, "upstream");
+
+        // The cause survives as a source, so a report can still unwrap the whole chain.
+        let source = std::error::Error::source(&ours).expect("a cause");
+        assert_eq!(source.to_string(), "the database is down");
+    }
+
+    #[test]
+    fn a_dispatcher_factory_builds_one_per_connection() {
+        // Dispatchers are generally stateful, so the server asks for a new one per socket.
+        let made = Arc::new(Mutex::new(0));
+        let counter = Arc::clone(&made);
+        let factory = make_with(move || {
+            *counter.lock().expect("not poisoned") += 1;
+            Recorder::default()
+        });
+
+        let _: Recorder = MakeDispatcher::<()>::make(&factory);
+        let _: Recorder = MakeDispatcher::<()>::make(&factory);
+        assert_eq!(*made.lock().expect("not poisoned"), 2);
+
+        // And a connection that handles nothing needs no dispatcher at all.
+        MakeDispatcher::<()>::make(&());
+    }
+}

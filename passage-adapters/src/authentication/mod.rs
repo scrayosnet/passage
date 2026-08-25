@@ -3,10 +3,8 @@ pub mod fixed;
 
 use crate::{Client, Player, error::Result};
 use num_bigint::BigInt;
-use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::fmt::Debug;
-use uuid::Uuid;
 
 /// The [`AuthenticationAdapter`] is used to provide custom logic for validating a connecting player
 /// against an authentication authority. The default configuration intents using the HTTP adapter
@@ -38,21 +36,7 @@ pub trait AuthenticationAdapter: Debug + Send + Sync {
 /// The `properties` usually only include one property called `textures`, but this may change over
 /// time, so it is kept as an array as that is what's specified in the JSON. The `profile_actions`
 /// are empty for non-sanctioned accounts.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct Profile {
-    /// The unique identifier of the Minecraft user profile.
-    pub id: Uuid,
-    /// The current visual name of the Minecraft user profile.
-    pub name: String,
-    /// The currently assigned properties of the Minecraft user profile.
-    #[serde(default)]
-    pub properties: Vec<ProfileProperty>,
-    /// The pending imposed moderative actions of the Minecraft user profile.
-    #[serde(default)]
-    pub profile_actions: Vec<String>,
-}
+pub type Profile = passage_core::common::Profile;
 
 /// Represents a single property of a Minecraft user profile.
 ///
@@ -63,18 +47,7 @@ pub struct Profile {
 /// All properties are cryptographic signed to verify the authenticity of the provided data. The
 /// `signature` of the property is signed with Yggdrasil's private key and therefore its
 /// authenticity can be verified by the Minecraft client.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct ProfileProperty {
-    /// The unique, identifiable name of the profile property.
-    pub name: String,
-    /// The base64 encoded value of the profile property.
-    pub value: String,
-    /// The base64 encoded signature of the profile property.
-    /// Only provided if `?unsigned=false` is appended to url
-    pub signature: Option<String>,
-}
+pub type ProfileProperty = passage_core::common::ProfileProperty;
 
 /// Computes the Minecraft session server hash from the server ID, shared secret, and encoded
 /// public key.

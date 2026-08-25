@@ -1,0 +1,99 @@
+use crate::config;
+use passage_adapters::status::StatusAdapter;
+use passage_adapters::{Client, FixedStatusAdapter, ServerStatus, ServerVersion};
+#[cfg(feature = "adapters-grpc")]
+use passage_adapters_grpc::GrpcStatusAdapter;
+#[cfg(feature = "adapters-http")]
+use passage_adapters_http::HttpStatusAdapter;
+use passage_core::ProtocolVersion;
+use serde_json::value::RawValue;
+use std::fmt::{Display, Formatter};
+
+/// Runtime-selected status adapter.
+///
+/// Wraps every built-in and feature-gated [`StatusAdapter`] implementation behind a single enum.
+#[derive(Debug)]
+pub enum DynStatusAdapter {
+    /// Returns a fixed, pre-configured server status.
+    Fixed(FixedStatusAdapter),
+    /// Retrieves status from an external gRPC service.
+    #[cfg(feature = "adapters-grpc")]
+    Grpc(GrpcStatusAdapter),
+    /// Periodically polls a remote HTTP endpoint for the server status.
+    #[cfg(feature = "adapters-http")]
+    Http(HttpStatusAdapter),
+    /// Answers only once told to, so that a test can hold a connection mid-adapter.
+    #[cfg(test)]
+    Held(crate::adapter::held::HeldStatusAdapter),
+}
+
+impl Display for DynStatusAdapter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Fixed(_) => write!(f, "fixed"),
+            #[cfg(feature = "adapters-grpc")]
+            Self::Grpc(_) => write!(f, "grpc"),
+            #[cfg(feature = "adapters-http")]
+            Self::Http(_) => write!(f, "http"),
+            #[cfg(test)]
+            Self::Held(_) => write!(f, "held"),
+        }
+    }
+}
+
+impl StatusAdapter for DynStatusAdapter {
+    async fn status(&self, client: &Client) -> passage_adapters::Result<Option<ServerStatus>> {
+        match self {
+            DynStatusAdapter::Fixed(adapter) => adapter.status(client).await,
+            #[cfg(feature = "adapters-grpc")]
+            DynStatusAdapter::Grpc(adapter) => adapter.status(client).await,
+            #[cfg(feature = "adapters-http")]
+            DynStatusAdapter::Http(adapter) => adapter.status(client).await,
+            #[cfg(test)]
+            DynStatusAdapter::Held(adapter) => adapter.status(client).await,
+        }
+    }
+}
+
+impl DynStatusAdapter {
+    /// Constructs the adapter described by `config`, establishing any required connections.
+    pub async fn from_config(
+        config: config::StatusAdapter,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        #[allow(unreachable_patterns)]
+        match config {
+            config::StatusAdapter::Fixed(config) => {
+                let description = config
+                    .description
+                    .and_then(|str| RawValue::from_string(str).ok());
+                let adapter = FixedStatusAdapter::new(
+                    Some(ServerStatus {
+                        version: ServerVersion {
+                            name: config.name,
+                            protocol: ProtocolVersion::UNKNOWN,
+                        },
+                        players: None,
+                        description,
+                        favicon: config.favicon,
+                        enforces_secure_chat: config.enforces_secure_chat,
+                    }),
+                    config.preferred_version,
+                    config.min_version,
+                    config.max_version,
+                );
+                Ok(DynStatusAdapter::Fixed(adapter))
+            }
+            #[cfg(feature = "adapters-grpc")]
+            config::StatusAdapter::Grpc(config) => {
+                let adapter = GrpcStatusAdapter::new(config.address).await?;
+                Ok(DynStatusAdapter::Grpc(adapter))
+            }
+            #[cfg(feature = "adapters-http")]
+            config::StatusAdapter::Http(config) => {
+                let adapter = HttpStatusAdapter::new(config.address, config.cache_duration)?;
+                Ok(DynStatusAdapter::Http(adapter))
+            }
+            _ => Err("unknown status adapter configured".into()),
+        }
+    }
+}
