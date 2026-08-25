@@ -1,5 +1,6 @@
 [package]
 name = "passage-driver"
+description = "General-purpose backbone for the Minecraft (Java) protocol"
 version.workspace = true
 repository.workspace = true
 documentation.workspace = true
@@ -8,7 +9,13 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+bytes = { workspace = true }
 futures = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "time"] }
-tokio-util = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }
+tokio-util = { workspace = true, features = ["rt", "codec"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util", "io-util", "macros", "time"] }

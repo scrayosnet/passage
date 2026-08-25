@@ -3062,10 +3062,13 @@ dependencies = [
 name = "passage-driver"
 version = "1.0.0"
 dependencies = [
+ "bytes",
  "futures",
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

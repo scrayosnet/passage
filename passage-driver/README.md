@@ -23,3 +23,22 @@ also fix issues with the current implementation.
   - It uses hooks of its own to implement and overwrite logic
 - Ontop of the server, the Passage router with its adapter can be implemented (or configured).
 - The application should keep the telemetry and even expand upon it by having better traces
+
+## Design proposals
+
+[`docs/`](docs/README.md) works these requirements into concrete proposals -- one document per
+decision, each with the options, their trade-offs and a recommendation:
+
+| Document                                                        | Decision                                              |
+|-----------------------------------------------------------------|-------------------------------------------------------|
+| [01-problem-analysis.md](docs/01-problem-analysis.md)           | What the current implementation gets wrong, and why   |
+| [02-versioning.md](docs/02-versioning.md)                       | How packets carry protocol-version differences        |
+| [03-dispatch.md](docs/03-dispatch.md)                           | How packets reach protocol logic                      |
+| [04-runtime.md](docs/04-runtime.md)                             | How a connection is driven, ordered and backpressured |
+| [05-errors-and-hardening.md](docs/05-errors-and-hardening.md)   | Error taxonomy, limits, and the no-panic rules        |
+| [06-layering-and-telemetry.md](docs/06-layering-and-telemetry.md)| Crate layering, adapters, tracing and metrics        |
+| [07-reference-implementation.md](docs/07-reference-implementation.md) | The working code in `src/`, and what it proves    |
+
+The recommended option of every proposal is implemented in this crate -- including a worked packet
+set and server flow in [`src/demo/`](src/demo) -- so it can be judged by running
+`cargo test -p passage-driver` rather than by reading prose alone.
