@@ -1,0 +1,14 @@
+[package]
+name = "passage-driver"
+version.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+futures = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "time"] }
+tokio-util = { workspace = true }
+thiserror = { workspace = true }

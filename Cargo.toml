@@ -1,5 +1,5 @@
 [workspace]
-members = ["passage-adapters", "passage-protocol", "passage-packets", "passage-adapters/grpc", "passage-adapters/agones", "passage-adapters/http", "passage-adapters/dns"]
+members = ["passage-adapters", "passage-protocol", "passage-packets", "passage-adapters/grpc", "passage-adapters/agones", "passage-adapters/http", "passage-adapters/dns", "passage-driver"]
 
 [workspace.package]
 version = "1.0.0"

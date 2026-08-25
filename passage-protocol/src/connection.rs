@@ -78,6 +78,18 @@ pub struct Connection<S, Stat, Disc, Auth, Loca> {
     client_locale: Option<String>,
 }
 
+trait Visitor<C, A> {
+    fn visit(&self, ctx: &C, acceptor: &A) -> Result<(), Error>;
+}
+
+trait Acceptor<C, V: Visitor<Self, C>>: Sized {
+    fn accept(&self, ctx: &C, visitor: &V) -> Result<(), Error> {
+        visitor.visit(ctx, self)
+    }
+}
+
+impl <T: Sized, C, V: Visitor<T, C>> Acceptor<C, V> for T {}
+
 impl<S, Stat, Disc, Auth, Loca> Connection<S, Stat, Disc, Auth, Loca>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync,
