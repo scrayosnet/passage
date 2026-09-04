@@ -28,7 +28,7 @@ Two independent axes: *who caused it* and *did the connection finish*.
 
 ```rust
 pub enum Class {
-    Peer,        // the peer sent something illegal: expected, counted, logged at debug
+    Peer,        // the peer sent something illegal, or stopped playing along: logged at debug
     Transport,   // the connection broke: not actionable
     Internal,    // our bug or a dependency failing: warn and report
 }
@@ -36,7 +36,8 @@ pub enum Class {
 pub enum Completion {
     Closed,      // a handler ended it (status answered, transfer sent, disconnect sent)
     PeerClosed,  // the peer hung up
-    Cancelled,   // shutdown or timeout
+    Cancelled,   // a shutdown
+    TimedOut,    // a deadline expired
 }
 ```
 
@@ -63,9 +64,64 @@ match result {
 different stories about who is talking to you:
 
 ```rust
-Eof · VarIntTooLong · VarIntNotCanonical · NegativeLength · LengthLimit
-TrailingBytes · Utf8 · FrameTooLarge · UnknownPacket · UnexpectedPacket · UnsupportedVersion
+Eof · VarIntTooLong · VarIntNotCanonical · NegativeLength · LengthLimit · TrailingBytes
+Utf8 · InvalidValue · FrameTooLarge · UnknownPacket · UnexpectedPacket · EarlyPacket
+UnsupportedVersion
 ```
+
+### Handlers must be able to classify their own failures
+
+The taxonomy above is only worth having if the layer above can use it, and for a while it could not:
+the only channel a handler had was `InternalError::Handler(Box<dyn Error>)`, hard-wired to
+`Class::Internal`. The demo showed exactly what that costs:
+
+```rust
+// a client that stops answering keep-alives -- reported as our bug
+return Flow::fail(Error::Internal(InternalError::Handler(
+    "client missed a keep-alive".into(),
+)));
+```
+
+A timeout is ordinary client behaviour. Classified `Internal`, it is logged at `warn` and reported to
+Sentry: the taxonomy's whole purpose, inverted, in the reference implementation of it. So the handler
+supplies both the blame and the label:
+
+```rust
+pub enum Error {
+    Protocol(ProtocolError),
+    Transport(std::io::Error),
+    Internal(InternalError),
+    Handler {
+        class: Class,
+        label: &'static str,   // low-cardinality, never peer-controlled, like every other label
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    Closed,
+}
+
+// at the call site
+Err(Error::peer("keep_alive_timeout", "the client missed a keep-alive"))
+```
+
+`Error` ended up *smaller* for it: `InternalError::Handler`'s other two users were a `JoinError`
+(gone with the task model, see [04-runtime.md](04-runtime.md#why-not-joinset)) and a `format!` string
+boxed into an error on the router's startup path -- which is now a `BuildError`.
+
+### Wiring mistakes are not connection errors
+
+```rust
+pub enum BuildError {
+    WrongDirection { packet, actual, expected },
+    IdOutOfRange { packet, id, version },
+    IdCollision { first, second, id, phase, version },
+    TooManyPackets { count, limit },
+}
+```
+
+A build error does not depend on any input, is the same on every run, and is discovered once:
+`RouterBuilder::build` either produces a router that works for every supported version or it fails at
+startup. Keeping these out of `Error` is why `Driver::new` cannot fail at all, and why there is no
+`validate()` call to forget.
 
 ## Hardening the wire layer
 
@@ -120,7 +176,9 @@ one, because it silently shifts every following field.
 ### Rule 3 -- Trailing bytes are an error
 
 ```rust
-reader.finish(Self::NAME)?;   // generated at the end of every decode
+// in the router's erased decoder: once, for every packet
+let packet = P::decode(&mut reader, version)?;
+reader.finish(P::NAME)?;
 ```
 
 If a packet decodes with bytes left over, our field list and the peer's disagree. Continuing means
@@ -128,19 +186,66 @@ every later packet is interpreted under a wrong assumption. This also catches ou
 version gains a field we have not modelled yet -- which is exactly how the 26.2 change should have
 surfaced.
 
-### Rule 4 -- Limits are configuration, not constants
+Note *where* the check lives. It used to be emitted into every generated decoder; now that decoders
+are written by hand it runs one level up, in dispatch, so no decoder can forget it or apply it
+inconsistently. Moving a per-instance obligation into a single choke point is worth more than
+generating it correctly N times.
+
+### Rule 4 -- Every field states its own limit
+
+```rust
+server_address: r.string("server_address", 255)?,     // a hostname
+body:           r.string("body", 32_768)?,            // a status JSON blob
+properties:     r.array("properties", 16, version)?,  // vanilla sends one
+```
+
+The earlier design had a crate-wide `Limits::max_string_len` of `32_767 * 3` = 98 301 bytes, applied
+to every string in every packet, because a generated codec has no way to say anything else. One
+number for a hostname and a chat component is simultaneously far too loose and, eventually, too
+tight.
+
+So `Limits` shrank to the two things that genuinely are connection-wide:
 
 ```rust
 pub struct Limits {
-    pub max_frame_len: usize,      // 8 KiB
-    pub max_string_len: usize,     // protocol maximum; individual fields should be far smaller
-    pub max_array_len: usize,      // 1024
+    pub max_frame_len: usize,      // 8 KiB -- enforced in *both* directions
     pub canonical_varints: bool,   // true
 }
 ```
 
-A status-only route can afford much tighter limits than a login route. Per-field limits are still
-worth adding (`server_address` needs 255 bytes, not 98 301).
+`max_string_len` and `max_array_len` are gone rather than deprecated: once every field named its own
+bound, nothing read them. `max_frame_len` bounds all of them transitively anyway -- no field can be
+longer than the frame carrying it -- so the per-field number is a tightening, never the only defence.
+
+A status-only route can still afford a much smaller `max_frame_len` than a login route, which is why
+limits remain configuration rather than constants.
+
+### Rule 5 -- The outbound path checks its casts too
+
+The reader honours rule 1 scrupulously; the writer used to do this:
+
+```rust
+writer.var_int(item.bytes.len() as i32);   // wraps above 2 GiB, and no frame-size check
+```
+
+Three of those existed (frame length, byte-slice length, array length). None was reachable, because
+everything Passage sends it built itself -- but "unreachable given current callers" is not the
+standard the module sets, and the failure mode is a length prefix that disagrees with its payload,
+which is the hardest kind of protocol bug to diagnose from the other end. Lengths now go through one
+checked path:
+
+```rust
+pub fn length(&mut self, value: usize) -> Result<()> {
+    if value > self.limits.max_frame_len {
+        return Err(InternalError::OversizedFrame { packet: self.packet, length: value, limit: .. }.into());
+    }
+    self.var_int(value as i32);   // bounded, so lossless
+    Ok(())
+}
+```
+
+It is an `InternalError` and it names the packet, because reaching it means we built something we
+should not have. `Writer` carries the packet name for exactly this message.
 
 ## No-panic rules
 
@@ -158,31 +263,38 @@ and, with Sentry's panic integration, peer-triggerable error reporting.
 * `Duration`/`SystemTime` arithmetic is our own data, but `expect("time error")` is still a panic; it
   belongs in the `Internal` class, not in an `expect`.
 
-Panics that do slip through are contained: `JoinSet` reports a panicking detached task as
-`JoinError`, which the driver turns into `Class::Internal` rather than letting it propagate.
+Background tasks are polled on the connection's own task rather than spawned, so a panic in one takes
+that connection down instead of being caught as a `JoinError`. That is a deliberate trade for a much
+smaller task model; see [04-runtime.md](04-runtime.md#why-not-joinset). Whoever spawns the connection
+observes the panic either way, and under the rules above a panic on the parse path is a bug rather
+than something a peer can reach.
 
 ## Resource budgets
 
-Missing from the reference implementation and worth adding early:
+Two are now in the driver, because it owns the clock and the socket:
 
-| Budget                   | Why                                                                                     |
-|--------------------------|-----------------------------------------------------------------------------------------|
-| Per-phase deadline       | A connection idling in the login phase costs a task, a socket and (after selection) a backend slot |
-| Max packets per phase    | Bounds "send `ClientInformation` a million times" without needing per-packet rate limits |
-| Max total bytes          | Bounds the cheap version of the same attack                                              |
-| Concurrent connections per IP | Already present as `RateLimiter`; keep it, and count *rejections* as a metric        |
+| Budget                        | Status | Why                                                                              |
+|-------------------------------|--------|----------------------------------------------------------------------------------|
+| `max_idle`                    | done   | A peer that connects and says nothing costs a task and a socket for free          |
+| `max_lifetime`                | done   | The idle timer resets on every frame, so a peer could hold a connection open forever by pinging; this is also the backstop for a stalled exclusive task |
+| Max packets per phase         | open   | Bounds "send `ClientInformation` a million times" without per-packet rate limits  |
+| Max total bytes               | open   | Bounds the cheap version of the same attack                                       |
+| Per-phase deadline            | open   | The handshake should take milliseconds; a global cap is coarse for that            |
+| Concurrent connections per IP | keep   | Already present as `RateLimiter`; keep it, and count *rejections* as a metric      |
 
-The existing global `connection_timeout` covers the worst case but is far too coarse: the handshake
-should take milliseconds.
+Both implemented budgets end the connection as `Completion::TimedOut` -- a completion, not an error,
+because a client that went away is not a failure. Note that the caller cannot substitute
+`tokio::time::timeout(driver.run())` for these: that drops the future mid-flight, so the shutdown
+path never runs and background tasks are not cancelled cleanly.
 
 ## Testing this layer
 
 | Technique                        | What it catches                                                                 |
 |----------------------------------|---------------------------------------------------------------------------------|
 | Unit tests per hostile input      | Regressions on the four known defects (implemented, `wire::tests`)               |
-| Round-trip property tests per version | Codec asymmetry between encode and decode                                    |
+| Round-trip tests per packet per version | Codec asymmetry between encode and decode -- load-bearing now that codecs are hand-written (implemented, `demo::packets::tests::every_packet_roundtrips_in_every_version`) |
 | Golden-byte tests                 | Silent wire-format changes that still round-trip                                  |
-| `cargo fuzz` over `FrameCodec` + `Bound::dispatch` | Everything above, plus the combinations nobody thought of; the target is ~20 lines and needs no network |
+| `cargo fuzz` over `FrameCodec` + `Router::dispatch` | Everything above, plus the combinations nobody thought of; the target is ~20 lines and needs no network |
 | Connection-level tests over `tokio::io::duplex` | Ordering, backpressure, completion classification (implemented, `tests/flow.rs`) |
 
 A fuzz target is the highest-value missing piece: the decode path is a pure function from

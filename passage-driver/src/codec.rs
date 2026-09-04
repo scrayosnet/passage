@@ -5,7 +5,7 @@
 //! packet is, which is what lets the same codec serve a client, a server, and a test harness.
 
 use crate::error::{Error, InternalError, ProtocolError, Result};
-use crate::packet::Packet;
+use crate::packet::{AnyPacket, Packet};
 use crate::version::ProtocolVersion;
 use crate::wire::{Limits, Reader, Writer};
 use bytes::{Bytes, BytesMut};
@@ -39,11 +39,6 @@ pub struct Frame {
 }
 
 /// A pre-encoded outbound packet: the ID varint followed by the payload, without a length prefix.
-///
-/// Handlers encode packets themselves (they know the version), and the driver only frames and
-/// encrypts. This keeps serialisation off the driver's hot path and, more importantly, makes the
-/// order in which bytes hit the socket depend on the order of operations, not on when a handler
-/// happened to finish encoding.
 #[derive(Clone, Debug)]
 pub struct Encoded {
     /// The packet name, for tracing and metrics.
@@ -56,24 +51,57 @@ pub struct Encoded {
 impl Encoded {
     /// Encodes a packet for the given protocol version.
     ///
-    /// This is the single place where an outbound packet ID is resolved. Both the server side
-    /// ([`ConnHandle::send`](crate::conn::ConnHandle::send)) and any client go through it, so
-    /// neither can drift from the ID table in the packet declaration.
-    pub fn of<P: Packet>(packet: &P, version: ProtocolVersion) -> Result<Self> {
-        let id = P::id(version).ok_or(InternalError::PacketNotInVersion {
-            packet: P::NAME,
+    /// This and [`Encoded::of_any`] are the only places an outbound packet ID is resolved, so no
+    /// call site can drift from the ID table in the packet's own declaration.
+    pub fn of<P: Packet>(packet: &P, version: ProtocolVersion, limits: Limits) -> Result<Self> {
+        Self::build(P::NAME, P::id(version), version, limits, |w| {
+            packet.encode(w, version)
+        })
+    }
+
+    /// Encodes a type-erased packet, as carried by [`Op::Send`](crate::conn::Op::Send).
+    pub fn of_any(
+        packet: &dyn AnyPacket,
+        version: ProtocolVersion,
+        limits: Limits,
+    ) -> Result<Self> {
+        Self::build(packet.name(), packet.id(version), version, limits, |w| {
+            packet.encode(w, version)
+        })
+    }
+
+    fn build(
+        name: &'static str,
+        id: Option<i32>,
+        version: ProtocolVersion,
+        limits: Limits,
+        encode: impl FnOnce(&mut Writer<'_>) -> Result<()>,
+    ) -> Result<Self> {
+        // Sending a packet that does not exist in the peer's version is an internal error, not a
+        // silent no-op: the alternative is a client waiting forever for something we never sent.
+        let id = id.ok_or(InternalError::PacketNotInVersion {
+            packet: name,
             version,
         })?;
 
         let mut buf = BytesMut::with_capacity(64);
         {
-            let mut writer = Writer::new(&mut buf);
+            let mut writer = Writer::new(&mut buf, name, limits);
             writer.var_int(id);
-            packet.encode(&mut writer, version)?;
+            encode(&mut writer)?;
+        }
+
+        if buf.len() > limits.max_frame_len {
+            return Err(InternalError::OversizedFrame {
+                packet: name,
+                length: buf.len(),
+                limit: limits.max_frame_len,
+            }
+            .into());
         }
 
         Ok(Self {
-            name: P::NAME,
+            name,
             bytes: buf.freeze(),
         })
     }
@@ -177,10 +205,13 @@ impl Encoder<Encoded> for FrameCodec {
 
     fn encode(&mut self, item: Encoded, dst: &mut BytesMut) -> Result<()> {
         let plain_until = dst.len();
-        let mut writer = Writer::new(dst);
-        // `Encoded::bytes` already contains the ID varint, so its length is the frame length.
-        writer.var_int(item.bytes.len() as i32);
-        writer.raw(&item.bytes);
+        {
+            let mut writer = Writer::new(dst, item.name, self.limits);
+            // `Encoded::bytes` already contains the ID varint, so its length is the frame length.
+            // `length` refuses anything that would not fit, rather than wrapping the cast.
+            writer.length(item.bytes.len())?;
+            writer.raw(&item.bytes);
+        }
 
         if let Some(cipher) = self.cipher.as_mut() {
             cipher.encrypt(&mut dst[plain_until..]);
@@ -227,7 +258,7 @@ mod tests {
 
     fn encoded(id: i32, payload: &[u8]) -> Encoded {
         let mut buf = BytesMut::new();
-        let mut writer = Writer::new(&mut buf);
+        let mut writer = Writer::new(&mut buf, "Test", Limits::default());
         writer.var_int(id);
         writer.raw(payload);
         Encoded {
@@ -280,12 +311,28 @@ mod tests {
         });
         let mut buf = BytesMut::new();
         // Announce a 1 MiB frame in three bytes and send nothing else.
-        Writer::new(&mut buf).var_int(1024 * 1024);
+        Writer::new(&mut buf, "Test", Limits::default()).var_int(1024 * 1024);
 
         let err = codec.decode(&mut buf).expect_err("must reject");
         assert!(matches!(
             err,
             Error::Protocol(ProtocolError::FrameTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn an_oversized_frame_is_refused_on_the_way_out_too() {
+        // The mirror of the test above: our own bug must not become the peer's parsing problem.
+        let mut codec = FrameCodec::new(Limits {
+            max_frame_len: 16,
+            ..Limits::default()
+        });
+        let err = codec
+            .encode(encoded(0x00, &[0u8; 64]), &mut BytesMut::new())
+            .expect_err("must refuse");
+        assert!(matches!(
+            err,
+            Error::Internal(InternalError::OversizedFrame { .. })
         ));
     }
 

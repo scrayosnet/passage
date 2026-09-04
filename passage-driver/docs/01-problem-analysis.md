@@ -58,7 +58,7 @@ let handshake = match_packet! { packet,
 }?;
 ```
 
-`SCRATCH.md` already flags the consequence:
+The early `SCRATCH.md` sketch (since folded into these documents) already flagged the consequence:
 
 > ```rust
 > // TODO: The match should be defined at once place, not two (other is the packet)

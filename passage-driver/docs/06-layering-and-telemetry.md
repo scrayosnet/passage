@@ -34,7 +34,14 @@ Two deliberate changes from today's layout:
 | Limits, deadlines, unknown-packet policy | driver (config) | Enforced in one place, configured per route          |
 | Phase transitions, keep-alive policy     | server    | Protocol semantics                                         |
 | Cookies, encryption handshake, auth      | server    | Passage policy, not protocol mechanics                     |
+| Log levels and metric emission           | server / passage | *What* to record is policy; the driver only supplies enough to decide it |
 | Route matching, adapter selection        | passage   | Deployment concern                                         |
+
+The `log_completion` helper is the smallest example of the second-to-last row: it started out in
+`driver.rs` and belongs above it, because a library that picks its own log levels has taken a
+decision away from its caller. What the driver owes the layer above is `Completion` for the happy
+paths and `Class` + `label()` for everything else. It currently lives in `demo::server`, and moves to
+`passage` with the rest of the observability wiring.
 
 ### `Router` per route, or per process?
 
@@ -54,17 +61,24 @@ unwieldy collapses into one field on a plain struct.
 
 `StatusAdapter`, `AuthenticationAdapter`, `DiscoveryAdapter`, `DiscoveryActionAdapter` and
 `LocalizationAdapter` are a good seam and none of this changes them. What changes is *where* they are
-called: from a handler that returns `Flow::later`, or from a detached task, instead of from the middle
-of a 470-line function. The `Rejected` error mapping to a localized disconnect packet becomes one
+called: from a task the handler hands to `ctx.exclusive` or `ctx.spawn`, instead of from the middle of
+a 470-line function. The `Rejected` error mapping to a localized disconnect packet becomes one
 helper:
 
 ```rust
-async fn reject(conn: &ConnHandle<Session>, locale: Option<&str>, key: &str) -> Result<Update<Session>> {
+async fn reject(conn: &ConnHandle<Session>, locale: Option<&str>, key: &str) -> Result<()> {
     let reason = localize(locale, key).await?;
-    conn.send(&Disconnect { reason })?;
-    conn.close()?;
-    Ok(Update::none())
+    conn.send(Disconnect { reason })?;
+    conn.close()
 }
+```
+
+An adapter that rejects a player is a `Class::Peer` failure, not an internal one, and the adapter
+layer is where that call is made:
+
+```rust
+Err(Rejected::NotWhitelisted) => Err(Error::peer("not_whitelisted", err)),
+Err(Rejected::Unreachable(e)) => Err(Error::internal("discovery_unreachable", e)),
 ```
 
 ## Telemetry
@@ -78,16 +92,20 @@ The current implementation instruments generously; the aim is better structure, 
 | `connection`         | session cookie, if present | `client.address`, `server.address`, `mc.protocol.version`, `mc.intent`, `route.name` |
 | `packet.read`        | `connection`      | `mc.packet.name`, `mc.packet.id`, `mc.phase`, `mc.packet.size`               |
 | `packet.write`       | `connection`      | same                                                                        |
-| `handler`            | `packet.read`     | `mc.packet.name`, `handler.async` (whether it returned `Pending`)            |
-| `adapter.<kind>`     | `handler`         | adapter type, outcome                                                       |
+| `handler`            | `packet.read`     | `mc.packet.name`                                                            |
+| `handler.task`       | `handler`         | `mc.packet.name`, `exclusive` (whether the peer was gated)                   |
+| `adapter.<kind>`     | `handler.task`    | adapter type, outcome                                                       |
 
 Two improvements over today:
 
 * **The driver emits the packet spans**, so handlers get instrumentation for free and cannot forget
   it. `Encoded.name` and the router's entry name exist for exactly this -- both are `&'static str`,
   so the label is free and can never contain peer data.
-* **`handler.async` makes the pause visible.** A phase that unexpectedly blocks reads shows up as a
-  handler span with a long duration, which is the thing you actually want to find.
+* **`exclusive` makes the gated window visible.** A handler is now always synchronous, so the
+  interesting duration is not the handler's but the *task's*: a `handler.task` span with
+  `exclusive = true` and a long duration is a window in which the peer was forbidden to speak, which
+  is exactly the thing you want to find. The driver knows both facts (it holds the flag and the
+  counter), so the span belongs to it rather than to the handler that started the task.
 
 Trace continuation through the session cookie (already implemented) is worth keeping: it is what
 makes a transfer chain across Passage instances one trace.
@@ -98,17 +116,28 @@ Keep the existing counters and add the ones the new error model makes possible:
 
 | Metric                             | Type      | Labels                                  |
 |------------------------------------|-----------|-----------------------------------------|
-| `passage.connections`              | counter   | `outcome` = closed/peer_closed/cancelled/error |
+| `passage.connections`              | counter   | `outcome` = closed/peer_closed/cancelled/timed_out/error |
 | `passage.connection.errors`        | counter   | `class` = peer/transport/internal, `kind` = `Error::label()` |
 | `passage.packets`                  | counter   | `direction`, `phase`, `packet`           |
 | `passage.packet.size`              | histogram | `direction`                              |
-| `passage.handler.duration`         | histogram | `packet`, `async`                        |
+| `passage.task.duration`            | histogram | `packet`, `exclusive`                    |
 | `passage.protocol.version`         | counter   | `version`                                |
 | `passage.connection.duration`      | histogram | `outcome`                                |
 
 `Error::label()` is deliberately a closed set of `&'static str`, so the error metric cannot blow up
 cardinality no matter what a peer sends. That is the property today's `err.to_string()` logging does
-not have.
+not have. Note that `Error::Handler` extends the set without breaking it: a handler supplies its own
+`&'static str` label, so the layer above can distinguish `not_whitelisted` from
+`keep_alive_timeout` without the driver knowing either name.
+
+Two labels worth watching once this is deployed, because they are new and they mean something
+specific:
+
+* `early_packet` -- a peer spoke while it was supposed to be waiting. A steady trickle is scanners
+  and odd clients; a step change after a release is the strictness trade in
+  [04-runtime.md](04-runtime.md#the-strictness-trade) going wrong, and the signal to reconsider it.
+* `unexpected_packet` -- a packet from the wrong phase, by name. Distinguishing this from
+  `unknown_packet` is the difference between "a client is confused" and "we are missing a definition".
 
 ### Logging levels, by class
 
@@ -119,4 +148,5 @@ not have.
 | `Internal`  | warn   | yes              |
 
 The point is that this table is decided once, in one function (`log_completion`), rather than at every
-call site.
+call site -- and that a handler can put its own failures in the right row by classifying them, rather
+than having every rejection land in `Internal` and page someone.

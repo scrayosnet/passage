@@ -5,8 +5,8 @@ general-purpose backbone for handling the Minecraft protocol. Instead of handlin
 sequentially in one big method, it uses hooks and handlers to implement the custom protocol logic.
 The backbone only provides the packet parsing and error handling.
 
-> The crate already contains some basic implementations as ideas on how to manage it. This is not
-> the final design and should be revised. Additional ideas are in SCRATCH.md.
+> The crate contains a working implementation of the design, including a worked packet set and
+> server flow, so it can be judged by running it. It is a proposal, not a commitment.
 
 ## Requirements
 
@@ -38,7 +38,34 @@ decision, each with the options, their trade-offs and a recommendation:
 | [05-errors-and-hardening.md](docs/05-errors-and-hardening.md)   | Error taxonomy, limits, and the no-panic rules        |
 | [06-layering-and-telemetry.md](docs/06-layering-and-telemetry.md)| Crate layering, adapters, tracing and metrics        |
 | [07-reference-implementation.md](docs/07-reference-implementation.md) | The working code in `src/`, and what it proves    |
+| [08-refinements.md](docs/08-refinements.md)                     | The review of the first implementation, and what changed |
 
 The recommended option of every proposal is implemented in this crate -- including a worked packet
 set and server flow in [`src/demo/`](src/demo) -- so it can be judged by running
 `cargo test -p passage-driver` rather than by reading prose alone.
+
+The first implementation was then reviewed, and three of its decisions were reversed: the `packet!`
+macro was replaced by hand-written codecs, the two ways of doing asynchronous work collapsed into one
+task model plus a read gate, and the deferred state `Update` became an ordinary operation.
+[08-refinements.md](docs/08-refinements.md) records the reasoning; the other documents were updated to
+match, and keep the "tried and removed" notes rather than pretending the earlier shape never existed.
+
+## Shape of a handler
+
+Every effect a handler has is an operation queued on the driver, which owns the socket, the
+connection state, the phase and the protocol version:
+
+```rust
+fn on_login_acknowledged(ctx: Ctx<'_, Session>, _packet: LoginAcknowledged) -> Result<()> {
+    ctx.set_phase(Phase::Configuration)?;
+
+    let conn = ctx.conn.clone();
+    // `spawn` keeps dispatch running (keep-alives must keep flowing); `exclusive` would require
+    // the peer to stay quiet until the task resolves.
+    ctx.spawn(async move {
+        let (host, port) = select_backend().await?;
+        conn.send(Transfer { host, port })?;
+        conn.close()
+    })
+}
+```

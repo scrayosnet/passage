@@ -9,6 +9,10 @@
 //! `Err(ConnectionClosed)`. Using an error variant for the happy path is how the previous
 //! implementation ended up with `Ok(()) | Err(Error::ConnectionClosed)` being treated identically
 //! at every call site -- one forgotten match arm away from logging normal traffic as a failure.
+//!
+//! Wiring mistakes are not in here at all. They are [`BuildError`]s, produced once by
+//! [`RouterBuilder::build`](crate::router::RouterBuilder::build) at startup, and a connection can
+//! never encounter one.
 
 use crate::packet::{Direction, Phase};
 use crate::version::ProtocolVersion;
@@ -16,8 +20,9 @@ use crate::version::ProtocolVersion;
 /// Who caused an error. This drives the observability and disconnect policy.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Class {
-    /// The peer sent something illegal. Expected in the wild (scanners, mods, bots): count it,
-    /// log it at `debug`, never page anyone. Do not report to error tracking.
+    /// The peer sent something illegal, or stopped playing along. Expected in the wild (scanners,
+    /// mods, bots, timeouts): count it, log it at `debug`, never page anyone. Do not report to
+    /// error tracking.
     Peer,
 
     /// The connection broke. Usually not actionable, log at `debug`.
@@ -95,6 +100,15 @@ pub enum ProtocolError {
         field: &'static str,
     },
 
+    /// A value was not one of the variants the protocol defines for its field.
+    #[error("invalid value {value} for field `{field}`")]
+    InvalidValue {
+        /// The field being read.
+        field: &'static str,
+        /// The value that was read.
+        value: i32,
+    },
+
     /// The frame length prefix exceeded the maximum frame size.
     #[error("frame length {length} exceeds limit of {limit}")]
     FrameTooLarge {
@@ -117,13 +131,28 @@ pub enum ProtocolError {
         id: i32,
     },
 
-    /// A packet arrived that is known but not acceptable right now.
-    #[error("unexpected packet `{packet}` in phase {phase:?}")]
+    /// A packet arrived that is registered, but in a different phase than the connection is in.
+    #[error("packet `{packet}` belongs to phase {expected:?} but arrived in phase {phase:?}")]
     UnexpectedPacket {
-        /// The packet that arrived.
+        /// The packet the ID resolves to in some other phase.
         packet: &'static str,
+        /// The phase that packet belongs to.
+        expected: Phase,
         /// The phase the connection was in.
         phase: Phase,
+    },
+
+    /// A packet arrived while the peer was required to stay quiet.
+    ///
+    /// The driver gates reads while an exclusive handler task is in flight (an authentication call,
+    /// a session-server round trip). A well-behaved peer waits for the answer, so a frame arriving
+    /// in that window was sent too early -- which is a protocol break, not backpressure.
+    #[error("packet id {id:#04x} arrived in phase {phase:?} while the peer had to wait")]
+    EarlyPacket {
+        /// The phase the connection was in.
+        phase: Phase,
+        /// The ID of the packet that arrived too early.
+        id: i32,
     },
 
     /// The peer's protocol version is not supported.
@@ -134,7 +163,7 @@ pub enum ProtocolError {
     },
 }
 
-/// An error caused by us: a bug, a misconfiguration, or a failing dependency.
+/// An error caused by us: a bug in the layer above the driver.
 #[derive(Debug, thiserror::Error)]
 pub enum InternalError {
     /// A packet does not exist in the connection's protocol version, but we tried to send it.
@@ -160,9 +189,20 @@ pub enum InternalError {
         version: ProtocolVersion,
     },
 
-    /// Anything a handler wants to bubble up.
-    #[error("{0}")]
-    Handler(Box<dyn std::error::Error + Send + Sync>),
+    /// A packet we built does not fit in a frame.
+    ///
+    /// The inbound path refuses oversized frames as a peer error; this is the same check on the way
+    /// out. Emitting a length prefix that disagreed with the payload would desynchronise the peer
+    /// with nothing to diagnose it from.
+    #[error("encoded `{packet}` is {length} bytes, which exceeds the frame limit of {limit}")]
+    OversizedFrame {
+        /// The packet being encoded.
+        packet: &'static str,
+        /// The encoded length.
+        length: usize,
+        /// The configured frame limit.
+        limit: usize,
+    },
 }
 
 /// The driver's error type.
@@ -180,6 +220,22 @@ pub enum Error {
     #[error(transparent)]
     Internal(#[from] InternalError),
 
+    /// Raised by a handler.
+    ///
+    /// The driver cannot know whether a failed authentication is the peer's fault, ours or a
+    /// dependency's, so the handler supplies both the blame and the metric label. Without this the
+    /// only channel a handler had was an internal error, which meant every ordinary rejection --
+    /// a missed keep-alive, an unverified profile -- was logged at `warn` and reported.
+    #[error("{source}")]
+    Handler {
+        /// Who is to blame.
+        class: Class,
+        /// A stable, low-cardinality metric label. Never peer-controlled.
+        label: &'static str,
+        /// The underlying error.
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     /// The connection is already gone, so the operation could not be carried out. This is not a
     /// failure of the connection -- it *is* the connection ending -- and callers usually ignore it.
     #[error("the connection is closed")]
@@ -187,6 +243,32 @@ pub enum Error {
 }
 
 impl Error {
+    /// Raises a handler error the peer is to blame for: a rejection, a timeout, a failed check.
+    #[must_use]
+    pub fn peer(
+        label: &'static str,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
+        Error::Handler {
+            class: Class::Peer,
+            label,
+            source: source.into(),
+        }
+    }
+
+    /// Raises a handler error we are to blame for: a bug, a misconfiguration, a failing dependency.
+    #[must_use]
+    pub fn internal(
+        label: &'static str,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
+        Error::Handler {
+            class: Class::Internal,
+            label,
+            source: source.into(),
+        }
+    }
+
     /// Who is to blame for this error.
     #[must_use]
     pub fn class(&self) -> Class {
@@ -194,6 +276,7 @@ impl Error {
             Error::Protocol(_) => Class::Peer,
             Error::Transport(_) | Error::Closed => Class::Transport,
             Error::Internal(_) => Class::Internal,
+            Error::Handler { class, .. } => *class,
         }
     }
 
@@ -209,13 +292,16 @@ impl Error {
                 ProtocolError::LengthLimit { .. } => "length_limit",
                 ProtocolError::TrailingBytes { .. } => "trailing_bytes",
                 ProtocolError::Utf8 { .. } => "utf8",
+                ProtocolError::InvalidValue { .. } => "invalid_value",
                 ProtocolError::FrameTooLarge { .. } => "frame_too_large",
                 ProtocolError::UnknownPacket { .. } => "unknown_packet",
                 ProtocolError::UnexpectedPacket { .. } => "unexpected_packet",
+                ProtocolError::EarlyPacket { .. } => "early_packet",
                 ProtocolError::UnsupportedVersion { .. } => "unsupported_version",
             },
             Error::Transport(_) => "transport",
             Error::Internal(_) => "internal",
+            Error::Handler { label, .. } => label,
             Error::Closed => "closed",
         }
     }
@@ -227,6 +313,65 @@ impl Error {
     pub fn is_incomplete(&self) -> bool {
         matches!(self, Error::Protocol(ProtocolError::Eof { .. }))
     }
+}
+
+/// A mistake in how the router was assembled.
+///
+/// These are separate from [`Error`] on purpose. A build error is a wiring bug: it does not depend
+/// on any input, it is the same on every run, and it is discovered once --
+/// [`RouterBuilder::build`](crate::router::RouterBuilder::build) either produces a router that
+/// works for every supported version or it fails at startup. Keeping them out of [`Error`] is why
+/// [`Driver::new`](crate::driver::Driver::new) cannot fail.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum BuildError {
+    /// A packet was registered on a router that does not receive packets travelling its way.
+    #[error("packet `{packet}` travels {actual:?} but this router receives {expected:?} packets")]
+    WrongDirection {
+        /// The packet that was registered.
+        packet: &'static str,
+        /// The direction the packet travels in.
+        actual: Direction,
+        /// The direction the router receives.
+        expected: Direction,
+    },
+
+    /// A packet's ID is outside the range the dispatch table covers.
+    #[error("packet `{packet}` has out-of-range id {id} in version {version}")]
+    IdOutOfRange {
+        /// The packet that was registered.
+        packet: &'static str,
+        /// The offending ID.
+        id: i32,
+        /// The version the ID was resolved for.
+        version: ProtocolVersion,
+    },
+
+    /// Two packets resolve to the same ID in the same phase and version.
+    #[error(
+        "packets `{first}` and `{second}` both claim id {id:#04x} in phase {phase:?} of version \
+         {version}"
+    )]
+    IdCollision {
+        /// The packet that claimed the ID first.
+        first: &'static str,
+        /// The packet that collided with it.
+        second: &'static str,
+        /// The contested ID.
+        id: i32,
+        /// The phase both packets belong to.
+        phase: Phase,
+        /// The version the IDs were resolved for.
+        version: ProtocolVersion,
+    },
+
+    /// More packets were registered than the dispatch table can index.
+    #[error("{count} packets registered, but the dispatch table indexes at most {limit}")]
+    TooManyPackets {
+        /// The number of registered packets.
+        count: usize,
+        /// The maximum the table can index.
+        limit: usize,
+    },
 }
 
 /// The driver's result type.

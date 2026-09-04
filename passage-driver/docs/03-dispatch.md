@@ -5,7 +5,7 @@ four options below satisfy that literally; they differ in what happens when the 
 
 ## C1 -- One trait with a method per packet
 
-The shape in `src/hooks.rs` today:
+The shape the first sketch of this crate had (`src/hooks.rs`, since deleted):
 
 ```rust
 pub trait Hooks<S> {
@@ -30,7 +30,7 @@ major version bump, so it will lag behind the protocol exactly when it should no
 
 ## C2 -- Visitor
 
-`SCRATCH.md` explored this:
+The early `SCRATCH.md` sketch explored this:
 
 ```rust
 pub trait PacketVisitor<T: Packet> {
@@ -54,8 +54,8 @@ The version dimension makes it worse: the visitor's dispatch function still need
 Registration is generic; storage is erased. This is the Axum/Tonic shape.
 
 ```rust
-pub fn router() -> Router<Session> {
-    Router::new(Direction::Serverbound)
+pub fn router() -> Result<Router<Session>, BuildError> {
+    Router::builder(Direction::Serverbound)
         .unknown(UnknownPolicy::Reject)
         .on::<Intention, _>(on_intention)
         .on::<StatusRequest, _>(on_status_request)
@@ -64,27 +64,26 @@ pub fn router() -> Router<Session> {
         .on::<LoginAcknowledged, _>(on_login_acknowledged)
         .on::<KeepAliveResponse, _>(on_keep_alive_response)
         .on_tick(on_tick)
+        .build(SUPPORTED_VERSIONS.iter().copied())
 }
 
-fn on_ping_request(ctx: Ctx<'_, Session>, packet: PingRequest) -> Outcome<Session> {
-    Flow::from_result(
-        ctx.send(&PongResponse { payload: packet.payload })
-            .and_then(|()| ctx.conn.close()),
-    )
+fn on_ping_request(ctx: Ctx<'_, Session>, packet: PingRequest) -> Result<()> {
+    ctx.send(PongResponse { payload: packet.payload })?;
+    ctx.close()
 }
 ```
 
 `on::<P, _>` stores a closure that decodes `P` and calls the handler, so the decode and the handler
-that consumes it are created together and cannot disagree:
+that consumes it are created together and cannot disagree. It is also the one place the
+trailing-bytes check runs, which is why no hand-written decoder has to remember it:
 
 ```rust
-let erased: Erased<S> = Box::new(move |ctx: Ctx<'_, S>, payload: &[u8]| {
+let dispatch: Dispatcher<S> = Box::new(move |ctx: Ctx<'_, S>, payload: &[u8]| {
     let version = ctx.version();
     let mut reader = Reader::new(payload, ctx.limits());
-    match P::decode(&mut reader, version) {
-        Ok(packet) => handler.call(ctx, packet),
-        Err(err) => Flow::Ready(Err(err)),
-    }
+    let packet = P::decode(&mut reader, version)?;
+    reader.finish(P::NAME)?;
+    handler.call(ctx, packet)
 });
 ```
 
@@ -94,7 +93,24 @@ let erased: Erased<S> = Box::new(move |ctx: Ctx<'_, S>, payload: &[u8]| {
 | Handlers are plain functions: unit-testable without a connection                     | "Packet has no handler" is a runtime policy, not a compile error                           |
 | The router *is* the protocol surface, readable in one screen                          | Closures need explicit argument types to satisfy the higher-ranked `Fn` bound (see below)   |
 | Composable: build a base router and override or extend it per route                  | The type parameter `S` propagates through `Router`, `Ctx` and `ConnHandle`                  |
-| Direction and phase come from the packet, so a mis-registration is caught at startup |                                                                                            |
+| Direction and phase come from the packet, so a mis-registration is a `BuildError`    |                                                                                            |
+
+### Building is validating
+
+`RouterBuilder::build(versions)` is the only fallible step, and it is the *only* place a router can be
+wrong. It resolves every packet's ID at every supported version, so an ID collision, an out-of-range
+ID and a packet registered on a router travelling the wrong way are all startup failures. Two things
+follow:
+
+* `Driver::new` is infallible. Nothing about dispatch can go wrong once a connection is running.
+* A connection allocates no table. It takes an `Arc` of the one built for its version -- the earlier
+  design rebuilt five vectors per connection, twice (once in `Driver::new`, once when the handshake
+  changed the version).
+
+A version with no table -- anything outside the supported range, including the garbage a scanner
+sends -- gets the version-independent table, which is exactly the packets whose ID table starts at
+`ProtocolVersion::UNKNOWN`. That is enough to answer a status ping and refuse a login, and it means
+the `i32` version space cannot cost memory.
 
 The runtime-policy downside is mitigated by making it explicit and strict by default:
 
@@ -110,10 +126,10 @@ arguments, because the blanket impl needs `Fn` for *any* lifetime:
 
 ```rust
 // fails: "implementation of `FnOnce` is not general enough"
-.on::<StatusRequest, _>(|ctx, packet| Flow::done())
+.on::<StatusRequest, _>(|ctx, packet| Ok(()))
 
 // works
-.on::<StatusRequest, _>(|ctx: Ctx<'_, Session>, packet: StatusRequest| Flow::done())
+.on::<StatusRequest, _>(|ctx: Ctx<'_, Session>, packet: StatusRequest| Ok(()))
 ```
 
 Named handler functions -- which is what a real flow uses anyway -- have no such problem. Worth
@@ -139,6 +155,14 @@ impl Connection<Login> {
 **Recommendation: C3**, with the *runtime* half of C4 kept: the driver tracks a `Phase`, dispatch is
 keyed by it, and a packet from the wrong phase is a `Peer` error rather than a mis-dispatch. That
 gets the safety property without the type gymnastics.
+
+One honest limit: because IDs are only unique *within* a phase, a packet from another phase whose ID
+happens to be taken in the current one is decoded as the resident packet -- `LoginStart` is `0x00` in
+Login and `StatusRequest` is `0x00` in Status, and nothing can tell them apart. That case surfaces as
+`TrailingBytes` or a decode error, which is correct but uninformative, and no dispatch design fixes
+it. What *is* fixed is the case where the ID is free in the current phase: dispatch looks it up in
+the others and reports `UnexpectedPacket { packet, expected, phase }` by name, rather than sending
+whoever reads the log looking for a missing packet definition.
 
 ## The tension worth naming: scripted vs. event-driven
 
@@ -169,19 +193,19 @@ let response = ctx.recv::<CookieResponse>().await?;   // hypothetical
 |                                                     | A registered interest that never arrives is a leak, so it needs its own timeout |
 |                                                     | Reentrancy: the handler is suspended inside dispatch while dispatch continues   |
 
-### Option 2 -- One mechanism, but input pauses while a handler runs *(chosen)*
+### Option 2 -- One mechanism, and the peer is told to wait *(chosen)*
 
-An asynchronous handler returns `Flow::Pending`, and the driver stops reading until it resolves. The
-flow stays as sequential as it needs to be, without a second dispatch path:
+A handler that has to wait for something external hands the work to `ctx.exclusive(..)`, which says
+"the peer has nothing to send until this resolves". The flow stays as sequential as it needs to be,
+without a second dispatch path:
 
 ```rust
-fn on_login_start(ctx: Ctx<'_, Session>, packet: LoginStart) -> Outcome<Session> {
+fn on_login_start(ctx: Ctx<'_, Session>, packet: LoginStart) -> Result<()> {
     let conn = ctx.conn.clone();
-    let version = ctx.version();
-    Flow::later(async move {
+    ctx.exclusive(async move {
         let (name, id) = authenticate(&packet.user_name).await?;   // takes as long as it takes
-        conn.send(&LoginSuccess { /* ... */ })?;
-        Ok(Update::apply(move |s: &mut Session| s.profile = Some((name, id))))
+        conn.update(move |s: &mut Session| s.profile = Some((name, id)))?;
+        conn.send(LoginSuccess { /* ... */ })
     })
 }
 ```
@@ -190,11 +214,13 @@ fn on_login_start(ctx: Ctx<'_, Session>, packet: LoginStart) -> Outcome<Session>
 |-----------------------------------------------------------------------------|-------------------------------------------------------------------------|
 | One dispatch path; no interest registry, no reentrancy                       | A multi-round-trip exchange becomes several handlers plus session state  |
 | Ordering guaranteed: no packet is dispatched into a half-finished transition  | The "script" is split across functions rather than being one function    |
-| Backpressure for free: a slow handler stops us buffering input               |                                                                         |
+| An early packet is *reported*, not buffered and replayed                     | Stricter than the protocol strictly requires (see [04-runtime.md](04-runtime.md#the-read-gate)) |
 
 For Passage specifically, the multi-round-trip parts (cookie request/response, encryption
 request/response) are two handlers and one `Option` in the session each -- an acceptable price for
-having only one mechanism. This is proven by `tests/flow.rs::an_async_handler_blocks_further_dispatch`.
+having only one mechanism. This is proven by
+`tests/flow.rs::a_packet_sent_during_an_exclusive_task_is_a_protocol_error` and
+`::the_login_flow_completes_when_the_client_waits_its_turn`.
 
 ## Middleware
 
@@ -202,7 +228,7 @@ Not implemented, and worth resisting until there is a second user. If it becomes
 natural seam is a `Layer` around the erased handler:
 
 ```rust
-type Erased<S> = Box<dyn for<'c> Fn(Ctx<'c, S>, &[u8]) -> Outcome<S> + Send + Sync>;
+type Dispatcher<S> = Box<dyn for<'c> Fn(Ctx<'c, S>, &[u8]) -> Result<()> + Send + Sync>;
 ```
 
 Everything a `tower::Layer` would do (tracing spans, metrics, rate limits, per-phase deadlines) can

@@ -1,36 +1,45 @@
 //! Bounds-checked primitives for the Minecraft wire format.
 //!
 //! Every read is checked against the bytes that are actually available *and* against an explicit
-//! [`Limits`] policy. The two rules that hold everywhere in this module:
+//! limit. The three rules that hold everywhere in this module:
 //!
 //! * **Never allocate based on a number you have not received the bytes for.** A length prefix is
 //!   validated against `remaining()` before it is used, so a 5 byte packet can never cause a
 //!   gigabyte allocation.
 //! * **Never let peer input reach an arithmetic operation that can panic.** No `as usize` on a
 //!   possibly-negative value, no indexing without a check, no unchecked shifts.
+//! * **Never emit a length that disagrees with its payload.** The outbound path checks its casts
+//!   too: a wrapped length prefix is the hardest kind of protocol bug to diagnose from the other
+//!   end.
 //!
 //! [`Reader`] borrows its buffer, so decoding a packet copies only what ends up in owned fields
 //! (strings). Unknown packets cost nothing but the frame split.
+//!
+//! # Encodings are chosen by the call, not by the type
+//!
+//! There is no `Wire` impl for `i32`, because the protocol has three different encodings for it.
+//! A decoder says `r.var_int()` or `r.u16()` and the choice is visible at the point it is made.
+//! [`Wire`] exists only for *composite* values that appear in more than one packet.
 
-use crate::error::{ProtocolError, Result};
+use crate::error::{InternalError, ProtocolError, Result};
 use crate::version::ProtocolVersion;
 use bytes::{BufMut, BytesMut};
 use uuid::Uuid;
 
-/// The size and length policy applied while decoding.
+/// The connection-wide size policy.
 ///
 /// Limits are data, not constants, so a route can tighten them (e.g. a status-only route needs
 /// tiny frames) without touching any codec.
-#[derive(Copy, Clone, Debug)]
+///
+/// There is deliberately no "maximum string length" or "maximum array length" here. Every field
+/// names its own bound where it is read (`r.string("server_address", 255)`), because a hostname and
+/// a chat component have nothing to do with each other, and one shared number for both is a limit
+/// that is simultaneously too tight and far too loose. [`Limits::max_frame_len`] bounds all of them
+/// transitively: no field can be longer than the frame that carries it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
-    /// Maximum length of a single frame, excluding the length prefix.
+    /// Maximum length of a single frame, excluding the length prefix. Enforced in both directions.
     pub max_frame_len: usize,
-
-    /// Maximum length of a string field in bytes.
-    pub max_string_len: usize,
-
-    /// Maximum number of elements in a length-prefixed array or byte blob.
-    pub max_array_len: usize,
 
     /// Whether non-canonical (overlong) `VarInt`/`VarLong` encodings are rejected.
     ///
@@ -46,10 +55,6 @@ impl Default for Limits {
             // Passage never legitimately receives large packets; the biggest is a status response
             // it sends itself.
             max_frame_len: 8 * 1024,
-            // The protocol caps strings at 32767 UTF-16 code units, i.e. at most 3 bytes each plus
-            // the prefix. Individual fields should use something far smaller.
-            max_string_len: 32_767 * 3,
-            max_array_len: 1024,
             canonical_varints: true,
         }
     }
@@ -234,6 +239,44 @@ impl<'a> Reader<'a> {
         String::from_utf8(bytes.to_vec()).map_err(|_| ProtocolError::Utf8 { field }.into())
     }
 
+    /// Reads a length-prefixed array of composite values.
+    ///
+    /// The element count is checked against the bytes left in the frame first, so a claimed count
+    /// can never make us reserve memory the peer has not paid for.
+    pub fn array<T: Wire>(
+        &mut self,
+        field: &'static str,
+        limit: usize,
+        version: ProtocolVersion,
+    ) -> Result<Vec<T>> {
+        let count = self.length(field, limit)?;
+        let mut values = Vec::with_capacity(count);
+        for _ in 0..count {
+            values.push(T::read(self, version)?);
+        }
+        Ok(values)
+    }
+
+    /// Reads a value that only exists once `condition` holds, and [`None`] otherwise.
+    ///
+    /// This is the read half of a version-gated field. It is a plain `if` written once, so that
+    /// `decode` bodies stay a flat list of fields:
+    ///
+    /// ```ignore
+    /// session_id: r.gated(version.has(Feature::LoginSuccessSessionId), Reader::uuid)?,
+    /// ```
+    pub fn gated<T>(
+        &mut self,
+        condition: bool,
+        read: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<Option<T>> {
+        if condition {
+            read(self).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Borrows the rest of the buffer without consuming it.
     #[must_use]
     pub fn peek_rest(&self) -> &'a [u8] {
@@ -249,8 +292,9 @@ impl<'a> Reader<'a> {
 
     /// Asserts that the whole payload was consumed.
     ///
-    /// Called by generated decoders. A packet with trailing bytes means our field list and the
-    /// peer's disagree -- continuing would decode later packets against a wrong assumption.
+    /// The [`Router`](crate::router::Router) calls this after every decode, so no individual
+    /// decoder has to remember to. A packet with trailing bytes means our field list and the peer's
+    /// disagree -- continuing would decode later packets against a wrong assumption.
     pub fn finish(&self, packet: &'static str) -> Result<()> {
         let remaining = self.remaining();
         if remaining > 0 {
@@ -263,13 +307,22 @@ impl<'a> Reader<'a> {
 /// A writer for the Minecraft wire format.
 pub struct Writer<'a> {
     buf: &'a mut BytesMut,
+    packet: &'static str,
+    limits: Limits,
 }
 
 impl<'a> Writer<'a> {
-    /// Creates a writer that appends to `buf`.
+    /// Creates a writer that appends to `buf` on behalf of `packet`.
+    ///
+    /// The packet name and limits are carried so that a length that cannot be encoded is reported
+    /// against the packet that caused it, rather than wrapping silently.
     #[must_use]
-    pub fn new(buf: &'a mut BytesMut) -> Self {
-        Self { buf }
+    pub fn new(buf: &'a mut BytesMut, packet: &'static str, limits: Limits) -> Self {
+        Self {
+            buf,
+            packet,
+            limits,
+        }
     }
 
     /// The number of bytes written so far.
@@ -342,15 +395,43 @@ impl<'a> Writer<'a> {
         }
     }
 
+    /// Writes a length prefix, refusing lengths that do not fit a frame.
+    ///
+    /// Nothing we build legitimately reaches this bound. It exists because `len as i32` wraps, and
+    /// a wrapped prefix produces a frame the peer will misparse in a way neither side can explain.
+    pub fn length(&mut self, value: usize) -> Result<()> {
+        if value > self.limits.max_frame_len {
+            return Err(InternalError::OversizedFrame {
+                packet: self.packet,
+                length: value,
+                limit: self.limits.max_frame_len,
+            }
+            .into());
+        }
+        // Bounded by `max_frame_len`, so the cast is lossless.
+        self.var_int(value as i32);
+        Ok(())
+    }
+
     /// Writes a length-prefixed byte slice.
-    pub fn bytes(&mut self, value: &[u8]) {
-        self.var_int(value.len() as i32);
+    pub fn bytes(&mut self, value: &[u8]) -> Result<()> {
+        self.length(value.len())?;
         self.buf.put_slice(value);
+        Ok(())
     }
 
     /// Writes a length-prefixed string.
-    pub fn string(&mut self, value: &str) {
-        self.bytes(value.as_bytes());
+    pub fn string(&mut self, value: &str) -> Result<()> {
+        self.bytes(value.as_bytes())
+    }
+
+    /// Writes a length-prefixed array of composite values.
+    pub fn array<T: Wire>(&mut self, values: &[T], version: ProtocolVersion) -> Result<()> {
+        self.length(values.len())?;
+        for value in values {
+            value.write(self, version)?;
+        }
+        Ok(())
     }
 
     /// Writes raw bytes without a length prefix.
@@ -359,160 +440,18 @@ impl<'a> Writer<'a> {
     }
 }
 
-/// A value that can be read from and written to the wire.
+/// A composite value that appears in more than one packet.
 ///
-/// Implementations are per *wire type*, not per Rust type: `i32` has no `Wire` impl because the
-/// protocol has three different encodings for it. [`VarInt`] and friends make the choice explicit
-/// at the field declaration, where it belongs.
+/// Primitives are deliberately absent: the *call* picks the encoding (`r.var_int()`, `r.u16()`),
+/// which is a choice a `Wire for i32` impl could not express anyway. Implement this only for
+/// structs and enums that are shared between packets -- a profile property, a chat component, a
+/// known-pack entry.
 pub trait Wire: Sized {
     /// Decodes the value.
-    fn read(reader: &mut Reader<'_>, version: ProtocolVersion, field: &'static str)
-    -> Result<Self>;
+    fn read(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self>;
 
     /// Encodes the value.
-    fn write(&self, writer: &mut Writer<'_>, version: ProtocolVersion);
-}
-
-/// A `VarInt`-encoded `i32`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct VarInt(pub i32);
-
-/// A `VarLong`-encoded `i64`.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct VarLong(pub i64);
-
-impl Wire for VarInt {
-    fn read(reader: &mut Reader<'_>, _v: ProtocolVersion, _field: &'static str) -> Result<Self> {
-        Ok(Self(reader.var_int()?))
-    }
-
-    fn write(&self, writer: &mut Writer<'_>, _v: ProtocolVersion) {
-        writer.var_int(self.0);
-    }
-}
-
-impl Wire for VarLong {
-    fn read(reader: &mut Reader<'_>, _v: ProtocolVersion, _field: &'static str) -> Result<Self> {
-        Ok(Self(reader.var_long()?))
-    }
-
-    fn write(&self, writer: &mut Writer<'_>, _v: ProtocolVersion) {
-        writer.var_long(self.0);
-    }
-}
-
-impl Wire for bool {
-    fn read(reader: &mut Reader<'_>, _v: ProtocolVersion, _field: &'static str) -> Result<Self> {
-        reader.bool()
-    }
-
-    fn write(&self, writer: &mut Writer<'_>, _v: ProtocolVersion) {
-        writer.bool(*self);
-    }
-}
-
-impl Wire for u8 {
-    fn read(reader: &mut Reader<'_>, _v: ProtocolVersion, _field: &'static str) -> Result<Self> {
-        reader.u8()
-    }
-
-    fn write(&self, writer: &mut Writer<'_>, _v: ProtocolVersion) {
-        writer.u8(*self);
-    }
-}
-
-impl Wire for u16 {
-    fn read(reader: &mut Reader<'_>, _v: ProtocolVersion, _field: &'static str) -> Result<Self> {
-        reader.u16()
-    }
-
-    fn write(&self, writer: &mut Writer<'_>, _v: ProtocolVersion) {
-        writer.u16(*self);
-    }
-}
-
-impl Wire for i64 {
-    fn read(reader: &mut Reader<'_>, _v: ProtocolVersion, _field: &'static str) -> Result<Self> {
-        reader.i64()
-    }
-
-    fn write(&self, writer: &mut Writer<'_>, _v: ProtocolVersion) {
-        writer.i64(*self);
-    }
-}
-
-impl Wire for u64 {
-    fn read(reader: &mut Reader<'_>, _v: ProtocolVersion, _field: &'static str) -> Result<Self> {
-        reader.u64()
-    }
-
-    fn write(&self, writer: &mut Writer<'_>, _v: ProtocolVersion) {
-        writer.u64(*self);
-    }
-}
-
-impl Wire for Uuid {
-    fn read(reader: &mut Reader<'_>, _v: ProtocolVersion, _field: &'static str) -> Result<Self> {
-        reader.uuid()
-    }
-
-    fn write(&self, writer: &mut Writer<'_>, _v: ProtocolVersion) {
-        writer.uuid(self);
-    }
-}
-
-impl Wire for String {
-    fn read(reader: &mut Reader<'_>, _v: ProtocolVersion, field: &'static str) -> Result<Self> {
-        let limit = reader.limits().max_string_len;
-        reader.string(field, limit)
-    }
-
-    fn write(&self, writer: &mut Writer<'_>, _v: ProtocolVersion) {
-        writer.string(self);
-    }
-}
-
-/// A length-prefixed blob of raw bytes.
-///
-/// A distinct type rather than `Vec<u8>` so that a byte blob and an array of `u8` fields cannot be
-/// confused at the declaration site.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct ByteArray(pub Vec<u8>);
-
-impl Wire for ByteArray {
-    fn read(reader: &mut Reader<'_>, _v: ProtocolVersion, field: &'static str) -> Result<Self> {
-        let limit = reader.limits().max_array_len;
-        Ok(Self(reader.bytes(field, limit)?.to_vec()))
-    }
-
-    fn write(&self, writer: &mut Writer<'_>, _v: ProtocolVersion) {
-        writer.bytes(&self.0);
-    }
-}
-
-impl<T: Wire> Wire for Vec<T> {
-    fn read(
-        reader: &mut Reader<'_>,
-        version: ProtocolVersion,
-        field: &'static str,
-    ) -> Result<Self> {
-        // `length` also refuses counts larger than the bytes left in the frame, so a claimed
-        // element count can never make us reserve memory the peer has not paid for.
-        let limit = reader.limits().max_array_len;
-        let count = reader.length(field, limit)?;
-        let mut values = Vec::with_capacity(count);
-        for _ in 0..count {
-            values.push(T::read(reader, version, field)?);
-        }
-        Ok(values)
-    }
-
-    fn write(&self, writer: &mut Writer<'_>, version: ProtocolVersion) {
-        writer.var_int(self.len() as i32);
-        for value in self {
-            value.write(writer, version);
-        }
-    }
+    fn write(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> Result<()>;
 }
 
 #[cfg(test)]
@@ -524,11 +463,16 @@ mod tests {
         Reader::new(bytes, Limits::default())
     }
 
+    fn write(f: impl FnOnce(&mut Writer<'_>)) -> BytesMut {
+        let mut buf = BytesMut::new();
+        f(&mut Writer::new(&mut buf, "Test", Limits::default()));
+        buf
+    }
+
     #[test]
     fn var_int_roundtrips() {
         for value in [0, 1, 127, 128, 255, 2_097_151, i32::MAX, -1, i32::MIN] {
-            let mut buf = BytesMut::new();
-            Writer::new(&mut buf).var_int(value);
+            let buf = write(|w| w.var_int(value));
             assert_eq!(reader(&buf).var_int().expect("decodes"), value, "{value}");
         }
     }
@@ -536,15 +480,12 @@ mod tests {
     #[test]
     fn var_long_roundtrips_ten_byte_values() {
         for value in [0, 1, i64::MAX, -1, i64::MIN] {
-            let mut buf = BytesMut::new();
-            Writer::new(&mut buf).var_long(value);
+            let buf = write(|w| w.var_long(value));
             let decoded = reader(&buf).var_long().expect("decodes");
             assert_eq!(decoded, value, "{value} encoded as {} bytes", buf.len());
         }
         // -1 needs all ten bytes; a nine byte bound silently truncates it.
-        let mut buf = BytesMut::new();
-        Writer::new(&mut buf).var_long(-1);
-        assert_eq!(buf.len(), 10);
+        assert_eq!(write(|w| w.var_long(-1)).len(), 10);
     }
 
     #[test]
@@ -579,7 +520,7 @@ mod tests {
     fn negative_length_is_rejected_before_allocating() {
         // 0xFF 0xFF 0xFF 0xFF 0x0F decodes to -1. Cast to `usize` this is 18446744073709551615.
         let mut r = reader(&[0xFF, 0xFF, 0xFF, 0xFF, 0x0F]);
-        let err = r.string("server_address", 32_767).expect_err("must reject");
+        let err = r.string("server_address", 255).expect_err("must reject");
         assert!(matches!(
             err,
             Error::Protocol(ProtocolError::NegativeLength { value: -1, .. })
@@ -589,11 +530,10 @@ mod tests {
     #[test]
     fn huge_length_is_rejected_before_allocating() {
         // A ten byte packet claiming a 2 GiB string.
-        let mut buf = BytesMut::new();
-        Writer::new(&mut buf).var_int(i32::MAX);
+        let mut buf = write(|w| w.var_int(i32::MAX));
         buf.extend_from_slice(b"abcde");
         let err = reader(&buf)
-            .string("server_address", 32_767)
+            .string("server_address", 255)
             .expect_err("must reject");
         assert!(matches!(
             err,
@@ -603,8 +543,7 @@ mod tests {
 
     #[test]
     fn length_beyond_the_buffer_is_eof_not_an_allocation() {
-        let mut buf = BytesMut::new();
-        Writer::new(&mut buf).var_int(4096);
+        let mut buf = write(|w| w.var_int(4096));
         buf.extend_from_slice(b"abc");
         let err = reader(&buf)
             .bytes("payload", usize::MAX)
@@ -613,13 +552,46 @@ mod tests {
     }
 
     #[test]
+    fn a_per_field_limit_is_tighter_than_the_frame() {
+        // 300 bytes fits a frame several times over, and is still refused: the field says 255.
+        let host = "a".repeat(300);
+        let buf = write(|w| w.string(&host).expect("fits a frame"));
+        let err = reader(&buf)
+            .string("server_address", 255)
+            .expect_err("must reject");
+        assert!(matches!(
+            err,
+            Error::Protocol(ProtocolError::LengthLimit { limit: 255, .. })
+        ));
+    }
+
+    #[test]
     fn string_roundtrips() {
-        let mut buf = BytesMut::new();
-        Writer::new(&mut buf).string("mc.justchunks.net");
+        let buf = write(|w| w.string("mc.justchunks.net").expect("writes"));
         assert_eq!(
-            reader(&buf).string("host", 64).expect("decodes"),
+            reader(&buf).string("host", 255).expect("decodes"),
             "mc.justchunks.net"
         );
+    }
+
+    #[test]
+    fn an_unencodable_length_is_refused_instead_of_wrapping() {
+        // The outbound counterpart of `FrameTooLarge`: no length prefix is emitted at all.
+        let mut buf = BytesMut::new();
+        let mut writer = Writer::new(
+            &mut buf,
+            "Test",
+            Limits {
+                max_frame_len: 16,
+                ..Limits::default()
+            },
+        );
+        let err = writer.bytes(&[0u8; 32]).expect_err("must refuse");
+        assert!(matches!(
+            err,
+            Error::Internal(InternalError::OversizedFrame { limit: 16, .. })
+        ));
+        assert!(buf.is_empty(), "nothing may reach the buffer");
     }
 
     #[test]

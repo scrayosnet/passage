@@ -8,14 +8,20 @@ homepage.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["demo"]
+# The worked example the `docs/` point at. Nothing in the driver depends on it; turn it off with
+# `default-features = false` and none of it is compiled in.
+demo = []
+
 [dependencies]
 bytes = { workspace = true }
 futures = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }
-tokio-util = { workspace = true, features = ["rt", "codec"] }
+tokio = { workspace = true, features = ["macros", "time", "sync"] }
+tokio-util = { workspace = true, features = ["codec"] }
 tracing = { workspace = true }
-uuid = { workspace = true, features = ["v4", "serde"] }
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "test-util", "io-util", "macros", "time"] }
