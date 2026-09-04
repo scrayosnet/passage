@@ -1,44 +1,10 @@
-//! The driver: the only thing that owns the socket, the state, the phase and the version.
+//! The connection loop.
 //!
-//! The driver does four things and nothing else -- frame, dispatch, tick, and shut down. All
-//! protocol logic lives in the [`Router`]'s handlers, and everything a handler wants to happen it
-//! queues as an [`Op`].
-//!
-//! # The loop
-//!
-//! ```text
-//! biased select:
-//!   1. queued operations   (writes, state, phase, version, spawn, close)  <- drained first
-//!   2. finished handler tasks
-//!   3. shutdown
-//!   4. deadlines           (lifetime, idle)
-//!   5. tick                (keep-alives; not while the peer must stay quiet)
-//!   6. the next frame
-//! ```
-//!
-//! The priority order is the design. Operations first means a handler's effects -- the packets it
-//! queued, the phase it moved to, the state it changed -- are all applied before the next packet is
-//! even looked at. That is what makes an operation queue equivalent to exclusive access without a
-//! lock, and it is what makes the read gate below sound: by the time a frame is considered, every
-//! `Op::Spawn` that preceded it has been counted.
-//!
-//! # The read gate
-//!
-//! [`ConnHandle::exclusive`](crate::conn::ConnHandle::exclusive) marks work the peer is expected to
-//! wait for -- an authentication call, a session-server round trip. While such a task is in flight
-//! the driver still **polls** the socket, and treats what it finds as a protocol break rather than
-//! as input to be replayed later:
-//!
-//! * a frame is [`ProtocolError::EarlyPacket`] -- a compliant peer had nothing to send;
-//! * an EOF ends the connection immediately, instead of after the adapter call returns on a
-//!   connection nobody is on the other end of any more.
-//!
-//! Work that must genuinely overlap with further traffic uses
-//! [`ConnHandle::spawn`](crate::conn::ConnHandle::spawn) instead. That is the difference between
-//! "the framework decided to run my handlers concurrently" and "I asked for concurrency here".
+//! See the [module docs](crate::conn) for the vocabulary, the priority order of the loop and
+//! the read gate.
 
 use crate::codec::{Frame, FrameCodec};
-use crate::conn::{ConnHandle, Ctx, Op};
+use crate::conn::{ConnectionHandle, Ctx, Op};
 use crate::error::{InternalError, ProtocolError, Result};
 use crate::packet::Phase;
 use crate::router::{Dispatched, Router, Table};
@@ -78,7 +44,7 @@ pub enum Completion {
 
 /// Static configuration of a connection.
 #[derive(Clone, Debug)]
-pub struct DriverConfig {
+pub struct ConnectionConfig {
     /// The decoding limits.
     pub limits: Limits,
 
@@ -88,8 +54,8 @@ pub struct DriverConfig {
     /// Hard cap on the whole connection.
     ///
     /// Passage connections are short by construction: a status ping is two packets and a login is a
-    /// handful. This belongs to the driver rather than to the caller because the driver owns the
-    /// clock and the socket -- wrapping [`Driver::run`] in [`tokio::time::timeout`] drops the
+    /// handful. This belongs to the connection rather than to the caller because the connection owns the
+    /// clock and the socket -- wrapping [`Connection::run`] in [`tokio::time::timeout`] drops the
     /// future mid-flight, so the shutdown path never runs and in-flight tasks are not cancelled
     /// cleanly. It is also the backstop for a task that never resolves while the read gate is shut.
     pub max_lifetime: Option<Duration>,
@@ -104,7 +70,7 @@ pub struct DriverConfig {
     pub initial_phase: Phase,
 }
 
-impl Default for DriverConfig {
+impl Default for ConnectionConfig {
     fn default() -> Self {
         Self {
             limits: Limits::default(),
@@ -121,15 +87,15 @@ impl Default for DriverConfig {
 type Task = BoxFuture<'static, (bool, Result<()>)>;
 
 /// Drives one connection.
-pub struct Driver<S, T> {
+pub struct Connection<S, T> {
     framed: Framed<T, FrameCodec>,
     router: Arc<Router<S>>,
     table: Arc<Table>,
     state: S,
-    handle: ConnHandle<S>,
+    handle: ConnectionHandle<S>,
     ops: mpsc::UnboundedReceiver<Op<S>>,
     tasks: FuturesUnordered<Task>,
-    /// How many in-flight tasks require the peer to stay quiet. Maintained by the driver, so it
+    /// How many in-flight tasks require the peer to stay quiet. Maintained by the connection, so it
     /// cannot be left set by a handler that forgot to reset it.
     exclusive: usize,
     version: ProtocolVersion,
@@ -138,7 +104,7 @@ pub struct Driver<S, T> {
     lifetime: Option<Pin<Box<Sleep>>>,
     idle: Option<Pin<Box<Sleep>>>,
     shutdown: CancellationToken,
-    config: DriverConfig,
+    config: ConnectionConfig,
 }
 
 /// What the select in the main loop produced.
@@ -151,12 +117,12 @@ enum Step<S> {
     Frame(Option<Result<Frame>>),
 }
 
-impl<S, T> Driver<S, T>
+impl<S, T> Connection<S, T>
 where
     S: Send + 'static,
     T: AsyncRead + AsyncWrite + Unpin,
 {
-    /// Creates a driver for `io`, together with the handle for its connection.
+    /// Creates a connection over `io`, together with the handle for its connection.
     ///
     /// This cannot fail: everything that could be misconfigured about a router was resolved by
     /// [`RouterBuilder::build`](crate::router::RouterBuilder::build) at startup.
@@ -167,12 +133,12 @@ where
         io: T,
         router: Arc<Router<S>>,
         state: S,
-        config: DriverConfig,
+        config: ConnectionConfig,
         shutdown: CancellationToken,
-    ) -> (Self, ConnHandle<S>) {
+    ) -> (Self, ConnectionHandle<S>) {
         let table = router.table(config.initial_version);
         let (handle, ops) =
-            ConnHandle::new(shutdown.clone(), config.initial_version, config.limits);
+            ConnectionHandle::new(shutdown.clone(), config.initial_version, config.limits);
 
         // A timer with no handler behind it would only wake the task up to do nothing.
         let ticker = config
@@ -184,7 +150,7 @@ where
                 ticker
             });
 
-        let driver = Self {
+        let connection = Self {
             framed: Framed::new(io, FrameCodec::new(config.limits)),
             router,
             table,
@@ -205,7 +171,7 @@ where
             shutdown,
             config,
         };
-        (driver, handle)
+        (connection, handle)
     }
 
     /// Runs the connection to completion.
@@ -219,7 +185,7 @@ where
 
                 // 1. Everything handlers asked for, before anything else.
                 op = self.ops.recv() => Step::Op(
-                    op.expect("the driver holds a handle, so the queue cannot close"),
+                    op.expect("the connection holds a handle, so the queue cannot close"),
                 ),
 
                 // 2. Finished handler tasks, exclusive or not -- one set, one arm.

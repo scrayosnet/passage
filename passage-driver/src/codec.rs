@@ -103,7 +103,7 @@ impl Encoded {
 ///
 /// Generic over the cipher so a caller with a known cipher type gets static dispatch and an
 /// inlinable `encrypt`/`decrypt`. `Box<dyn Cipher>` is the default because that is what travels
-/// through the driver's operation queue, where the concrete type is not known until the encryption
+/// through the connection's operation queue, where the concrete type is not known until the encryption
 /// handshake picks it.
 pub struct FrameCodec<C: Cipher = Box<dyn Cipher>> {
     limits: Limits,
@@ -126,7 +126,7 @@ impl<C: Cipher> FrameCodec<C> {
     /// Enables encryption from this point in the stream on.
     ///
     /// Correctness depends entirely on *when* this is called: every byte written before must be
-    /// plaintext and every byte after must be ciphertext. The driver therefore routes this through
+    /// plaintext and every byte after must be ciphertext. The connection therefore routes this through
     /// the same ordered operation queue as packet sends instead of exposing it to handlers.
     pub fn set_cipher(&mut self, cipher: C) {
         self.cipher = Some(cipher);

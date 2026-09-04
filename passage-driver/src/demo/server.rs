@@ -3,18 +3,18 @@
 //! This is the layer the README calls "a basic server implementation on top of the backbone". It
 //! owns no I/O and no framing -- only the state machine. Compare it to the 470-line `listen()` it
 //! replaces: each step is a function you can read, test and override in isolation, and the
-//! sequential parts stay sequential because the driver applies one handler's operations before it
+//! sequential parts stay sequential because the connection applies one handler's operations before it
 //! looks at the next packet.
 //!
 //! Note what no handler here does: hold a lock, mutate state in place, or await. Every one of them
 //! reads [`Ctx::state`] and queues what it wants to happen.
 
+use crate::conn::Completion;
 use crate::conn::Ctx;
 use crate::demo::packets::{
     Intent, Intention, KeepAlive, KeepAliveResponse, LoginAcknowledged, LoginStart, LoginSuccess,
     PingRequest, PongResponse, Property, StatusRequest, StatusResponse, Transfer,
 };
-use crate::driver::Completion;
 use crate::error::{BuildError, Class, Error, ProtocolError, Result};
 use crate::packet::{Direction, Phase};
 use crate::router::{Router, UnknownPolicy};
@@ -40,6 +40,11 @@ pub const SUPPORTED_VERSIONS: &[ProtocolVersion] =
 /// it by queueing [`Ctx::update`].
 #[derive(Debug, Default)]
 pub struct Session {
+    /// Where the connection came from, as reported by the listener.
+    ///
+    /// [`serve`](crate::server::serve) calls the state factory once per accepted socket, which is
+    /// how a per-connection fact like this gets into the state before the first packet arrives.
+    pub peer: Option<std::net::SocketAddr>,
     /// The hostname the client connected to.
     pub host: String,
     /// What the client asked for.
@@ -195,7 +200,7 @@ fn on_keep_alive_response(ctx: Ctx<'_, Session>, packet: KeepAliveResponse) -> R
 
 /// The tick: send a keep-alive, and fail the connection if the previous one went unanswered.
 ///
-/// The driver owns the timer, so this is the only place keep-alive policy lives -- rather than a
+/// The connection owns the timer, so this is the only place keep-alive policy lives -- rather than a
 /// `select!` arm tangled into the middle of a 470-line function.
 fn on_tick(ctx: Ctx<'_, Session>) -> Result<()> {
     if ctx.phase() != Phase::Configuration {

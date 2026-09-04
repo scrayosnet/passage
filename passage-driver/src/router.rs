@@ -322,7 +322,7 @@ impl<S: 'static> Router<S> {
         self.unknown
     }
 
-    /// Whether a tick handler is registered. The driver only arms its timer if there is one.
+    /// Whether a tick handler is registered. A connection only arms its timer if there is one.
     #[must_use]
     pub fn ticks(&self) -> bool {
         self.tick.is_some()

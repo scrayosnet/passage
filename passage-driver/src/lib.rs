@@ -25,10 +25,12 @@
 //!   failure and a connection allocates nothing.
 //! * **Handlers are synchronous, and everything they do is an operation.** A handler reads
 //!   [`Ctx::state`](conn::Ctx::state) and queues [`Op`](conn::Op)s -- a packet, a state change, a
-//!   phase change, a background task. The driver drains them in order, which is what makes "record
-//!   the profile, then announce it" and "send this, then switch to encryption" mean what they say.
+//!   phase change, a background task. The connection drains them in order, which is what makes
+//!   "record the profile, then announce it" and "send this, then switch to encryption" mean what
+//!   they say.
 //! * **One task owns everything.** The socket, the state, the phase and the version all live on the
-//!   driver. No locks, no atomics, and no way to observe a half-applied change.
+//!   [`Connection`](conn::Connection). No locks, no atomics, and no way to observe a half-applied
+//!   change.
 //! * **Waiting is explicit.** [`Ctx::exclusive`](conn::Ctx::exclusive) says the peer must stay quiet
 //!   until a future resolves -- so a packet that arrives anyway is reported rather than replayed,
 //!   and a hangup mid-authentication is noticed at once. [`Ctx::spawn`](conn::Ctx::spawn) is for
@@ -38,48 +40,70 @@
 //!   never an error variant. Wiring mistakes are [`BuildError`](error::BuildError)s and cannot
 //!   reach a connection at all.
 //!
+//! # What is static and what is per connection
+//!
+//! The two halves of the crate, and the reason the vocabulary is worth learning:
+//!
+//! | Static, built once            | One per accepted socket                  |
+//! |-------------------------------|------------------------------------------|
+//! | [`Router`](router::Router)    | [`Connection`](conn::Connection)         |
+//! | [`ConnectionConfig`](conn::ConnectionConfig) | [`ConnectionHandle`](conn::ConnectionHandle) |
+//! | the handlers themselves       | the state `S`, and a [`Ctx`](conn::Ctx) per handler call |
+//!
+//! The left column is immutable and shared behind an [`Arc`](std::sync::Arc); nothing in the right
+//! column is shared with anything, which is why none of it needs a lock.
+//! [`serve`](server::serve) is the bridge: it accepts sockets and builds the right column for each
+//! one.
+//!
 //! # Example
 //!
 //! ```no_run
-//! use passage_driver::demo::server::{Session, router};
-//! use passage_driver::driver::{Driver, DriverConfig};
-//! use std::sync::Arc;
+//! use passage_driver::conn::ConnectionConfig;
+//! use passage_driver::demo::server::{Session, log_completion, router};
+//! use passage_driver::server::serve;
 //! use std::time::Duration;
+//! use tokio::net::TcpListener;
 //! use tokio_util::sync::CancellationToken;
 //!
-//! # async fn run(io: tokio::io::DuplexStream) -> Result<(), Box<dyn std::error::Error>> {
-//! // Built once at startup and shared by every connection.
-//! let router = Arc::new(router()?);
+//! # async fn run(shutdown: CancellationToken) -> Result<(), Box<dyn std::error::Error>> {
+//! let listener = TcpListener::bind("0.0.0.0:25565").await?;
 //!
-//! let config = DriverConfig {
+//! // Built once at startup and shared by every connection.
+//! let router = router()?;
+//!
+//! let config = ConnectionConfig {
 //!     tick_interval: Some(Duration::from_secs(16)),
 //!     max_lifetime: Some(Duration::from_secs(60)),
 //!     max_idle: Some(Duration::from_secs(30)),
-//!     ..DriverConfig::default()
+//!     ..ConnectionConfig::default()
 //! };
 //!
-//! let (driver, _handle) = Driver::new(
-//!     io,
-//!     router,
-//!     Session::default(),
-//!     config,
-//!     CancellationToken::new(),
-//! );
-//! let completion = driver.run().await?;
-//! # let _ = completion;
+//! // Built once per accepted socket.
+//! serve(listener, router, |addr| Session {
+//!     peer: Some(*addr),
+//!     ..Session::default()
+//! })
+//! .config(config)
+//! .with_graceful_shutdown(shutdown)
+//! .on_finish(log_completion)
+//! .await;
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! One connection at a time, without the accept loop, is
+//! [`Connection::new`](conn::Connection::new) -- what `serve` calls per socket, and what the tests
+//! drive over a socket pair.
 
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod codec;
 pub mod conn;
-pub mod driver;
 pub mod error;
 pub mod packet;
 pub mod router;
+pub mod server;
 pub mod version;
 pub mod wire;
 

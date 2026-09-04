@@ -144,7 +144,7 @@ pub enum ProtocolError {
 
     /// A packet arrived while the peer was required to stay quiet.
     ///
-    /// The driver gates reads while an exclusive handler task is in flight (an authentication call,
+    /// A connection gates reads while an exclusive handler task is in flight (an authentication call,
     /// a session-server round trip). A well-behaved peer waits for the answer, so a frame arriving
     /// in that window was sent too early -- which is a protocol break, not backpressure.
     #[error("packet id {id:#04x} arrived in phase {phase:?} while the peer had to wait")]
@@ -349,7 +349,7 @@ impl Error {
 /// on any input, it is the same on every run, and it is discovered once --
 /// [`RouterBuilder::build`](crate::router::RouterBuilder::build) either produces a router that
 /// works for every supported version or it fails at startup. Keeping them out of [`Error`] is why
-/// [`Driver::new`](crate::driver::Driver::new) cannot fail.
+/// [`Connection::new`](crate::conn::Connection::new) cannot fail.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum BuildError {
     /// A packet was registered on a router that does not receive packets travelling its way.

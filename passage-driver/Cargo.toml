@@ -18,8 +18,8 @@ demo = []
 bytes = { workspace = true }
 futures = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["macros", "time", "sync"] }
-tokio-util = { workspace = true, features = ["codec"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "time", "sync"] }
+tokio-util = { workspace = true, features = ["codec", "rt"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 

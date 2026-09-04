@@ -1,16 +1,17 @@
-//! End-to-end tests for the driver, driven by a raw protocol client over a socket pair.
+//! End-to-end tests for one connection, driven by a raw protocol client over a socket pair.
 //!
 //! These exist to keep the claims in `docs/` honest. Each test names the property it proves.
 
-use futures::{SinkExt, StreamExt};
-use passage_driver::codec::{Encoded, FrameCodec};
-use passage_driver::conn::Ctx;
+mod common;
+
+use common::{TestClient, intention};
+use futures::StreamExt;
+use passage_driver::conn::{Completion, Connection, ConnectionConfig, Ctx};
 use passage_driver::demo::packets::{
     Intent, Intention, KeepAlive, KeepAliveResponse, LoginAcknowledged, LoginStart, LoginSuccess,
     PingRequest, PongResponse, StatusRequest, StatusResponse, Transfer,
 };
 use passage_driver::demo::server::{SUPPORTED_VERSIONS, Session, router};
-use passage_driver::driver::{Completion, Driver, DriverConfig};
 use passage_driver::error::{BuildError, Class, Error, InternalError, Result};
 use passage_driver::packet::{Direction, Packet, Phase};
 use passage_driver::router::Router;
@@ -18,100 +19,27 @@ use passage_driver::version::{ProtocolVersion, versions};
 use passage_driver::wire::{Limits, Reader, Writer};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::DuplexStream;
 use tokio::task::JoinHandle;
-use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-/// A minimal protocol client: the mirror image of the driver, without the driver.
-struct TestClient {
-    framed: Framed<DuplexStream, FrameCodec>,
-    version: ProtocolVersion,
-    limits: Limits,
-}
-
-impl TestClient {
-    fn new(io: DuplexStream) -> Self {
-        let limits = Limits::default();
-        Self {
-            framed: Framed::new(io, FrameCodec::new(limits)),
-            version: ProtocolVersion::UNKNOWN,
-            limits,
-        }
-    }
-
-    async fn send<P: Packet>(&mut self, packet: &P) {
-        let encoded =
-            Encoded::of(packet, self.version, self.limits).expect("packet exists in this version");
-        self.framed.send(encoded).await.expect("writes");
-    }
-
-    /// Reads the next packet, asserting it is of the expected type.
-    async fn expect<P: Packet>(&mut self) -> P {
-        let frame = self
-            .framed
-            .next()
-            .await
-            .expect("connection stays open")
-            .expect("frame decodes");
-        assert_eq!(
-            Some(frame.id),
-            P::id(self.version),
-            "expected {} (id {:?}), got id {}",
-            P::NAME,
-            P::id(self.version),
-            frame.id,
-        );
-        let mut reader = Reader::new(&frame.payload, self.limits);
-        P::decode(&mut reader, self.version).expect("packet decodes")
-    }
-
-    /// Sends bytes that are not a valid packet at all.
-    async fn send_raw(&mut self, bytes: &[u8]) {
-        self.framed
-            .send(Encoded {
-                name: "Raw",
-                bytes: bytes.to_vec().into(),
-            })
-            .await
-            .expect("writes");
-    }
-
-    async fn expect_eof(&mut self) {
-        assert!(
-            self.framed.next().await.is_none(),
-            "expected the server to close the connection",
-        );
-    }
-}
-
-/// Spawns the demo server on one end of a socket pair and hands back a client for the other.
-fn serve(config: DriverConfig) -> (TestClient, JoinHandle<Result<Completion>>) {
+/// Runs the demo server on one end of a socket pair and hands back a client for the other.
+fn connect(config: ConnectionConfig) -> (TestClient, JoinHandle<Result<Completion>>) {
     let (server_io, client_io) = tokio::io::duplex(4096);
     let router = Arc::new(router().expect("the demo router is well-formed"));
-    let (driver, _handle) = Driver::new(
+    let (connection, _handle) = Connection::new(
         server_io,
         router,
         Session::default(),
         config,
         CancellationToken::new(),
     );
-    (TestClient::new(client_io), tokio::spawn(driver.run()))
-}
-
-fn intention(version: ProtocolVersion, intent: Intent) -> Intention {
-    Intention {
-        protocol_version: version,
-        server_address: "mc.justchunks.net".to_owned(),
-        server_port: 25565,
-        intent,
-    }
+    (TestClient::new(client_io), tokio::spawn(connection.run()))
 }
 
 #[tokio::test]
 async fn serves_a_status_ping_end_to_end() {
-    let (mut client, server) = serve(DriverConfig::default());
+    let (mut client, server) = connect(ConnectionConfig::default());
 
     client
         .send(&intention(versions::V1_21, Intent::Status))
@@ -137,7 +65,7 @@ async fn serves_a_status_ping_end_to_end() {
 #[tokio::test]
 async fn the_gated_field_follows_the_client_version() {
     // An old client must not be sent the session id...
-    let (mut client, server) = serve(DriverConfig::default());
+    let (mut client, server) = connect(ConnectionConfig::default());
     client
         .send(&intention(versions::V1_21, Intent::Login))
         .await;
@@ -155,7 +83,7 @@ async fn the_gated_field_follows_the_client_version() {
     let _ = server.await;
 
     // ...and a new one must be.
-    let (mut client, server) = serve(DriverConfig::default());
+    let (mut client, server) = connect(ConnectionConfig::default());
     client
         .send(&intention(versions::V26_2, Intent::Login))
         .await;
@@ -178,7 +106,7 @@ async fn a_packet_sent_during_an_exclusive_task_is_a_protocol_error() {
     // exclusive, so `LoginAcknowledged` was sent before the client could possibly have seen
     // `LoginSuccess` -- it is a protocol break, and reporting it is the whole point of the gate.
     // The previous design buffered it and dispatched it into a half-authenticated session.
-    let (mut client, server) = serve(DriverConfig::default());
+    let (mut client, server) = connect(ConnectionConfig::default());
     client
         .send(&intention(versions::V26_2, Intent::Login))
         .await;
@@ -203,7 +131,7 @@ async fn a_packet_sent_during_an_exclusive_task_is_a_protocol_error() {
 async fn a_hangup_during_an_exclusive_task_ends_the_connection_at_once() {
     // The socket is still polled while the gate is shut, so a client that disappears mid-login is
     // noticed immediately instead of after the authentication call returns.
-    let (mut client, server) = serve(DriverConfig::default());
+    let (mut client, server) = connect(ConnectionConfig::default());
     client
         .send(&intention(versions::V26_2, Intent::Login))
         .await;
@@ -227,7 +155,7 @@ async fn a_hangup_during_an_exclusive_task_ends_the_connection_at_once() {
 
 #[tokio::test]
 async fn the_login_flow_completes_when_the_client_waits_its_turn() {
-    let (mut client, server) = serve(DriverConfig::default());
+    let (mut client, server) = connect(ConnectionConfig::default());
     client
         .send(&intention(versions::V26_2, Intent::Login))
         .await;
@@ -258,11 +186,11 @@ async fn the_login_flow_completes_when_the_client_waits_its_turn() {
 async fn spawned_work_runs_while_keep_alives_are_exchanged() {
     // The backend selection is spawned rather than exclusive, so the gate stays open and the tick
     // handler keeps the connection alive while it runs.
-    let config = DriverConfig {
+    let config = ConnectionConfig {
         tick_interval: Some(Duration::from_secs(16)),
-        ..DriverConfig::default()
+        ..ConnectionConfig::default()
     };
-    let (mut client, server) = serve(config);
+    let (mut client, server) = connect(config);
 
     client
         .send(&intention(versions::V26_2, Intent::Login))
@@ -312,9 +240,9 @@ async fn spawned_work_runs_while_keep_alives_are_exchanged() {
 #[tokio::test]
 async fn state_is_recorded_before_the_packet_that_announces_it() {
     // `on_login_start` queues the profile update ahead of `LoginSuccess`. Both are operations, so
-    // by the time the client has the packet the driver has already applied the update -- which is
+    // by the time the client has the packet the connection has already applied the update -- which is
     // what a tick or a later handler would observe.
-    let (mut client, server) = serve(DriverConfig::default());
+    let (mut client, server) = connect(ConnectionConfig::default());
     client
         .send(&intention(versions::V26_2, Intent::Login))
         .await;
@@ -338,7 +266,7 @@ async fn state_is_recorded_before_the_packet_that_announces_it() {
 
 #[tokio::test]
 async fn an_unknown_packet_ends_the_connection_as_a_peer_error() {
-    let (mut client, server) = serve(DriverConfig::default());
+    let (mut client, server) = connect(ConnectionConfig::default());
     client
         .send(&intention(versions::V1_21, Intent::Status))
         .await;
@@ -358,7 +286,7 @@ async fn an_unknown_packet_ends_the_connection_as_a_peer_error() {
 async fn a_packet_from_another_phase_says_so() {
     // `LoginAcknowledged` is 0x03 in the login phase and nothing in the status phase. Reporting it
     // as unknown would send whoever reads the log looking for a missing packet definition.
-    let (mut client, server) = serve(DriverConfig::default());
+    let (mut client, server) = connect(ConnectionConfig::default());
     client
         .send(&intention(versions::V1_21, Intent::Status))
         .await;
@@ -375,7 +303,7 @@ async fn a_packet_from_another_phase_says_so() {
 
 #[tokio::test]
 async fn a_hostile_length_prefix_is_a_peer_error_not_a_panic() {
-    let (mut client, server) = serve(DriverConfig::default());
+    let (mut client, server) = connect(ConnectionConfig::default());
 
     // A handshake whose `server_address` claims a length of -1. Decoded as `usize` that is
     // 18446744073709551615, which is what used to reach `vec![0; len]`.
@@ -398,14 +326,14 @@ async fn a_hostile_length_prefix_is_a_peer_error_not_a_panic() {
 
 #[tokio::test]
 async fn an_oversized_frame_is_rejected_before_it_is_buffered() {
-    let config = DriverConfig {
+    let config = ConnectionConfig {
         limits: Limits {
             max_frame_len: 128,
             ..Limits::default()
         },
-        ..DriverConfig::default()
+        ..ConnectionConfig::default()
     };
-    let (mut client, server) = serve(config);
+    let (mut client, server) = connect(config);
 
     // Announce a 1 MiB frame in three bytes, then send nothing.
     let mut buf = bytes::BytesMut::new();
@@ -424,7 +352,7 @@ async fn an_oversized_frame_is_rejected_before_it_is_buffered() {
 
 #[tokio::test]
 async fn logging_in_with_an_unsupported_version_is_refused() {
-    let (mut client, server) = serve(DriverConfig::default());
+    let (mut client, server) = connect(ConnectionConfig::default());
     // 1.20.4: no configuration phase, so no transfer.
     client
         .send(&intention(ProtocolVersion::new(765), Intent::Login))
@@ -438,7 +366,7 @@ async fn logging_in_with_an_unsupported_version_is_refused() {
 
     // But a status ping from the same client still works, which is how it learns what to install.
     // There is no table for 765, so this is served from the version-independent fallback.
-    let (mut client, server) = serve(DriverConfig::default());
+    let (mut client, server) = connect(ConnectionConfig::default());
     client
         .send(&intention(ProtocolVersion::new(765), Intent::Status))
         .await;
@@ -451,7 +379,7 @@ async fn logging_in_with_an_unsupported_version_is_refused() {
 
 #[tokio::test]
 async fn a_peer_hangup_is_not_an_error() {
-    let (client, server) = serve(DriverConfig::default());
+    let (client, server) = connect(ConnectionConfig::default());
     drop(client);
     assert_eq!(
         server.await.expect("no panic").expect("no error"),
@@ -463,14 +391,14 @@ async fn a_peer_hangup_is_not_an_error() {
 async fn cancellation_ends_the_connection_cleanly() {
     let (server_io, client_io) = tokio::io::duplex(4096);
     let shutdown = CancellationToken::new();
-    let (driver, handle) = Driver::new(
+    let (connection, handle) = Connection::new(
         server_io,
         Arc::new(router().expect("builds")),
         Session::default(),
-        DriverConfig::default(),
+        ConnectionConfig::default(),
         shutdown.clone(),
     );
-    let server = tokio::spawn(driver.run());
+    let server = tokio::spawn(connection.run());
     let _client = TestClient::new(client_io);
 
     shutdown.cancel();
@@ -484,13 +412,13 @@ async fn cancellation_ends_the_connection_cleanly() {
 
 #[tokio::test(start_paused = true)]
 async fn an_idle_connection_is_dropped_by_its_deadline() {
-    // A peer that connects and says nothing costs a task and a socket. The driver owns the clock,
+    // A peer that connects and says nothing costs a task and a socket. The connection owns the clock,
     // so this does not have to be every caller's problem.
-    let config = DriverConfig {
+    let config = ConnectionConfig {
         max_idle: Some(Duration::from_secs(10)),
-        ..DriverConfig::default()
+        ..ConnectionConfig::default()
     };
-    let (_client, server) = serve(config);
+    let (_client, server) = connect(config);
 
     assert_eq!(
         server.await.expect("no panic").expect("no error"),
@@ -503,12 +431,12 @@ async fn a_lifetime_deadline_bounds_even_a_chatty_connection() {
     // The idle deadline resets on every frame, so a peer could hold a connection open forever by
     // pinging. The lifetime cap is what makes that impossible -- and it is the backstop for an
     // exclusive task that never resolves.
-    let config = DriverConfig {
+    let config = ConnectionConfig {
         max_idle: Some(Duration::from_secs(10)),
         max_lifetime: Some(Duration::from_secs(30)),
-        ..DriverConfig::default()
+        ..ConnectionConfig::default()
     };
-    let (mut client, server) = serve(config);
+    let (mut client, server) = connect(config);
     client
         .send(&intention(versions::V1_21, Intent::Status))
         .await;
@@ -546,16 +474,16 @@ where
         .expect("builds")
 }
 
-fn serve_router(router: Router<Session>) -> (TestClient, JoinHandle<Result<Completion>>) {
+fn connect_to(router: Router<Session>) -> (TestClient, JoinHandle<Result<Completion>>) {
     let (server_io, client_io) = tokio::io::duplex(4096);
-    let (driver, _handle) = Driver::new(
+    let (connection, _handle) = Connection::new(
         server_io,
         Arc::new(router),
         Session::default(),
-        DriverConfig::default(),
+        ConnectionConfig::default(),
         CancellationToken::new(),
     );
-    (TestClient::new(client_io), tokio::spawn(driver.run()))
+    (TestClient::new(client_io), tokio::spawn(connection.run()))
 }
 
 fn status_response() -> StatusResponse {
@@ -570,7 +498,7 @@ async fn a_packet_encoded_for_a_phase_the_connection_left_is_refused() {
     // just left. Operations drain in queue order, so those bytes would reach the client with an ID
     // it resolves against the configuration table -- a desynchronised connection with no diagnostic
     // on either side.
-    let (mut client, server) = serve_router(status_router(
+    let (mut client, server) = connect_to(status_router(
         |ctx: Ctx<'_, Session>, _packet: StatusRequest| {
             ctx.set_phase(Phase::Configuration)?;
             ctx.send(status_response())
@@ -606,7 +534,7 @@ async fn a_packet_encoded_for_a_phase_the_connection_left_is_refused() {
 async fn a_packet_encoded_for_a_superseded_version_is_refused() {
     // Same guard, other axis: a handler that re-pins the version cannot also answer in it, because
     // its own view of the version is the snapshot from before the change.
-    let (mut client, server) = serve_router(status_router(
+    let (mut client, server) = connect_to(status_router(
         |ctx: Ctx<'_, Session>, _packet: StatusRequest| {
             ctx.set_version(versions::V26_2)?;
             ctx.send(status_response())
@@ -641,7 +569,7 @@ async fn sending_before_switching_phase_is_the_order_that_works() {
     // The guard must not break the pattern the design promises: "send the last packet of this
     // phase, then switch". Operations drain in order, so the send is written while the connection
     // is still in the packet's own phase.
-    let (mut client, server) = serve_router(status_router(
+    let (mut client, server) = connect_to(status_router(
         |ctx: Ctx<'_, Session>, _packet: StatusRequest| {
             ctx.send(status_response())?;
             ctx.set_phase(Phase::Configuration)?;

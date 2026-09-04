@@ -1,34 +1,7 @@
 //! The operation queue, the connection handle and the handler context.
 //!
-//! # Everything a handler does is an operation
-//!
-//! A handler holds nothing and mutates nothing. It reads a snapshot of the connection through
-//! [`Ctx`] and *queues* whatever it wants to happen -- a packet, a state change, a phase change,
-//! an encryption switch, a background task, a close -- as an [`Op`]. The driver drains that queue
-//! with priority, in order, with exclusive access to everything it owns.
-//!
-//! Three properties fall out of that, and none of them needs a lock:
-//!
-//! * **One writer.** The driver is the only thing that touches the socket, the state, the phase and
-//!   the version. Nothing can interleave, not even a packet queued from a background task.
-//! * **Ordered side effects.** "Record the profile, then announce it" and "send this, then switch
-//!   to encryption" mean what they say, because both halves are operations in one queue. Getting
-//!   the second one wrong is the classic "works until the client is slow" bug; getting the first
-//!   one wrong gives you a session whose login has been announced but not recorded.
-//! * **No stale reads.** [`Ctx::phase`] and [`Ctx::version`] are values the driver passed in, not
-//!   atomics that another task may already have moved on from.
-//!
-//! The cost is that a handler cannot observe its own effects: `ctx.send(..)` then `ctx.state` still
-//! shows the old state. That is the point -- the alternative is a handler that half-applied its
-//! changes before returning an error.
-//!
-//! # Two types, not three
-//!
-//! [`ConnHandle`] holds the queue and the connection's configuration *by value*: an
-//! `UnboundedSender` and a `CancellationToken` are already cheap clones, so wrapping them in a
-//! shared allocation bought nothing and cost an indirection on every queued operation. [`Ctx`] is
-//! then a borrow of a handle plus the two things only the driver can supply -- the state snapshot
-//! and the phase.
+//! See the [module docs](crate::conn) for why a handler queues operations instead of mutating
+//! anything.
 
 use crate::codec::{Cipher, Encoded};
 use crate::error::{Error, Result};
@@ -39,7 +12,7 @@ use futures::future::BoxFuture;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-/// An operation for the driver to carry out, in queue order.
+/// An operation for the connection to carry out, in queue order.
 ///
 /// This is the whole vocabulary a handler has. If something is not expressible as an `Op`, a
 /// handler cannot do it.
@@ -103,11 +76,16 @@ impl<S> std::fmt::Debug for Op<S> {
 /// encode plus a channel send, so it is safe to hold across await points and cannot block.
 ///
 /// The handle carries the protocol version it was created for. The version is pinned once, by the
-/// handshake, and the driver re-stamps its own handle when that happens -- so a handle taken from a
-/// [`Ctx`] is always current, and one taken from
-/// [`Driver::new`](crate::driver::Driver::new) is not (it predates the handshake, and is meant for
-/// [`close`](ConnHandle::close) and [`shutdown`](ConnHandle::shutdown) rather than for sending).
-pub struct ConnHandle<S> {
+/// handshake, and the connection re-stamps its own handle when that happens -- so a handle taken
+/// from a [`Ctx`] is always current, and one taken from
+/// [`Connection::new`](crate::conn::Connection::new) is not (it predates the handshake, and is
+/// meant for [`close`](ConnectionHandle::close) and [`shutdown`](ConnectionHandle::shutdown) rather
+/// than for sending).
+///
+/// Everything in it is held *by value*: an `UnboundedSender` and a `CancellationToken` are already
+/// cheap clones, so wrapping them in a shared allocation bought nothing and cost an indirection on
+/// every queued operation.
+pub struct ConnectionHandle<S> {
     ops: mpsc::UnboundedSender<Op<S>>,
     shutdown: CancellationToken,
     version: ProtocolVersion,
@@ -115,7 +93,7 @@ pub struct ConnHandle<S> {
 }
 
 // Derived `Clone` would demand `S: Clone`, which is wrong: the state is never cloned, only shared.
-impl<S> Clone for ConnHandle<S> {
+impl<S> Clone for ConnectionHandle<S> {
     fn clone(&self) -> Self {
         Self {
             ops: self.ops.clone(),
@@ -126,7 +104,7 @@ impl<S> Clone for ConnHandle<S> {
     }
 }
 
-impl<S> ConnHandle<S> {
+impl<S> ConnectionHandle<S> {
     /// Creates a handle and the receiving end of its operation queue.
     pub(crate) fn new(
         shutdown: CancellationToken,
@@ -167,11 +145,11 @@ impl<S> ConnHandle<S> {
 
     /// Encodes a packet and queues it.
     ///
-    /// The encode happens here, not on the driver: an ID that does not exist in this version, a
+    /// The encode happens here, not on the connection: an ID that does not exist in this version, a
     /// gated field left unset, or a packet too large for a frame is reported to the code that made
     /// the mistake instead of surfacing later as a connection failure with no obvious author.
     ///
-    /// The version and the packet's phase travel with the bytes, and the driver refuses to write
+    /// The version and the packet's phase travel with the bytes, and the connection refuses to write
     /// them if the connection has moved on -- see
     /// [`InternalError::StaleEncoding`](crate::error::InternalError::StaleEncoding).
     pub fn send<P: Packet>(&self, packet: P) -> Result<()> {
@@ -190,7 +168,7 @@ impl<S> ConnHandle<S> {
 
     /// Queues the protocol version.
     ///
-    /// It decides which IDs are used for packets queued after it and which decode table the driver
+    /// It decides which IDs are used for packets queued after it and which decode table the connection
     /// uses for the next frame. In a server this is called once, from the handshake handler.
     ///
     /// A handler that pins the version cannot also send in it: its own view of the version is the
@@ -214,7 +192,7 @@ impl<S> ConnHandle<S> {
     ///
     /// # The closure
     ///
-    /// It runs on the driver, with `&mut S`, while the queue is being drained. So it must not block
+    /// It runs on the connection, with `&mut S`, while the queue is being drained. So it must not block
     /// and cannot await. It *may* queue further operations through a cloned handle.
     pub fn update(&self, change: impl FnOnce(&mut S) + Send + 'static) -> Result<()> {
         self.queue(Op::With(Box::new(change)))
@@ -222,7 +200,7 @@ impl<S> ConnHandle<S> {
 
     /// Runs `f` against the connection state and returns its result.
     ///
-    /// This is how a background task *reads* state it does not own. It resolves once the driver has
+    /// This is how a background task *reads* state it does not own. It resolves once the connection has
     /// drained everything queued before it, so it doubles as a barrier: `conn.with(|_| ()).await`
     /// means "everything I queued has been carried out".
     pub async fn with<R: Send + 'static>(
@@ -241,7 +219,7 @@ impl<S> ConnHandle<S> {
     ///
     /// Use this for work that must overlap with further protocol traffic -- Passage's backend
     /// selection, which runs while keep-alives are exchanged. Anything it needs from the connection
-    /// it takes through a cloned [`ConnHandle`]. An error from the future fails the connection.
+    /// it takes through a cloned [`ConnectionHandle`]. An error from the future fails the connection.
     pub fn spawn(&self, future: impl Future<Output = Result<()>> + Send + 'static) -> Result<()> {
         self.queue(Op::Spawn {
             future: Box::pin(future),
@@ -257,7 +235,7 @@ impl<S> ConnHandle<S> {
     /// [`ProtocolError::EarlyPacket`](crate::error::ProtocolError::EarlyPacket) rather than
     /// buffered and replayed into a half-finished session.
     ///
-    /// The driver reopens the gate when the future resolves, so there is nothing to reset by hand
+    /// The connection reopens the gate when the future resolves, so there is nothing to reset by hand
     /// and no way to leave the connection gated by accident.
     pub fn exclusive(
         &self,
@@ -305,13 +283,13 @@ pub struct Ctx<'a, S> {
     pub state: &'a S,
 
     /// The connection handle. Clone it into a background task.
-    pub conn: &'a ConnHandle<S>,
+    pub conn: &'a ConnectionHandle<S>,
 
     phase: Phase,
 }
 
 impl<'a, S> Ctx<'a, S> {
-    pub(crate) fn new(state: &'a S, conn: &'a ConnHandle<S>, phase: Phase) -> Self {
+    pub(crate) fn new(state: &'a S, conn: &'a ConnectionHandle<S>, phase: Phase) -> Self {
         Self { state, conn, phase }
     }
 
@@ -335,37 +313,37 @@ impl<'a, S> Ctx<'a, S> {
         self.phase
     }
 
-    /// Encodes a packet and queues it. See [`ConnHandle::send`].
+    /// Encodes a packet and queues it. See [`ConnectionHandle::send`].
     pub fn send<P: Packet>(&self, packet: P) -> Result<()> {
         self.conn.send(packet)
     }
 
-    /// Queues an encryption switch. See [`ConnHandle::encrypt`].
+    /// Queues an encryption switch. See [`ConnectionHandle::encrypt`].
     pub fn encrypt(&self, cipher: Box<dyn Cipher>) -> Result<()> {
         self.conn.encrypt(cipher)
     }
 
-    /// Queues the protocol version. See [`ConnHandle::set_version`].
+    /// Queues the protocol version. See [`ConnectionHandle::set_version`].
     pub fn set_version(&self, version: ProtocolVersion) -> Result<()> {
         self.conn.set_version(version)
     }
 
-    /// Queues a phase change. See [`ConnHandle::set_phase`].
+    /// Queues a phase change. See [`ConnectionHandle::set_phase`].
     pub fn set_phase(&self, phase: Phase) -> Result<()> {
         self.conn.set_phase(phase)
     }
 
-    /// Queues a change to the connection state. See [`ConnHandle::update`].
+    /// Queues a change to the connection state. See [`ConnectionHandle::update`].
     pub fn update(&self, change: impl FnOnce(&mut S) + Send + 'static) -> Result<()> {
         self.conn.update(change)
     }
 
-    /// Runs a future alongside the connection. See [`ConnHandle::spawn`].
+    /// Runs a future alongside the connection. See [`ConnectionHandle::spawn`].
     pub fn spawn(&self, future: impl Future<Output = Result<()>> + Send + 'static) -> Result<()> {
         self.conn.spawn(future)
     }
 
-    /// Runs a future, requiring the peer to stay quiet. See [`ConnHandle::exclusive`].
+    /// Runs a future, requiring the peer to stay quiet. See [`ConnectionHandle::exclusive`].
     pub fn exclusive(
         &self,
         future: impl Future<Output = Result<()>> + Send + 'static,

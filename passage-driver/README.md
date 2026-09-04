@@ -50,9 +50,36 @@ task model plus a read gate, and the deferred state `Update` became an ordinary 
 [08-refinements.md](docs/08-refinements.md) records the reasoning; the other documents were updated to
 match, and keep the "tried and removed" notes rather than pretending the earlier shape never existed.
 
+## Static, and per connection
+
+Two halves, and the vocabulary follows the split: a `Router` is built once at startup and shared,
+a `Connection` is created for each accepted socket and owns everything mutable.
+
+| Static, built once  | One per accepted socket                          |
+|---------------------|--------------------------------------------------|
+| `Router`            | `Connection`                                     |
+| `ConnectionConfig`  | `ConnectionHandle`                               |
+| the handlers        | the state `S`, and a `Ctx` per handler call      |
+
+`server::serve` is the bridge, in the shape Axum uses -- with one difference: state here is *per
+connection*, so it takes a factory rather than a value and calls it once per socket.
+
+```rust
+let listener = TcpListener::bind("0.0.0.0:25565").await?;
+
+serve(listener, router()?, |addr| Session { peer: Some(*addr), ..Session::default() })
+    .config(config)
+    .with_graceful_shutdown(shutdown)
+    .on_finish(log_completion)
+    .await;
+```
+
+One connection without the accept loop is `Connection::new`, which is what `serve` calls per
+socket and what the tests drive over a socket pair.
+
 ## Shape of a handler
 
-Every effect a handler has is an operation queued on the driver, which owns the socket, the
+Every effect a handler has is an operation queued on the connection, which owns the socket, the
 connection state, the phase and the protocol version:
 
 ```rust
