@@ -14,7 +14,7 @@ use passage_driver::demo::packets::{
 use passage_driver::demo::server::{SUPPORTED_VERSIONS, Session, router};
 use passage_driver::error::{BuildError, Class, Error, InternalError, Result};
 use passage_driver::packet::{Direction, Packet, Phase};
-use passage_driver::router::Router;
+use passage_driver::router::{Router, RouterDispatcher};
 use passage_driver::version::{ProtocolVersion, versions};
 use passage_driver::wire::{Limits, Reader, Writer};
 use std::sync::Arc;
@@ -29,7 +29,7 @@ fn connect(config: ConnectionConfig) -> (TestClient, JoinHandle<Result<Completio
     let router = Arc::new(router().expect("the demo router is well-formed"));
     let (connection, _handle) = Connection::new(
         server_io,
-        router,
+        RouterDispatcher::new(router),
         Session::default(),
         config,
         CancellationToken::new(),
@@ -393,7 +393,7 @@ async fn cancellation_ends_the_connection_cleanly() {
     let shutdown = CancellationToken::new();
     let (connection, handle) = Connection::new(
         server_io,
-        Arc::new(router().expect("builds")),
+        RouterDispatcher::new(router().expect("builds")),
         Session::default(),
         ConnectionConfig::default(),
         shutdown.clone(),
@@ -478,7 +478,7 @@ fn connect_to(router: Router<Session>) -> (TestClient, JoinHandle<Result<Complet
     let (server_io, client_io) = tokio::io::duplex(4096);
     let (connection, _handle) = Connection::new(
         server_io,
-        Arc::new(router),
+        RouterDispatcher::new(router),
         Session::default(),
         ConnectionConfig::default(),
         CancellationToken::new(),

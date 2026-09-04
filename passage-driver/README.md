@@ -60,6 +60,11 @@ a `Connection` is created for each accepted socket and owns everything mutable.
 | `Router`            | `Connection`                                     |
 | `ConnectionConfig`  | `ConnectionHandle`                               |
 | the handlers        | the state `S`, and a `Ctx` per handler call      |
+| the dispatch tables | a `RouterDispatcher`, holding the table for the negotiated version |
+
+The two never meet directly: a `Connection` depends on the `Dispatcher` trait, which `conn`
+declares and `router` implements. So the connection holds no table and resolves no packet ID, and
+it can be driven by a test double instead -- see [`tests/dispatch.rs`](tests/dispatch.rs).
 
 `server::serve` is the bridge, in the shape Axum uses -- with one difference: state here is *per
 connection*, so it takes a factory rather than a value and calls it once per socket.

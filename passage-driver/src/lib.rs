@@ -31,6 +31,11 @@
 //! * **One task owns everything.** The socket, the state, the phase and the version all live on the
 //!   [`Connection`](conn::Connection). No locks, no atomics, and no way to observe a half-applied
 //!   change.
+//! * **The connection does not know what a router is.** It reaches dispatch through
+//!   [`Dispatcher`](conn::Dispatcher), a trait declared by the side that uses it and implemented by
+//!   [`RouterDispatcher`](router::RouterDispatcher). So the table lives with the thing that owns
+//!   routing, a connection can be driven by a test double or a recorder, and the two halves can be
+//!   read separately.
 //! * **Waiting is explicit.** [`Ctx::exclusive`](conn::Ctx::exclusive) says the peer must stay quiet
 //!   until a future resolves -- so a packet that arrives anyway is reported rather than replayed,
 //!   and a hangup mid-authentication is noticed at once. [`Ctx::spawn`](conn::Ctx::spawn) is for
@@ -49,6 +54,7 @@
 //! | [`Router`](router::Router)    | [`Connection`](conn::Connection)         |
 //! | [`ConnectionConfig`](conn::ConnectionConfig) | [`ConnectionHandle`](conn::ConnectionHandle) |
 //! | the handlers themselves       | the state `S`, and a [`Ctx`](conn::Ctx) per handler call |
+//! | the dispatch tables, one per version | a [`RouterDispatcher`](router::RouterDispatcher), holding the table for the version this connection negotiated |
 //!
 //! The left column is immutable and shared behind an [`Arc`](std::sync::Arc); nothing in the right
 //! column is shared with anything, which is why none of it needs a lock.

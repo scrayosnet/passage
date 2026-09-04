@@ -40,7 +40,7 @@
 
 use crate::conn::{Completion, Connection, ConnectionConfig};
 use crate::error::Result;
-use crate::router::Router;
+use crate::router::{Router, RouterDispatcher};
 use futures::future::BoxFuture;
 use std::fmt;
 use std::future::{Future, IntoFuture};
@@ -219,7 +219,9 @@ where
             trace!(?addr, "accepted a connection");
             let (connection, _handle) = Connection::new(
                 io,
-                Arc::clone(&self.router),
+                // One dispatcher per connection: two `Arc` clones, and the table it caches then
+                // follows the version this connection negotiates.
+                RouterDispatcher::new(Arc::clone(&self.router)),
                 (self.state)(&addr),
                 self.config.clone(),
                 // Its own token, so a connection ending cancels itself and nothing else.

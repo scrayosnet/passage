@@ -4,17 +4,15 @@
 //! the read gate.
 
 use crate::codec::{Frame, FrameCodec};
-use crate::conn::{ConnectionHandle, Ctx, Op};
+use crate::conn::{ConnectionHandle, Ctx, Dispatcher, Op};
 use crate::error::{InternalError, ProtocolError, Result};
 use crate::packet::Phase;
-use crate::router::{Dispatched, Router, Table};
 use crate::version::ProtocolVersion;
 use crate::wire::Limits;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use futures::{SinkExt, StreamExt};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
@@ -48,7 +46,8 @@ pub struct ConnectionConfig {
     /// The decoding limits.
     pub limits: Limits,
 
-    /// How often the tick handler runs, if at all. Ignored if the router has no tick handler.
+    /// How often the tick handler runs, if at all. Ignored if
+    /// [`Dispatcher::ticks`](crate::conn::Dispatcher::ticks) is `false`.
     pub tick_interval: Option<Duration>,
 
     /// Hard cap on the whole connection.
@@ -87,10 +86,11 @@ impl Default for ConnectionConfig {
 type Task = BoxFuture<'static, (bool, Result<()>)>;
 
 /// Drives one connection.
-pub struct Connection<S, T> {
+pub struct Connection<S, T, D> {
     framed: Framed<T, FrameCodec>,
-    router: Arc<Router<S>>,
-    table: Arc<Table>,
+    /// Where frames and ticks go. The connection holds no dispatch table of its own, and no
+    /// reference to a router -- see [`Dispatcher`].
+    dispatcher: D,
     state: S,
     handle: ConnectionHandle<S>,
     ops: mpsc::UnboundedReceiver<Op<S>>,
@@ -117,33 +117,38 @@ enum Step<S> {
     Frame(Option<Result<Frame>>),
 }
 
-impl<S, T> Connection<S, T>
+impl<S, T, D> Connection<S, T, D>
 where
     S: Send + 'static,
     T: AsyncRead + AsyncWrite + Unpin,
+    D: Dispatcher<S>,
 {
     /// Creates a connection over `io`, together with the handle for its connection.
     ///
-    /// This cannot fail: everything that could be misconfigured about a router was resolved by
+    /// This cannot fail. Everything that could be misconfigured about dispatch was resolved when
+    /// the dispatcher was built -- for the built-in one, by
     /// [`RouterBuilder::build`](crate::router::RouterBuilder::build) at startup.
     ///
     /// The handle is returned so the caller can talk to the connection from the outside -- close
     /// it, or hand it to something that will. Handlers get their own copy through [`Ctx`].
     pub fn new(
         io: T,
-        router: Arc<Router<S>>,
+        mut dispatcher: D,
         state: S,
         config: ConnectionConfig,
         shutdown: CancellationToken,
     ) -> (Self, ConnectionHandle<S>) {
-        let table = router.table(config.initial_version);
+        // The dispatcher is handed over unbound, so the connection is the only thing that decides
+        // which version dispatch happens against -- here and in `Op::SetVersion`, nowhere else.
+        dispatcher.set_version(config.initial_version);
+
         let (handle, ops) =
             ConnectionHandle::new(shutdown.clone(), config.initial_version, config.limits);
 
         // A timer with no handler behind it would only wake the task up to do nothing.
         let ticker = config
             .tick_interval
-            .filter(|_| router.ticks())
+            .filter(|_| dispatcher.ticks())
             .map(|interval| {
                 let mut ticker = tokio::time::interval_at(Instant::now() + interval, interval);
                 ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -152,8 +157,7 @@ where
 
         let connection = Self {
             framed: Framed::new(io, FrameCodec::new(config.limits)),
-            router,
-            table,
+            dispatcher,
             state,
             handle: handle.clone(),
             ops,
@@ -269,7 +273,7 @@ where
             Op::SetVersion(version) => {
                 debug!(%version, "binding dispatch table");
                 self.version = version;
-                self.table = self.router.table(version);
+                self.dispatcher.set_version(version);
                 // Handlers encode against the handle's version, so it has to move with us. Ours is
                 // the one every `Ctx` lends out, which is why a handle taken from a handler is
                 // always current.
@@ -301,10 +305,8 @@ where
     }
 
     fn handle_tick(&mut self) -> Result<()> {
-        let Some(handler) = self.router.tick_handler() else {
-            return Ok(());
-        };
-        handler.call(Ctx::new(&self.state, &self.handle, self.phase))
+        self.dispatcher
+            .tick(Ctx::new(&self.state, &self.handle, self.phase))
     }
 
     fn handle_frame(&mut self, frame: Frame) -> Result<()> {
@@ -320,18 +322,7 @@ where
         }
 
         let ctx = Ctx::new(&self.state, &self.handle, self.phase);
-        match self
-            .router
-            .dispatch(&self.table, ctx, frame.id, &frame.payload)?
-        {
-            Dispatched::Handled(name) => {
-                trace!(packet = name, phase = ?self.phase, "dispatched packet");
-            }
-            Dispatched::Ignored => {
-                trace!(id = frame.id, phase = ?self.phase, "ignoring unhandled packet");
-            }
-        }
-        Ok(())
+        self.dispatcher.dispatch(ctx, frame.id, &frame.payload)
     }
 
     fn reset_idle(&mut self) {

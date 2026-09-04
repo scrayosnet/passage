@@ -15,6 +15,14 @@
 //! queues as an [`Op`]. To accept sockets and run one [`Connection`] per socket, see
 //! [`server::serve`](crate::server::serve).
 //!
+//! # It does not know about the router
+//!
+//! Dispatch is reached through the [`Dispatcher`] trait, which this module declares and
+//! [`router`](crate::router) implements. So the dependency points one way only -- nothing in here
+//! mentions [`Router`](crate::router::Router) -- and a connection holds no dispatch table, resolves
+//! no packet ID and needs no rebinding logic of its own. What it hands over is a frame; what comes
+//! back is a [`Result`](crate::error::Result).
+//!
 //! # Everything a handler does is an operation
 //!
 //! A handler holds nothing and mutates nothing. It reads a snapshot of the connection through
@@ -72,7 +80,9 @@
 //! asked for concurrency here".
 
 mod connection;
+mod dispatch;
 mod handle;
 
 pub use connection::{Completion, Connection, ConnectionConfig};
+pub use dispatch::Dispatcher;
 pub use handle::{ConnectionHandle, Ctx, Op};
