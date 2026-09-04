@@ -203,6 +203,34 @@ pub enum InternalError {
         /// The configured frame limit.
         limit: usize,
     },
+
+    /// A queued packet was encoded for a configuration the connection had left by the time the
+    /// operation was drained.
+    ///
+    /// A handler sees a *snapshot* of the version and phase, and encodes against it. That is only
+    /// wrong if the same handler also moved the connection first -- `set_phase(Configuration)`
+    /// followed by a send of a `Login` packet, or a send after `set_version`. Operations drain in
+    /// queue order, so the correct orderings (send, *then* switch) can never trip this; only the
+    /// mistake can.
+    ///
+    /// Without the check those bytes would go out with an ID the peer resolves against a different
+    /// table, which is a desynchronised connection with no diagnostic on either side.
+    #[error(
+        "`{packet}` was encoded for version {encoded_version} phase {encoded_phase:?}, but the \
+         connection reached version {version} phase {phase:?} before it was written"
+    )]
+    StaleEncoding {
+        /// The packet that was queued.
+        packet: &'static str,
+        /// The version it was encoded for.
+        encoded_version: ProtocolVersion,
+        /// The phase it belongs to.
+        encoded_phase: Phase,
+        /// The version the connection is in now.
+        version: ProtocolVersion,
+        /// The phase the connection is in now.
+        phase: Phase,
+    },
 }
 
 /// The driver's error type.

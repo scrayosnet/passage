@@ -139,43 +139,6 @@ pub fn ids(version: ProtocolVersion, table: &[(ProtocolVersion, i32)]) -> Option
         .map(|(_, id)| *id)
 }
 
-/// A packet whose type has been erased, so the driver can carry it in an
-/// [`Op::Send`](crate::conn::Op::Send).
-///
-/// Encoding happens on the driver, at the moment the operation is drained. That is what lets a
-/// handler queue a packet without knowing the negotiated version, and what keeps the bytes on the
-/// wire in operation order rather than in whatever order handlers finished encoding.
-pub trait AnyPacket: Send + Sync {
-    /// The name of the packet.
-    fn name(&self) -> &'static str;
-
-    /// The packet ID in the given protocol version.
-    fn id(&self, version: ProtocolVersion) -> Option<i32>;
-
-    /// Encodes the payload.
-    fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> Result<()>;
-}
-
-/// Wraps a [`Packet`] to erase its type.
-///
-/// A wrapper rather than a blanket `impl<P: Packet> AnyPacket for P`, so that a packet type never
-/// has two inherent-looking `encode` methods to disambiguate between.
-pub(crate) struct Erased<P>(pub(crate) P);
-
-impl<P: Packet> AnyPacket for Erased<P> {
-    fn name(&self) -> &'static str {
-        P::NAME
-    }
-
-    fn id(&self, version: ProtocolVersion) -> Option<i32> {
-        P::id(version)
-    }
-
-    fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> Result<()> {
-        Packet::encode(&self.0, w, version)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

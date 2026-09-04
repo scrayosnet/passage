@@ -21,14 +21,21 @@
 //! The cost is that a handler cannot observe its own effects: `ctx.send(..)` then `ctx.state` still
 //! shows the old state. That is the point -- the alternative is a handler that half-applied its
 //! changes before returning an error.
+//!
+//! # Two types, not three
+//!
+//! [`ConnHandle`] holds the queue and the connection's configuration *by value*: an
+//! `UnboundedSender` and a `CancellationToken` are already cheap clones, so wrapping them in a
+//! shared allocation bought nothing and cost an indirection on every queued operation. [`Ctx`] is
+//! then a borrow of a handle plus the two things only the driver can supply -- the state snapshot
+//! and the phase.
 
-use crate::codec::Cipher;
+use crate::codec::{Cipher, Encoded};
 use crate::error::{Error, Result};
-use crate::packet::{AnyPacket, Erased, Packet, Phase};
+use crate::packet::{Packet, Phase};
 use crate::version::ProtocolVersion;
 use crate::wire::Limits;
 use futures::future::BoxFuture;
-use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -37,8 +44,16 @@ use tokio_util::sync::CancellationToken;
 /// This is the whole vocabulary a handler has. If something is not expressible as an `Op`, a
 /// handler cannot do it.
 pub enum Op<S> {
-    /// Encode a packet with the connection's protocol version and write it.
-    Send(Box<dyn AnyPacket>),
+    /// Write an already-encoded packet, if the connection is still in the configuration it was
+    /// encoded for.
+    Send {
+        /// The ID varint and payload, plus the packet name for tracing.
+        encoded: Encoded,
+        /// The protocol version the bytes were encoded for.
+        version: ProtocolVersion,
+        /// The phase the packet belongs to.
+        phase: Phase,
+    },
 
     /// Enable encryption for every byte from here on.
     Encrypt(Box<dyn Cipher>),
@@ -70,7 +85,7 @@ pub enum Op<S> {
 impl<S> std::fmt::Debug for Op<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Op::Send(packet) => write!(f, "Send({})", packet.name()),
+            Op::Send { encoded, .. } => write!(f, "Send({})", encoded.name),
             Op::Encrypt(_) => f.write_str("Encrypt"),
             Op::SetVersion(version) => write!(f, "SetVersion({version})"),
             Op::SetPhase(phase) => write!(f, "SetPhase({phase:?})"),
@@ -82,48 +97,90 @@ impl<S> std::fmt::Debug for Op<S> {
     }
 }
 
-struct Shared<S> {
-    ops: mpsc::UnboundedSender<Op<S>>,
-    shutdown: CancellationToken,
-}
-
 /// A cheap, cloneable handle to a live connection.
 ///
-/// This is what a handler keeps when it moves work into a background task. Every method is a
-/// channel send, so it is safe to hold across await points and cannot block.
+/// This is what a handler keeps when it moves work into a background task. Every method is an
+/// encode plus a channel send, so it is safe to hold across await points and cannot block.
+///
+/// The handle carries the protocol version it was created for. The version is pinned once, by the
+/// handshake, and the driver re-stamps its own handle when that happens -- so a handle taken from a
+/// [`Ctx`] is always current, and one taken from
+/// [`Driver::new`](crate::driver::Driver::new) is not (it predates the handshake, and is meant for
+/// [`close`](ConnHandle::close) and [`shutdown`](ConnHandle::shutdown) rather than for sending).
 pub struct ConnHandle<S> {
-    shared: Arc<Shared<S>>,
+    ops: mpsc::UnboundedSender<Op<S>>,
+    shutdown: CancellationToken,
+    version: ProtocolVersion,
+    limits: Limits,
 }
 
 // Derived `Clone` would demand `S: Clone`, which is wrong: the state is never cloned, only shared.
 impl<S> Clone for ConnHandle<S> {
     fn clone(&self) -> Self {
         Self {
-            shared: Arc::clone(&self.shared),
+            ops: self.ops.clone(),
+            shutdown: self.shutdown.clone(),
+            version: self.version,
+            limits: self.limits,
         }
     }
 }
 
 impl<S> ConnHandle<S> {
     /// Creates a handle and the receiving end of its operation queue.
-    pub(crate) fn new(shutdown: CancellationToken) -> (Self, mpsc::UnboundedReceiver<Op<S>>) {
+    pub(crate) fn new(
+        shutdown: CancellationToken,
+        version: ProtocolVersion,
+        limits: Limits,
+    ) -> (Self, mpsc::UnboundedReceiver<Op<S>>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let shared = Shared { ops: tx, shutdown };
         (
             Self {
-                shared: Arc::new(shared),
+                ops: tx,
+                shutdown,
+                version,
+                limits,
             },
             rx,
         )
     }
 
-    /// Queues a packet.
+    /// The same handle, stamped for another protocol version.
+    pub(crate) fn at_version(&self, version: ProtocolVersion) -> Self {
+        Self {
+            version,
+            ..self.clone()
+        }
+    }
+
+    /// The protocol version this handle encodes for.
+    #[must_use]
+    pub fn version(&self) -> ProtocolVersion {
+        self.version
+    }
+
+    /// The decoding limits of this connection.
+    #[must_use]
+    pub fn limits(&self) -> Limits {
+        self.limits
+    }
+
+    /// Encodes a packet and queues it.
     ///
-    /// The packet is encoded when the operation is drained, against whatever version the connection
-    /// has by then -- so a handler never has to know the version to send something, and a task that
-    /// outlives its handler cannot encode against a stale one.
+    /// The encode happens here, not on the driver: an ID that does not exist in this version, a
+    /// gated field left unset, or a packet too large for a frame is reported to the code that made
+    /// the mistake instead of surfacing later as a connection failure with no obvious author.
+    ///
+    /// The version and the packet's phase travel with the bytes, and the driver refuses to write
+    /// them if the connection has moved on -- see
+    /// [`InternalError::StaleEncoding`](crate::error::InternalError::StaleEncoding).
     pub fn send<P: Packet>(&self, packet: P) -> Result<()> {
-        self.queue(Op::Send(Box::new(Erased(packet))))
+        let encoded = Encoded::of(&packet, self.version, self.limits)?;
+        self.queue(Op::Send {
+            encoded,
+            version: self.version,
+            phase: P::PHASE,
+        })
     }
 
     /// Queues an encryption switch, applying to every byte after the packets queued so far.
@@ -135,6 +192,10 @@ impl<S> ConnHandle<S> {
     ///
     /// It decides which IDs are used for packets queued after it and which decode table the driver
     /// uses for the next frame. In a server this is called once, from the handshake handler.
+    ///
+    /// A handler that pins the version cannot also send in it: its own view of the version is the
+    /// snapshot from before the change, so the send would be refused as a stale encoding. Answer
+    /// from the next handler, which sees the pinned version.
     pub fn set_version(&self, version: ProtocolVersion) -> Result<()> {
         self.queue(Op::SetVersion(version))
     }
@@ -143,7 +204,8 @@ impl<S> ConnHandle<S> {
     ///
     /// Because this is an operation, it lands exactly between the packet queued before it and the
     /// one queued after -- so "send the last packet of this phase, then switch" is expressible, and
-    /// the peer's next frame is decoded against the table the handler intended.
+    /// the peer's next frame is decoded against the table the handler intended. The reverse order
+    /// is the mistake, and it is refused rather than written.
     pub fn set_phase(&self, phase: Phase) -> Result<()> {
         self.queue(Op::SetPhase(phase))
     }
@@ -225,11 +287,11 @@ impl<S> ConnHandle<S> {
     /// The token that is cancelled when the connection ends.
     #[must_use]
     pub fn shutdown(&self) -> &CancellationToken {
-        &self.shared.shutdown
+        &self.shutdown
     }
 
     fn queue(&self, op: Op<S>) -> Result<()> {
-        self.shared.ops.send(op).map_err(|_| Error::Closed)
+        self.ops.send(op).map_err(|_| Error::Closed)
     }
 }
 
@@ -245,32 +307,18 @@ pub struct Ctx<'a, S> {
     /// The connection handle. Clone it into a background task.
     pub conn: &'a ConnHandle<S>,
 
-    limits: Limits,
-    version: ProtocolVersion,
     phase: Phase,
 }
 
 impl<'a, S> Ctx<'a, S> {
-    pub(crate) fn new(
-        state: &'a S,
-        conn: &'a ConnHandle<S>,
-        limits: Limits,
-        version: ProtocolVersion,
-        phase: Phase,
-    ) -> Self {
-        Self {
-            state,
-            conn,
-            limits,
-            version,
-            phase,
-        }
+    pub(crate) fn new(state: &'a S, conn: &'a ConnHandle<S>, phase: Phase) -> Self {
+        Self { state, conn, phase }
     }
 
     /// The decoding limits of this connection.
     #[must_use]
     pub fn limits(&self) -> Limits {
-        self.limits
+        self.conn.limits()
     }
 
     /// The negotiated protocol version.
@@ -278,7 +326,7 @@ impl<'a, S> Ctx<'a, S> {
     /// Capture this into a background task that needs it: it does not change after the handshake.
     #[must_use]
     pub fn version(&self) -> ProtocolVersion {
-        self.version
+        self.conn.version()
     }
 
     /// The phase the connection is in.
@@ -287,7 +335,7 @@ impl<'a, S> Ctx<'a, S> {
         self.phase
     }
 
-    /// Queues a packet. See [`ConnHandle::send`].
+    /// Encodes a packet and queues it. See [`ConnHandle::send`].
     pub fn send<P: Packet>(&self, packet: P) -> Result<()> {
         self.conn.send(packet)
     }

@@ -11,8 +11,8 @@ use passage_driver::demo::packets::{
 };
 use passage_driver::demo::server::{SUPPORTED_VERSIONS, Session, router};
 use passage_driver::driver::{Completion, Driver, DriverConfig};
-use passage_driver::error::{BuildError, Class, Result};
-use passage_driver::packet::{Direction, Packet};
+use passage_driver::error::{BuildError, Class, Error, InternalError, Result};
+use passage_driver::packet::{Direction, Packet, Phase};
 use passage_driver::router::Router;
 use passage_driver::version::{ProtocolVersion, versions};
 use passage_driver::wire::{Limits, Reader, Writer};
@@ -528,6 +528,140 @@ async fn a_lifetime_deadline_bounds_even_a_chatty_connection() {
         Completion::TimedOut,
     );
     chatter.abort();
+}
+
+/// A two-packet router whose status handler is supplied by the caller, so the tests below can put
+/// a deliberate ordering mistake in it.
+fn status_router<H>(on_status: H) -> Router<Session>
+where
+    H: Fn(Ctx<'_, Session>, StatusRequest) -> Result<()> + Send + Sync + 'static,
+{
+    Router::builder(Direction::Serverbound)
+        .on::<Intention, _>(|ctx: Ctx<'_, Session>, packet: Intention| {
+            ctx.set_version(packet.protocol_version)?;
+            ctx.set_phase(Phase::Status)
+        })
+        .on::<StatusRequest, _>(on_status)
+        .build(SUPPORTED_VERSIONS.iter().copied())
+        .expect("builds")
+}
+
+fn serve_router(router: Router<Session>) -> (TestClient, JoinHandle<Result<Completion>>) {
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let (driver, _handle) = Driver::new(
+        server_io,
+        Arc::new(router),
+        Session::default(),
+        DriverConfig::default(),
+        CancellationToken::new(),
+    );
+    (TestClient::new(client_io), tokio::spawn(driver.run()))
+}
+
+fn status_response() -> StatusResponse {
+    StatusResponse {
+        body: r#"{"description":{"text":"hi"}}"#.to_owned(),
+    }
+}
+
+#[tokio::test]
+async fn a_packet_encoded_for_a_phase_the_connection_left_is_refused() {
+    // The mistake the snapshot semantics allow: switch phase, *then* send a packet of the phase you
+    // just left. Operations drain in queue order, so those bytes would reach the client with an ID
+    // it resolves against the configuration table -- a desynchronised connection with no diagnostic
+    // on either side.
+    let (mut client, server) = serve_router(status_router(
+        |ctx: Ctx<'_, Session>, _packet: StatusRequest| {
+            ctx.set_phase(Phase::Configuration)?;
+            ctx.send(status_response())
+        },
+    ));
+
+    client
+        .send(&intention(versions::V1_21, Intent::Status))
+        .await;
+    client.version = versions::V1_21;
+    client.send(&StatusRequest).await;
+
+    let err = server
+        .await
+        .expect("no panic")
+        .expect_err("must refuse to write the packet");
+    assert_eq!(err.class(), Class::Internal);
+    assert!(
+        matches!(
+            err,
+            Error::Internal(InternalError::StaleEncoding {
+                packet: "StatusResponse",
+                encoded_phase: Phase::Status,
+                phase: Phase::Configuration,
+                ..
+            })
+        ),
+        "{err}",
+    );
+}
+
+#[tokio::test]
+async fn a_packet_encoded_for_a_superseded_version_is_refused() {
+    // Same guard, other axis: a handler that re-pins the version cannot also answer in it, because
+    // its own view of the version is the snapshot from before the change.
+    let (mut client, server) = serve_router(status_router(
+        |ctx: Ctx<'_, Session>, _packet: StatusRequest| {
+            ctx.set_version(versions::V26_2)?;
+            ctx.send(status_response())
+        },
+    ));
+
+    client
+        .send(&intention(versions::V1_21, Intent::Status))
+        .await;
+    client.version = versions::V1_21;
+    client.send(&StatusRequest).await;
+
+    let err = server
+        .await
+        .expect("no panic")
+        .expect_err("must refuse to write the packet");
+    assert!(
+        matches!(
+            err,
+            Error::Internal(InternalError::StaleEncoding {
+                encoded_version: v,
+                version: w,
+                ..
+            }) if v == versions::V1_21 && w == versions::V26_2
+        ),
+        "{err}",
+    );
+}
+
+#[tokio::test]
+async fn sending_before_switching_phase_is_the_order_that_works() {
+    // The guard must not break the pattern the design promises: "send the last packet of this
+    // phase, then switch". Operations drain in order, so the send is written while the connection
+    // is still in the packet's own phase.
+    let (mut client, server) = serve_router(status_router(
+        |ctx: Ctx<'_, Session>, _packet: StatusRequest| {
+            ctx.send(status_response())?;
+            ctx.set_phase(Phase::Configuration)?;
+            ctx.close()
+        },
+    ));
+
+    client
+        .send(&intention(versions::V1_21, Intent::Status))
+        .await;
+    client.version = versions::V1_21;
+    client.send(&StatusRequest).await;
+
+    let status = client.expect::<StatusResponse>().await;
+    assert_eq!(status, status_response());
+    client.expect_eof().await;
+    assert_eq!(
+        server.await.expect("no panic").expect("no error"),
+        Completion::Closed,
+    );
 }
 
 #[tokio::test]

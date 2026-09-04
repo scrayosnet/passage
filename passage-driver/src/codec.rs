@@ -5,7 +5,7 @@
 //! packet is, which is what lets the same codec serve a client, a server, and a test harness.
 
 use crate::error::{Error, InternalError, ProtocolError, Result};
-use crate::packet::{AnyPacket, Packet};
+use crate::packet::Packet;
 use crate::version::ProtocolVersion;
 use crate::wire::{Limits, Reader, Writer};
 use bytes::{Bytes, BytesMut};
@@ -25,6 +25,18 @@ pub trait Cipher: Send + 'static {
     fn decrypt(&mut self, buf: &mut [u8]);
 }
 
+/// So that [`FrameCodec`] can hold either a concrete cipher (monomorphised, inlinable) or a
+/// `Box<dyn Cipher>` chosen at runtime, without two code paths.
+impl<C: Cipher + ?Sized> Cipher for Box<C> {
+    fn encrypt(&mut self, buf: &mut [u8]) {
+        (**self).encrypt(buf);
+    }
+
+    fn decrypt(&mut self, buf: &mut [u8]) {
+        (**self).decrypt(buf);
+    }
+}
+
 /// A decoded frame: the packet ID and its still-undecoded payload.
 ///
 /// The payload is a [`Bytes`] view into the read buffer, so frames the router does not know cost
@@ -39,6 +51,9 @@ pub struct Frame {
 }
 
 /// A pre-encoded outbound packet: the ID varint followed by the payload, without a length prefix.
+///
+/// [`Bytes`] rather than a boxed packet, so queueing it is a move and the encode happened once, in
+/// the handler that knew what it was sending.
 #[derive(Clone, Debug)]
 pub struct Encoded {
     /// The packet name, for tracing and metrics.
@@ -51,49 +66,26 @@ pub struct Encoded {
 impl Encoded {
     /// Encodes a packet for the given protocol version.
     ///
-    /// This and [`Encoded::of_any`] are the only places an outbound packet ID is resolved, so no
-    /// call site can drift from the ID table in the packet's own declaration.
+    /// This is the only place an outbound packet ID is resolved, so no call site can drift from the
+    /// ID table in the packet's own declaration.
     pub fn of<P: Packet>(packet: &P, version: ProtocolVersion, limits: Limits) -> Result<Self> {
-        Self::build(P::NAME, P::id(version), version, limits, |w| {
-            packet.encode(w, version)
-        })
-    }
-
-    /// Encodes a type-erased packet, as carried by [`Op::Send`](crate::conn::Op::Send).
-    pub fn of_any(
-        packet: &dyn AnyPacket,
-        version: ProtocolVersion,
-        limits: Limits,
-    ) -> Result<Self> {
-        Self::build(packet.name(), packet.id(version), version, limits, |w| {
-            packet.encode(w, version)
-        })
-    }
-
-    fn build(
-        name: &'static str,
-        id: Option<i32>,
-        version: ProtocolVersion,
-        limits: Limits,
-        encode: impl FnOnce(&mut Writer<'_>) -> Result<()>,
-    ) -> Result<Self> {
         // Sending a packet that does not exist in the peer's version is an internal error, not a
         // silent no-op: the alternative is a client waiting forever for something we never sent.
-        let id = id.ok_or(InternalError::PacketNotInVersion {
-            packet: name,
+        let id = P::id(version).ok_or(InternalError::PacketNotInVersion {
+            packet: P::NAME,
             version,
         })?;
 
         let mut buf = BytesMut::with_capacity(64);
         {
-            let mut writer = Writer::new(&mut buf, name, limits);
+            let mut writer = Writer::new(&mut buf, P::NAME, limits);
             writer.var_int(id);
-            encode(&mut writer)?;
+            packet.encode(&mut writer, version)?;
         }
 
         if buf.len() > limits.max_frame_len {
             return Err(InternalError::OversizedFrame {
-                packet: name,
+                packet: P::NAME,
                 length: buf.len(),
                 limit: limits.max_frame_len,
             }
@@ -101,21 +93,26 @@ impl Encoded {
         }
 
         Ok(Self {
-            name,
+            name: P::NAME,
             bytes: buf.freeze(),
         })
     }
 }
 
 /// Frames the Minecraft packet format: `VarInt` length, `VarInt` ID, payload.
-pub struct FrameCodec {
+///
+/// Generic over the cipher so a caller with a known cipher type gets static dispatch and an
+/// inlinable `encrypt`/`decrypt`. `Box<dyn Cipher>` is the default because that is what travels
+/// through the driver's operation queue, where the concrete type is not known until the encryption
+/// handshake picks it.
+pub struct FrameCodec<C: Cipher = Box<dyn Cipher>> {
     limits: Limits,
-    cipher: Option<Box<dyn Cipher>>,
+    cipher: Option<C>,
     /// How many bytes of the read buffer have already been decrypted.
     decrypted: usize,
 }
 
-impl FrameCodec {
+impl<C: Cipher> FrameCodec<C> {
     /// Creates a codec with the given limits and no encryption.
     #[must_use]
     pub fn new(limits: Limits) -> Self {
@@ -131,7 +128,7 @@ impl FrameCodec {
     /// Correctness depends entirely on *when* this is called: every byte written before must be
     /// plaintext and every byte after must be ciphertext. The driver therefore routes this through
     /// the same ordered operation queue as packet sends instead of exposing it to handlers.
-    pub fn set_cipher(&mut self, cipher: Box<dyn Cipher>) {
+    pub fn set_cipher(&mut self, cipher: C) {
         self.cipher = Some(cipher);
     }
 
@@ -142,7 +139,7 @@ impl FrameCodec {
     }
 }
 
-impl Decoder for FrameCodec {
+impl<C: Cipher> Decoder for FrameCodec<C> {
     type Item = Frame;
     type Error = Error;
 
@@ -200,7 +197,7 @@ impl Decoder for FrameCodec {
     }
 }
 
-impl Encoder<Encoded> for FrameCodec {
+impl<C: Cipher> Encoder<Encoded> for FrameCodec<C> {
     type Error = Error;
 
     fn encode(&mut self, item: Encoded, dst: &mut BytesMut) -> Result<()> {
@@ -269,7 +266,7 @@ mod tests {
 
     #[test]
     fn frames_roundtrip() {
-        let mut codec = FrameCodec::new(Limits::default());
+        let mut codec = FrameCodec::<RotatingCipher>::new(Limits::default());
         let mut buf = BytesMut::new();
         codec
             .encode(encoded(0x42, b"hello"), &mut buf)
@@ -283,7 +280,7 @@ mod tests {
 
     #[test]
     fn partial_frames_are_not_an_error() {
-        let mut codec = FrameCodec::new(Limits::default());
+        let mut codec = FrameCodec::<RotatingCipher>::new(Limits::default());
         let mut buf = BytesMut::new();
         codec
             .encode(encoded(0x01, b"0123456789"), &mut buf)
@@ -305,7 +302,7 @@ mod tests {
 
     #[test]
     fn oversized_frames_are_rejected_without_buffering() {
-        let mut codec = FrameCodec::new(Limits {
+        let mut codec = FrameCodec::<RotatingCipher>::new(Limits {
             max_frame_len: 64,
             ..Limits::default()
         });
@@ -323,7 +320,7 @@ mod tests {
     #[test]
     fn an_oversized_frame_is_refused_on_the_way_out_too() {
         // The mirror of the test above: our own bug must not become the peer's parsing problem.
-        let mut codec = FrameCodec::new(Limits {
+        let mut codec = FrameCodec::<RotatingCipher>::new(Limits {
             max_frame_len: 16,
             ..Limits::default()
         });
@@ -338,15 +335,17 @@ mod tests {
 
     #[test]
     fn encryption_applies_from_the_switchover_point_only() {
-        let mut server = FrameCodec::new(Limits::default());
-        let mut client = FrameCodec::new(Limits::default());
+        // A concrete cipher: no `Box`, and `encrypt`/`decrypt` are static calls the compiler
+        // can inline into the framing loop.
+        let mut server = FrameCodec::<RotatingCipher>::new(Limits::default());
+        let mut client = FrameCodec::<RotatingCipher>::new(Limits::default());
         let mut wire = BytesMut::new();
 
         // Plaintext frame, then enable encryption on both ends, then two encrypted frames.
         server
             .encode(encoded(0x00, b"plain"), &mut wire)
             .expect("encodes");
-        server.set_cipher(Box::new(RotatingCipher::new()));
+        server.set_cipher(RotatingCipher::new());
         server
             .encode(encoded(0x01, b"secret"), &mut wire)
             .expect("encodes");
@@ -360,7 +359,7 @@ mod tests {
             .expect("decodes")
             .expect("complete");
         assert_eq!(&frame.payload[..], b"plain");
-        client.set_cipher(Box::new(RotatingCipher::new()));
+        client.set_cipher(RotatingCipher::new());
 
         let frame = client
             .decode(&mut wire)

@@ -37,9 +37,9 @@
 //! [`ConnHandle::spawn`](crate::conn::ConnHandle::spawn) instead. That is the difference between
 //! "the framework decided to run my handlers concurrently" and "I asked for concurrency here".
 
-use crate::codec::{Encoded, Frame, FrameCodec};
+use crate::codec::{Frame, FrameCodec};
 use crate::conn::{ConnHandle, Ctx, Op};
-use crate::error::{ProtocolError, Result};
+use crate::error::{InternalError, ProtocolError, Result};
 use crate::packet::Phase;
 use crate::router::{Dispatched, Router, Table};
 use crate::version::ProtocolVersion;
@@ -171,7 +171,8 @@ where
         shutdown: CancellationToken,
     ) -> (Self, ConnHandle<S>) {
         let table = router.table(config.initial_version);
-        let (handle, ops) = ConnHandle::new(shutdown.clone());
+        let (handle, ops) =
+            ConnHandle::new(shutdown.clone(), config.initial_version, config.limits);
 
         // A timer with no handler behind it would only wake the task up to do nothing.
         let ticker = config
@@ -273,11 +274,23 @@ where
     /// Carries out one queued operation. Returns a completion if the connection should end.
     async fn handle_op(&mut self, op: Op<S>) -> Result<Option<Completion>> {
         match op {
-            Op::Send(packet) => {
-                // Encoded here, at drain time, so the bytes are ordered by the queue rather than by
-                // whenever a handler happened to finish building the packet -- and so a handler
-                // never needs to know the version to send something.
-                let encoded = Encoded::of_any(&*packet, self.version, self.config.limits)?;
+            Op::Send {
+                encoded,
+                version,
+                phase,
+            } => {
+                // The bytes were encoded against a snapshot. Refuse them if the connection has
+                // moved on since, rather than writing an ID the peer resolves in another table.
+                if version != self.version || phase != self.phase {
+                    return Err(InternalError::StaleEncoding {
+                        packet: encoded.name,
+                        encoded_version: version,
+                        encoded_phase: phase,
+                        version: self.version,
+                        phase: self.phase,
+                    }
+                    .into());
+                }
                 trace!(packet = encoded.name, "writing packet");
                 self.framed.feed(encoded).await?;
             }
@@ -291,6 +304,10 @@ where
                 debug!(%version, "binding dispatch table");
                 self.version = version;
                 self.table = self.router.table(version);
+                // Handlers encode against the handle's version, so it has to move with us. Ours is
+                // the one every `Ctx` lends out, which is why a handle taken from a handler is
+                // always current.
+                self.handle = self.handle.at_version(version);
             }
             Op::SetPhase(phase) => {
                 trace!(?phase, "entering phase");
@@ -321,13 +338,7 @@ where
         let Some(handler) = self.router.tick_handler() else {
             return Ok(());
         };
-        handler.call(Ctx::new(
-            &self.state,
-            &self.handle,
-            self.config.limits,
-            self.version,
-            self.phase,
-        ))
+        handler.call(Ctx::new(&self.state, &self.handle, self.phase))
     }
 
     fn handle_frame(&mut self, frame: Frame) -> Result<()> {
@@ -342,13 +353,7 @@ where
             .into());
         }
 
-        let ctx = Ctx::new(
-            &self.state,
-            &self.handle,
-            self.config.limits,
-            self.version,
-            self.phase,
-        );
+        let ctx = Ctx::new(&self.state, &self.handle, self.phase);
         match self
             .router
             .dispatch(&self.table, ctx, frame.id, &frame.payload)?
