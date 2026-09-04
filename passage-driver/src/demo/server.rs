@@ -18,7 +18,7 @@ use crate::driver::Completion;
 use crate::error::{BuildError, Class, Error, ProtocolError, Result};
 use crate::packet::{Direction, Phase};
 use crate::router::{Router, UnknownPolicy};
-use crate::version::{Feature, ProtocolVersion, versions};
+use crate::version::{ProtocolVersion, versions};
 use std::time::Duration;
 use tracing::{debug, warn};
 use uuid::Uuid;
@@ -157,11 +157,10 @@ fn on_login_start(ctx: Ctx<'_, Session>, packet: LoginStart) -> Result<()> {
                 name: "textures".to_owned(),
                 value: "<signed>".to_owned(),
             }],
-            // The gated field is filled from the feature, not from a version number. On older
-            // clients this stays `None` and never reaches the wire.
-            session_id: version
-                .has(Feature::LoginSuccessSessionId)
-                .then(Uuid::new_v4),
+            // On older clients this stays `None` and never reaches the wire. If this and the
+            // codec ever disagreed about the threshold, the encoder would refuse the packet rather
+            // than truncate it -- so the duplication fails closed.
+            session_id: version.at_least(versions::V26_2).then(Uuid::new_v4),
         })
     })
 }

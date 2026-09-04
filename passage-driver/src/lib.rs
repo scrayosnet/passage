@@ -13,8 +13,9 @@
 //! # Design in one page
 //!
 //! * **Packets carry their own version mapping.** A packet implements [`Packet`](packet::Packet)
-//!   once, with an ID table keyed by protocol version ([`ids`](packet::ids)) and fields that may be
-//!   gated behind a named [`Feature`](version::Feature). One type serves every version;
+//!   once, with an ID table keyed by protocol version ([`ids`](packet::ids)) and fields gated by a
+//!   version comparison ([`at_least`](version::ProtocolVersion::at_least)). One type serves every
+//!   version;
 //!   [`Router`](router::Router) derives the decode table from the same declaration, so there is no
 //!   second place to forget. Codecs are written out rather than generated, which is what lets a
 //!   field name its own length limit and a decoder produce a domain type instead of a raw `VarInt`.

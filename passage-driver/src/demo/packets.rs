@@ -4,8 +4,8 @@
 //! hand, which is what lets each of them say something a generated one could not:
 //!
 //! * [`Intention`] decodes its `intent` field into an [`Intent`], so an invalid value is a decode
-//!   error and no handler can ever see one. It also caps `server_address` at 255 bytes rather than
-//!   at the crate-wide string backstop of ~98 KB.
+//!   error and no handler can ever see one. It also caps `server_address` at 255 bytes, where a
+//!   generated codec could only fall back on the frame limit.
 //! * [`LoginSuccess`] gained a trailing session ID in the 26.2 protocol -- one `if` in each
 //!   direction, and one type that serves every version.
 //! * [`Transfer`] does not exist before 1.20.5 -- expressed by its ID table starting there, so
@@ -13,7 +13,7 @@
 
 use crate::error::{InternalError, ProtocolError, Result};
 use crate::packet::{Direction, Packet, Phase, ids};
-use crate::version::{Feature, ProtocolVersion, versions};
+use crate::version::{ProtocolVersion, versions};
 use crate::wire::{Reader, Wire, Writer};
 use uuid::Uuid;
 
@@ -329,7 +329,7 @@ impl Packet for LoginSuccess {
             user_name: r.string("user_name", MAX_NAME_LEN * 4)?,
             properties: r.array("properties", MAX_PROPERTIES, version)?,
             // Not a field that may be missing -- a field this version does not have.
-            session_id: r.gated(version.has(Feature::LoginSuccessSessionId), Reader::uuid)?,
+            session_id: r.gated(version.at_least(versions::V26_2), Reader::uuid)?,
         })
     }
 
@@ -338,7 +338,7 @@ impl Packet for LoginSuccess {
         w.string(&self.user_name)?;
         w.array(&self.properties, version)?;
 
-        if version.has(Feature::LoginSuccessSessionId) {
+        if version.at_least(versions::V26_2) {
             // Fail closed. Emitting a frame that is one field short would desynchronise the client
             // with nothing to diagnose it from, so this refuses rather than guessing a default.
             let session_id = self.session_id.ok_or(InternalError::MissingField {
@@ -519,7 +519,7 @@ mod tests {
             // The gated field has to match what the version does with it.
             let success = login_success(
                 version
-                    .has(Feature::LoginSuccessSessionId)
+                    .at_least(versions::V26_2)
                     .then(|| Uuid::from_u128(0x5678)),
             );
             assert_eq!(roundtrip(&success, version), success);

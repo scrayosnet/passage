@@ -263,7 +263,7 @@ impl<'a> Reader<'a> {
     /// `decode` bodies stay a flat list of fields:
     ///
     /// ```ignore
-    /// session_id: r.gated(version.has(Feature::LoginSuccessSessionId), Reader::uuid)?,
+    /// session_id: r.gated(version.at_least(versions::V26_2), Reader::uuid)?,
     /// ```
     pub fn gated<T>(
         &mut self,
