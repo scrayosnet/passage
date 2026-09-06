@@ -178,7 +178,7 @@ pub enum ProtocolError {
 }
 
 /// An error caused by us: a bug in the layer above the driver.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum InternalError {
     /// A packet does not exist in the connection's protocol version, but we tried to send it.
     #[error("packet `{packet}` does not exist in protocol version {version}")]
@@ -280,6 +280,21 @@ pub enum Error {
 
     /// The connection is already gone, so the operation could not be carried out. This is not a
     /// failure of the connection -- it *is* the connection ending -- and callers usually ignore it.
+    ///
+    /// # Who can see it, and why it is a [`Class::Transport`] anyway
+    ///
+    /// Only code outside the connection's own task: a [`detach`](crate::conn::ConnectionHandle::detach)ed
+    /// task, or a handle someone kept from
+    /// [`Connection::new`](crate::conn::Connection::new). A handler, and anything
+    /// [`spawn`](crate::conn::ConnectionHandle::spawn)ed or
+    /// [`exclusive`](crate::conn::ConnectionHandle::exclusive), is polled *by* the loop that owns
+    /// the receiving end of the queue -- so for them the queue cannot be closed, and `?`-ing a
+    /// queue operation cannot produce this.
+    ///
+    /// That is why the classification does not need a fourth [`Class`]: by the time anything can
+    /// observe this, there is no connection left to report it to, and the one thing that could
+    /// (`detach`) already drops it. Where it *is* reported, the socket going away is what happened,
+    /// which is what `Transport` says.
     #[error("the connection is closed")]
     Closed,
 }

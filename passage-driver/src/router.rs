@@ -24,7 +24,7 @@
 //! start at [`ProtocolVersion::UNKNOWN`], which is enough to answer a status ping and refuse a
 //! login. Versions that are not comparable at all -- snapshots, negative numbers -- get that table
 //! too, because [`at_least`](ProtocolVersion::at_least) cannot place them (see
-//! [`ProtocolVersion::is_release`]).
+//! [`ProtocolVersion::placed`], which is also what the *outbound* ID lookup uses, so the two agree).
 //!
 //! # How a connection reaches this
 //!
@@ -42,10 +42,13 @@ use crate::wire::Reader;
 use std::sync::Arc;
 use tracing::trace;
 
-/// The highest packet ID the dispatch table covers.
+/// The highest packet ID a registration may claim.
 ///
-/// Real IDs are far below this; anything above is a registration mistake.
-const MAX_PACKET_ID: i32 = 255;
+/// This is a sanity ceiling, not the table's width: a table is sized by the IDs actually registered
+/// in its phase, so raising this costs nothing for a server that only handles a handful of packets.
+/// It has to sit above the Play phase, whose clientbound IDs already run past `0x80` -- Passage
+/// never reaches that phase, but the driver is not Passage.
+const MAX_PACKET_ID: i32 = 1023;
 
 /// The most packets a router can hold, bounded by the table's index width.
 const MAX_PACKETS: usize = u16::MAX as usize;
@@ -384,17 +387,16 @@ impl<S: 'static> Router<S> {
 
     /// The table covering `version`.
     ///
-    /// A version that [`is_release`](ProtocolVersion::is_release) gets the table of the highest
-    /// breakpoint at or below it. Anything else -- a snapshot, a negative number -- gets the floor,
-    /// because it cannot be ordered against the thresholds in any way a codec could act on.
+    /// The table of the highest breakpoint at or below it. A version that cannot be ordered against
+    /// the thresholds at all -- a snapshot, a negative number -- is [`placed`](ProtocolVersion::placed)
+    /// on the floor first, which is the same rule [`ids`](crate::packet::ids) applies on the way
+    /// out, so what a connection accepts and what it sends stay the same set.
     fn table(&self, version: ProtocolVersion) -> Arc<Table> {
-        let index = if version.is_release() {
-            self.tables
-                .partition_point(|(since, _)| version.at_least(*since))
-                .saturating_sub(1)
-        } else {
-            0
-        };
+        let version = version.placed();
+        let index = self
+            .tables
+            .partition_point(|(since, _)| version.at_least(*since))
+            .saturating_sub(1);
         // The floor is always present, so index 0 always exists.
         Arc::clone(&self.tables[index].1)
     }

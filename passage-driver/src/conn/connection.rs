@@ -25,6 +25,16 @@ use tracing::{debug, trace};
 /// How long a connection may spend writing what it owes the peer once it is already ending.
 const DEFAULT_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// How long a connection may last by default.
+///
+/// A default is the security posture, and "no bound at all" is not one: the documented minimal
+/// `serve(listener, router, state).await` would otherwise accept sockets that idle forever, and
+/// holding one open costs a peer nothing. Two minutes is what the previous implementation's
+/// listener applied and is an eternity for a handshake, a login and a transfer. A server that
+/// genuinely runs long connections -- anything that reaches [`Phase::Play`] -- says so by setting
+/// this itself.
+const DEFAULT_MAX_LIFETIME: Duration = Duration::from_secs(120);
+
 /// What ended a connection that we did not end ourselves.
 ///
 /// The `Err` half of [`Outcome::result`], and exactly what
@@ -137,7 +147,7 @@ pub struct ConnectionConfig {
     /// the connection cannot.
     pub tick_interval: Option<Duration>,
 
-    /// Hard cap on the whole connection.
+    /// Hard cap on the whole connection. Two minutes unless you say otherwise.
     ///
     /// Passage connections are short by construction: a status ping is two packets and a login is a
     /// handful. This belongs to the connection rather than to the caller because the connection owns the
@@ -145,6 +155,10 @@ pub struct ConnectionConfig {
     /// future mid-flight, so the shutdown path never runs and in-flight tasks are not cancelled
     /// cleanly. It is also the backstop for a task that never resolves while the read gate is shut,
     /// and for a peer that stops reading (every socket write is raced against it).
+    ///
+    /// `None` removes the cap, which is what a server that reaches [`Phase::Play`] wants -- and is
+    /// a deliberate statement rather than the default, because a socket nobody bounds is free for a
+    /// peer to hold and not for us.
     pub max_lifetime: Option<Duration>,
 
     /// How long the connection may spend writing what it owes the peer *after* it has started
@@ -169,7 +183,7 @@ impl Default for ConnectionConfig {
         Self {
             limits: Limits::default(),
             tick_interval: None,
-            max_lifetime: None,
+            max_lifetime: Some(DEFAULT_MAX_LIFETIME),
             close_timeout: Some(DEFAULT_CLOSE_TIMEOUT),
             initial_version: ProtocolVersion::UNKNOWN,
             initial_phase: Phase::Handshake,

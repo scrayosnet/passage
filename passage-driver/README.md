@@ -83,8 +83,13 @@ const IDS: &[(ProtocolVersion, i32)] = &[(versions::V26_2, 0x05), (versions::V1_
 Because that table is data, the router reads the *thresholds* out of every registered packet and
 builds one dispatch table per version at which dispatch actually changes. There is no list of
 supported versions, which means there is none to leave a release out of: 1.21.2 is served exactly
-like 1.21.1 because nothing between them differs. Snapshots are the one thing refused outright --
-they set bit 30, so every snapshot compares above every release and no threshold can place them.
+like 1.21.1 because nothing between them differs.
+
+A version no threshold can place -- a snapshot, which sets bit 30 and so compares above every
+release, or a negative number a client is free to send -- is put on the floor instead, by one method
+that both directions use. So such a peer is still *answerable*: it gets a status response, which is
+how it learns which version to install, and a reason if it tries to log in. What it does not get is
+a version-gated field written for a client that cannot read it.
 
 ## Ending is something you can answer
 

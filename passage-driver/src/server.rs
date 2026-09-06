@@ -107,7 +107,20 @@ impl Listener for TcpListener {
     type Addr = std::net::SocketAddr;
 
     async fn accept(&mut self) -> io::Result<(TcpStream, std::net::SocketAddr)> {
-        TcpListener::accept(self).await
+        let (io, addr) = TcpListener::accept(self).await?;
+
+        // Nagle holds a small write back waiting for more, and this protocol's writes are small and
+        // final: a status response, a pong, a transfer. Batching them against a delayed ACK costs up
+        // to ~40 ms on the one latency a player actually sees, the ping in the server list. There
+        // is no switch for it because there is no case for the other setting -- a listener that
+        // wants different socket options is a `Listener` impl, which is a dozen lines.
+        //
+        // Not fatal: the socket is still perfectly usable, it is just slower than it could be.
+        if let Err(err) = io.set_nodelay(true) {
+            trace!(cause = %err, ?addr, "could not disable Nagle on an accepted socket");
+        }
+
+        Ok((io, addr))
     }
 }
 

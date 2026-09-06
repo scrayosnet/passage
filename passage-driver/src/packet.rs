@@ -34,10 +34,14 @@ use crate::wire::{Reader, Writer};
 /// The protocol phase a packet belongs to.
 ///
 /// The phase is part of a packet's identity: IDs are only unique within a phase and direction.
+///
+/// The discriminants are the table index, so adding a phase means adding a variant and adding it to
+/// [`ALL`](Phase::ALL) -- [`COUNT`](Phase::COUNT) and [`index`](Phase::index) follow on their own.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(usize)]
 pub enum Phase {
     /// Before the handshake has been processed.
-    Handshake,
+    Handshake = 0,
     /// Server list ping.
     Status,
     /// Login and encryption.
@@ -49,11 +53,8 @@ pub enum Phase {
 }
 
 impl Phase {
-    /// The number of phases, for table sizing.
-    pub const COUNT: usize = 5;
-
     /// Every phase, in [`Phase::index`] order.
-    pub const ALL: [Phase; Self::COUNT] = [
+    pub const ALL: [Phase; 5] = [
         Phase::Handshake,
         Phase::Status,
         Phase::Login,
@@ -61,16 +62,13 @@ impl Phase {
         Phase::Play,
     ];
 
+    /// The number of phases, for table sizing.
+    pub const COUNT: usize = Self::ALL.len();
+
     /// A dense index for table lookups.
     #[must_use]
     pub const fn index(self) -> usize {
-        match self {
-            Phase::Handshake => 0,
-            Phase::Status => 1,
-            Phase::Login => 2,
-            Phase::Configuration => 3,
-            Phase::Play => 4,
-        }
+        self as usize
     }
 }
 
@@ -145,8 +143,13 @@ pub trait Packet: Sized + Send + Sync + 'static {
 /// The first entry whose version is `<=` the connection's version wins. If none matches, the packet
 /// does not exist in that version and the result is [`None`] -- which makes sending it an internal
 /// error instead of a malformed frame, and keeps it out of the decode table entirely.
+///
+/// A version the table cannot order -- a snapshot, a negative number -- resolves against the floor
+/// instead, exactly as [`Router`](crate::router::Router) picks its dispatch table. See
+/// [`ProtocolVersion::placed`] for why the two have to agree.
 #[must_use]
 pub fn ids(version: ProtocolVersion, table: &[(ProtocolVersion, i32)]) -> Option<i32> {
+    let version = version.placed();
     table
         .iter()
         .find(|(since, _)| version.at_least(*since))
@@ -168,6 +171,21 @@ mod tests {
         assert_eq!(ids(ProtocolVersion::new(765), &table), None);
         // A hostile version must not resolve to anything either.
         assert_eq!(ids(ProtocolVersion::new(i32::MIN), &table), None);
+    }
+
+    #[test]
+    fn a_version_that_cannot_be_placed_resolves_like_the_floor() {
+        let versioned = [(versions::V26_2, 0x05), (versions::V1_20_5, 0x02)];
+        let anchored = [(ProtocolVersion::UNKNOWN, 0x00)];
+        // A snapshot is numerically above every release, so a plain `>=` would hand it the newest
+        // ID -- while the router dispatches it against the floor table. That disagreement is the
+        // bug: an ID we would accept is not one we would send.
+        let snapshot = ProtocolVersion::new(0x4000_0000 | 132);
+        assert_eq!(ids(snapshot, &versioned), None);
+        assert_eq!(ids(snapshot, &anchored), Some(0x00));
+        // And a client that sends garbage can still be answered with the packets that never
+        // depended on a version: a status response, and a reason for turning it away.
+        assert_eq!(ids(ProtocolVersion::new(-1), &anchored), Some(0x00));
     }
 
     #[test]

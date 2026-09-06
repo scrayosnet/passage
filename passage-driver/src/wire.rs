@@ -17,9 +17,16 @@
 //!
 //! # Encodings are chosen by the call, not by the type
 //!
-//! There is no `Wire` impl for `i32`, because the protocol has three different encodings for it.
-//! A decoder says `r.var_int()` or `r.u16()` and the choice is visible at the point it is made.
-//! [`Wire`] exists only for *composite* values that appear in more than one packet.
+//! There is no `Wire` impl for `i32`, because the protocol has more than one encoding for it: a
+//! `VarInt` in most packets, four fixed big-endian bytes in others. A decoder says `r.var_int()` or
+//! `r.i32()`, and the choice is visible at the point it is made -- an impl keyed on the type could
+//! only pick one and be wrong half the time. [`Wire`] exists only for *composite* values that
+//! appear in more than one packet.
+//!
+//! The same distinction runs through the two kinds of absent value. [`Reader::optional`] is the
+//! protocol's `Optional` -- a boolean on the wire, and the peer's choice. [`Reader::gated`] is a
+//! version-gated field, which costs no bytes and is ours. They produce the same `Option<T>` from
+//! entirely different bytes, so they are separate calls rather than one with a flag.
 
 use crate::error::{InternalError, ProtocolError, Result};
 use crate::version::ProtocolVersion;
@@ -52,9 +59,12 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            // Passage never legitimately receives large packets; the biggest is a status response
-            // it sends itself.
-            max_frame_len: 8 * 1024,
+            // Sized by the biggest thing a server legitimately *sends*, which is a status response
+            // carrying a favicon -- base64 of a 64x64 PNG, plus a MOTD and a sample. The vanilla
+            // client caps that JSON at 32,767 characters, so a limit below it would refuse ordinary
+            // content: an earlier 8 KiB default did exactly that, as our own `OversizedFrame`.
+            // Still 64x under vanilla's own inbound cap, and it bounds every field transitively.
+            max_frame_len: 32 * 1024,
             canonical_varints: true,
         }
     }
@@ -116,6 +126,11 @@ impl<'a> Reader<'a> {
         Ok(self.take(1)?[0])
     }
 
+    /// Reads a signed byte.
+    pub fn i8(&mut self) -> Result<i8> {
+        Ok(self.u8()? as i8)
+    }
+
     /// Reads a boolean. Any non-zero byte is `true`, matching the vanilla implementation.
     pub fn bool(&mut self) -> Result<bool> {
         Ok(self.u8()? != 0)
@@ -123,29 +138,52 @@ impl<'a> Reader<'a> {
 
     /// Reads a big-endian `u16`.
     pub fn u16(&mut self) -> Result<u16> {
-        let bytes = self.take(2)?;
-        Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+        Ok(u16::from_be_bytes(self.fixed()?))
+    }
+
+    /// Reads a big-endian `i16`.
+    pub fn i16(&mut self) -> Result<i16> {
+        Ok(i16::from_be_bytes(self.fixed()?))
+    }
+
+    /// Reads a big-endian `i32`.
+    ///
+    /// Not the same encoding as [`var_int`](Reader::var_int), and the protocol uses both: block
+    /// coordinates and entity IDs are `VarInt`s, while a chunk's `x`/`z` are four fixed bytes.
+    pub fn i32(&mut self) -> Result<i32> {
+        Ok(i32::from_be_bytes(self.fixed()?))
     }
 
     /// Reads a big-endian `i64`.
     pub fn i64(&mut self) -> Result<i64> {
-        let bytes = self.take(8)?;
-        let mut array = [0u8; 8];
-        array.copy_from_slice(bytes);
-        Ok(i64::from_be_bytes(array))
+        Ok(i64::from_be_bytes(self.fixed()?))
     }
 
     /// Reads a big-endian `u64`.
     pub fn u64(&mut self) -> Result<u64> {
-        Ok(self.i64()? as u64)
+        Ok(u64::from_be_bytes(self.fixed()?))
+    }
+
+    /// Reads a big-endian `f32`.
+    pub fn f32(&mut self) -> Result<f32> {
+        Ok(f32::from_be_bytes(self.fixed()?))
+    }
+
+    /// Reads a big-endian `f64`.
+    pub fn f64(&mut self) -> Result<f64> {
+        Ok(f64::from_be_bytes(self.fixed()?))
+    }
+
+    /// Consumes exactly `N` bytes as an array, for the fixed-width numbers above.
+    fn fixed<const N: usize>(&mut self) -> Result<[u8; N]> {
+        let mut array = [0u8; N];
+        array.copy_from_slice(self.take(N)?);
+        Ok(array)
     }
 
     /// Reads a UUID (two big-endian `u64`s).
     pub fn uuid(&mut self) -> Result<Uuid> {
-        let bytes = self.take(16)?;
-        let mut array = [0u8; 16];
-        array.copy_from_slice(bytes);
-        Ok(Uuid::from_bytes(array))
+        Ok(Uuid::from_bytes(self.fixed()?))
     }
 
     /// Reads a `VarInt`.
@@ -265,6 +303,11 @@ impl<'a> Reader<'a> {
     /// ```ignore
     /// session_id: r.gated(version.at_least(versions::V26_2), Reader::uuid)?,
     /// ```
+    ///
+    /// It is **not** the protocol's `Optional`, which is a boolean on the wire -- see
+    /// [`optional`](Reader::optional). The two produce the same `Option<T>` from entirely different
+    /// bytes: this one reads nothing at all when the version does not have the field, and the peer
+    /// cannot influence it.
     pub fn gated<T>(
         &mut self,
         condition: bool,
@@ -275,6 +318,20 @@ impl<'a> Reader<'a> {
         } else {
             Ok(None)
         }
+    }
+
+    /// Reads a value preceded by a boolean saying whether it is there.
+    ///
+    /// This is the protocol's `Optional`: one byte, then the value if that byte was set. Whether
+    /// the field is present is the *peer's* choice, which is the whole difference from
+    /// [`gated`](Reader::gated), where it is the version's.
+    ///
+    /// ```ignore
+    /// payload: r.optional(|r| r.bytes("payload", MAX_COOKIE_LEN))?,
+    /// ```
+    pub fn optional<T>(&mut self, read: impl FnOnce(&mut Self) -> Result<T>) -> Result<Option<T>> {
+        let present = self.bool()?;
+        self.gated(present, read)
     }
 
     /// Borrows the rest of the buffer without consuming it.
@@ -342,6 +399,11 @@ impl<'a> Writer<'a> {
         self.buf.put_u8(value);
     }
 
+    /// Writes a signed byte.
+    pub fn i8(&mut self, value: i8) {
+        self.buf.put_i8(value);
+    }
+
     /// Writes a boolean.
     pub fn bool(&mut self, value: bool) {
         self.buf.put_u8(u8::from(value));
@@ -352,6 +414,16 @@ impl<'a> Writer<'a> {
         self.buf.put_u16(value);
     }
 
+    /// Writes a big-endian `i16`.
+    pub fn i16(&mut self, value: i16) {
+        self.buf.put_i16(value);
+    }
+
+    /// Writes a big-endian `i32`. Not the same encoding as [`var_int`](Writer::var_int).
+    pub fn i32(&mut self, value: i32) {
+        self.buf.put_i32(value);
+    }
+
     /// Writes a big-endian `i64`.
     pub fn i64(&mut self, value: i64) {
         self.buf.put_i64(value);
@@ -360,6 +432,16 @@ impl<'a> Writer<'a> {
     /// Writes a big-endian `u64`.
     pub fn u64(&mut self, value: u64) {
         self.buf.put_u64(value);
+    }
+
+    /// Writes a big-endian `f32`.
+    pub fn f32(&mut self, value: f32) {
+        self.buf.put_f32(value);
+    }
+
+    /// Writes a big-endian `f64`.
+    pub fn f64(&mut self, value: f64) {
+        self.buf.put_f64(value);
     }
 
     /// Writes a UUID.
@@ -423,6 +505,27 @@ impl<'a> Writer<'a> {
     /// Writes a length-prefixed string.
     pub fn string(&mut self, value: &str) -> Result<()> {
         self.bytes(value.as_bytes())
+    }
+
+    /// Writes a value preceded by a boolean saying whether it is there.
+    ///
+    /// The write half of [`Reader::optional`]. The boolean is emitted either way, so a `None` is
+    /// one byte on the wire rather than nothing -- which is exactly what distinguishes this from a
+    /// version-gated field, where a missing value costs no bytes at all.
+    ///
+    /// ```ignore
+    /// w.optional(self.payload.as_deref(), |w, payload| w.bytes(payload))?;
+    /// ```
+    pub fn optional<T: ?Sized>(
+        &mut self,
+        value: Option<&T>,
+        write: impl FnOnce(&mut Self, &T) -> Result<()>,
+    ) -> Result<()> {
+        self.bool(value.is_some());
+        match value {
+            Some(value) => write(self, value),
+            None => Ok(()),
+        }
     }
 
     /// Writes a length-prefixed array of composite values.
@@ -592,6 +695,83 @@ mod tests {
             Error::Internal(InternalError::OversizedFrame { limit: 16, .. })
         ));
         assert!(buf.is_empty(), "nothing may reach the buffer");
+    }
+
+    #[test]
+    fn fixed_width_numbers_roundtrip() {
+        let buf = write(|w| {
+            w.i8(i8::MIN);
+            w.u8(u8::MAX);
+            w.i16(i16::MIN);
+            w.u16(u16::MAX);
+            w.i32(i32::MIN);
+            w.i64(i64::MIN);
+            w.u64(u64::MAX);
+            w.f32(std::f32::consts::PI);
+            w.f64(-0.0);
+        });
+        let mut r = reader(&buf);
+        assert_eq!(r.i8().expect("decodes"), i8::MIN);
+        assert_eq!(r.u8().expect("decodes"), u8::MAX);
+        assert_eq!(r.i16().expect("decodes"), i16::MIN);
+        assert_eq!(r.u16().expect("decodes"), u16::MAX);
+        assert_eq!(r.i32().expect("decodes"), i32::MIN);
+        assert_eq!(r.i64().expect("decodes"), i64::MIN);
+        assert_eq!(r.u64().expect("decodes"), u64::MAX);
+        assert_eq!(r.f32().expect("decodes"), std::f32::consts::PI);
+        // Big-endian, not native: `-0.0` differs from `0.0` only in the first byte.
+        assert!(r.f64().expect("decodes").is_sign_negative());
+        r.finish("Test").expect("consumes the whole payload");
+    }
+
+    #[test]
+    fn a_fixed_width_number_that_runs_off_the_end_is_eof() {
+        // Three bytes where four are needed: no panic, no partial value.
+        let err = reader(&[0x01, 0x02, 0x03]).i32().expect_err("must reject");
+        assert!(matches!(
+            err,
+            Error::Protocol(ProtocolError::Eof {
+                needed: 4,
+                remaining: 3
+            })
+        ));
+    }
+
+    #[test]
+    fn an_optional_costs_a_byte_even_when_it_is_absent() {
+        // The protocol's `Optional`, which is the peer's choice -- not `gated`, which is the
+        // version's and reads nothing at all.
+        let present = write(|w| {
+            w.optional(Some("abc"), |w, value| w.string(value))
+                .expect("writes");
+        });
+        let absent = write(|w| {
+            w.optional(None::<&str>, |w, value| w.string(value))
+                .expect("writes");
+        });
+        assert_eq!(absent.as_ref(), &[0x00]);
+
+        let decoded = reader(&present)
+            .optional(|r| r.string("value", 16))
+            .expect("decodes");
+        assert_eq!(decoded.as_deref(), Some("abc"));
+        let decoded = reader(&absent)
+            .optional(|r| r.string("value", 16))
+            .expect("decodes");
+        assert_eq!(decoded, None);
+    }
+
+    #[test]
+    fn a_status_response_with_a_favicon_fits_the_default_frame() {
+        // The regression the 8 KiB default caused: a 64x64 favicon is base64 of a PNG that runs to
+        // several kilobytes, and refusing it would have been our own `OversizedFrame` for content
+        // the client asks for by default.
+        let favicon = "A".repeat(12 * 1024);
+        let body = format!(r#"{{"favicon":"data:image/png;base64,{favicon}"}}"#);
+        let mut buf = BytesMut::new();
+        Writer::new(&mut buf, "StatusResponse", Limits::default())
+            .string(&body)
+            .expect("a favicon is ordinary content, not an oversized frame");
     }
 
     #[test]

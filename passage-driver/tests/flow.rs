@@ -755,3 +755,71 @@ async fn a_snapshot_is_refused_rather_than_treated_as_the_newest_release() {
         "unsupported_version",
     );
 }
+
+#[tokio::test]
+async fn a_version_nothing_can_place_is_answered_rather_than_failing_internally() {
+    // A client is free to send a negative version, and one that does still has to be *answerable*:
+    // dispatch places anything it cannot order on the floor table, so the request arrives -- and if
+    // the encoder disagreed and refused to resolve an ID for the same version, answering it would
+    // be an internal error of ours over ordinary peer input. Both sides go through `placed`.
+    let garbage = ProtocolVersion::new(-1);
+    assert!(!garbage.is_release());
+
+    let (mut client, server) = connect(ConnectionConfig::default());
+    client.send(&intention(garbage, Intent::Status)).await;
+    client.version = garbage;
+    client.send(&StatusRequest).await;
+
+    // Status is exactly what this connection is for: it is how the client is told which version to
+    // install.
+    let status = client.expect::<StatusResponse>().await;
+    assert!(status.body.contains("mc.justchunks.net"), "{}", status.body);
+
+    client.send(&PingRequest { payload: 7 }).await;
+    assert_eq!(client.expect::<PongResponse>().await.payload, 7);
+    client.expect_eof().await;
+    server.await.expect("no panic").result.expect("no error");
+}
+
+#[tokio::test]
+async fn a_login_at_a_version_nothing_can_place_is_told_why() {
+    // The other half: the login is refused, and the refusal reaches a client whose version resolves
+    // nothing else -- because `LoginDisconnect` is anchored at the floor, and the floor is where
+    // this version was placed.
+    let (mut client, server) = connect(ConnectionConfig::default());
+    client
+        .send(&intention(ProtocolVersion::new(-1), Intent::Login))
+        .await;
+    client.version = ProtocolVersion::new(-1);
+
+    let disconnect = client.expect::<LoginDisconnect>().await;
+    assert!(
+        disconnect.reason.contains("could not use"),
+        "{disconnect:?}"
+    );
+    assert_eq!(
+        server
+            .await
+            .expect("no panic")
+            .result
+            .expect_err("refused")
+            .label(),
+        "unsupported_version",
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_connection_nobody_configured_still_has_a_deadline() {
+    // The documented minimal setup is `ConnectionConfig::default()`, so that is where the security
+    // posture lives: a peer that connects and then says nothing must not hold the socket forever.
+    let (mut client, server) = connect(ConnectionConfig::default());
+    client
+        .send(&intention(versions::V1_21, Intent::Login))
+        .await;
+
+    // Nothing else is ever sent. The connection ends on its own.
+    assert!(matches!(
+        server.await.expect("no panic").result,
+        Err(Ending::TimedOut),
+    ));
+}

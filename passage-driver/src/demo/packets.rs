@@ -24,10 +24,16 @@ const MAX_HOST_LEN: usize = 255;
 const MAX_NAME_LEN: usize = 16;
 
 /// A status response is JSON with a MOTD, a favicon and a sample; generous but bounded.
-const MAX_STATUS_LEN: usize = 32_768;
+///
+/// A field limit has to leave room for the rest of its frame, or it is not a limit at all -- the
+/// frame refuses first and reports the wrong thing. These sit well under
+/// [`Limits::max_frame_len`](crate::wire::Limits::max_frame_len), which is what makes them the
+/// bound that actually fires.
+const MAX_STATUS_LEN: usize = 16_384;
 
-/// A signed texture blob is the largest property value in practice.
-const MAX_PROPERTY_LEN: usize = 32_768;
+/// A signed texture blob is the largest property value in practice: roughly 2 KB of base64 and a
+/// signature.
+const MAX_PROPERTY_LEN: usize = 8_192;
 
 /// Vanilla sends one property (`textures`); the bound only has to be sane.
 const MAX_PROPERTIES: usize = 16;

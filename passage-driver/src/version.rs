@@ -107,6 +107,28 @@ impl ProtocolVersion {
     pub const fn is_release(self) -> bool {
         self.0 >= 0 && !self.is_snapshot()
     }
+
+    /// Where this version sits in a version table: itself when it can be ordered against the
+    /// thresholds, and [`UNKNOWN`](ProtocolVersion::UNKNOWN) when it cannot.
+    ///
+    /// This is the *one* statement of "what do we do with a version we cannot place", and both
+    /// directions go through it: [`ids`](crate::packet::ids) resolves outbound packet IDs against
+    /// it, and [`Router`](crate::router::Router) picks its dispatch table with it. They used to
+    /// answer differently -- a snapshot dispatched against the floor table and encoded against the
+    /// newest IDs, so an ID we accepted was not one we would have sent, and a client on a negative
+    /// version could be *dispatched* a status request and then not be *answered*, because no
+    /// packet resolved for it.
+    ///
+    /// The floor is the honest answer for both: it holds exactly the packets that do not depend on
+    /// a version at all, which is enough to answer a ping and to say why a login was refused.
+    #[must_use]
+    pub const fn placed(self) -> Self {
+        if self.is_release() {
+            self
+        } else {
+            Self::UNKNOWN
+        }
+    }
 }
 
 /// The bit a snapshot sets in its protocol number.
@@ -192,6 +214,29 @@ mod tests {
             assert!(version.is_release(), "{version}");
         }
         assert!(ProtocolVersion::UNKNOWN.is_release());
+    }
+
+    #[test]
+    fn a_version_that_cannot_be_placed_falls_back_to_the_floor() {
+        // Everything a codec could be resolved against keeps its own place.
+        for version in [
+            ProtocolVersion::UNKNOWN,
+            versions::V1_20_5,
+            versions::V1_21,
+            versions::V26_2,
+        ] {
+            assert_eq!(version.placed(), version, "{version}");
+        }
+        // Everything else lands on the floor, in *both* directions -- which is the point: the
+        // table a connection dispatches against and the IDs it encodes with have to agree.
+        for version in [
+            ProtocolVersion::new(0x4000_0000 | 132),
+            ProtocolVersion::new(-1),
+            ProtocolVersion::new(i32::MIN),
+            ProtocolVersion::new(i32::MAX),
+        ] {
+            assert_eq!(version.placed(), ProtocolVersion::UNKNOWN, "{version}");
+        }
     }
 
     #[test]
