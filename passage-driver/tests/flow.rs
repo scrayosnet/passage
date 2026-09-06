@@ -6,12 +6,12 @@ mod common;
 
 use common::{TestClient, intention};
 use futures::StreamExt;
-use passage_driver::conn::{Completion, Connection, ConnectionConfig, Ctx};
+use passage_driver::conn::{Connection, ConnectionConfig, Ctx, Ending, Outcome};
 use passage_driver::demo::packets::{
-    Intent, Intention, KeepAlive, KeepAliveResponse, LoginAcknowledged, LoginStart, LoginSuccess,
-    PingRequest, PongResponse, StatusRequest, StatusResponse, Transfer,
+    Intent, Intention, KeepAlive, KeepAliveResponse, LoginAcknowledged, LoginDisconnect,
+    LoginStart, LoginSuccess, PingRequest, PongResponse, StatusRequest, StatusResponse, Transfer,
 };
-use passage_driver::demo::server::{SUPPORTED_VERSIONS, Session, router};
+use passage_driver::demo::server::{Session, router};
 use passage_driver::error::{BuildError, Class, Error, InternalError, Result};
 use passage_driver::packet::{Direction, Packet, Phase};
 use passage_driver::router::{Router, RouterDispatcher};
@@ -24,7 +24,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// Runs the demo server on one end of a socket pair and hands back a client for the other.
-fn connect(config: ConnectionConfig) -> (TestClient, JoinHandle<Result<Completion>>) {
+fn connect(config: ConnectionConfig) -> (TestClient, JoinHandle<Outcome<Session>>) {
     let (server_io, client_io) = tokio::io::duplex(4096);
     let router = Arc::new(router().expect("the demo router is well-formed"));
     let (connection, _handle) = Connection::new(
@@ -56,10 +56,7 @@ async fn serves_a_status_ping_end_to_end() {
     assert_eq!(pong.payload, 0x1234);
 
     client.expect_eof().await;
-    assert_eq!(
-        server.await.expect("no panic").expect("no error"),
-        Completion::Closed,
-    );
+    server.await.expect("no panic").result.expect("no error");
 }
 
 #[tokio::test]
@@ -119,12 +116,13 @@ async fn a_packet_sent_during_an_exclusive_task_is_a_protocol_error() {
         .await;
     client.send(&LoginAcknowledged).await;
 
-    let err = server
+    let ending = server
         .await
         .expect("no panic")
+        .result
         .expect_err("must fail the connection");
-    assert_eq!(err.class(), Class::Peer);
-    assert_eq!(err.label(), "early_packet");
+    assert_eq!(ending.error().expect("a failure").class(), Class::Peer);
+    assert_eq!(ending.label(), "early_packet");
 }
 
 #[tokio::test]
@@ -145,12 +143,11 @@ async fn a_hangup_during_an_exclusive_task_ends_the_connection_at_once() {
     drop(client);
 
     // `authenticate` sleeps, so completing this quickly is only possible by seeing the EOF.
-    let completion = tokio::time::timeout(Duration::from_secs(5), server)
+    let outcome = tokio::time::timeout(Duration::from_secs(5), server)
         .await
         .expect("must not wait for the authentication call")
-        .expect("no panic")
-        .expect("a hangup is not an error");
-    assert_eq!(completion, Completion::PeerClosed);
+        .expect("no panic");
+    assert!(matches!(outcome.result, Err(Ending::PeerClosed)));
 }
 
 #[tokio::test]
@@ -176,10 +173,7 @@ async fn the_login_flow_completes_when_the_client_waits_its_turn() {
     assert_eq!(transfer.port, 25565);
 
     client.expect_eof().await;
-    assert_eq!(
-        server.await.expect("no panic").expect("no error"),
-        Completion::Closed,
-    );
+    server.await.expect("no panic").result.expect("no error");
 }
 
 #[tokio::test(start_paused = true)]
@@ -226,10 +220,7 @@ async fn spawned_work_runs_while_keep_alives_are_exchanged() {
     }
 
     client.expect_eof().await;
-    assert_eq!(
-        server.await.expect("no panic").expect("no error"),
-        Completion::Closed,
-    );
+    server.await.expect("no panic").result.expect("no error");
     // The selection in the demo is fast, so this is only a smoke check that ticks are wired up.
     assert!(
         keep_alives <= 1,
@@ -274,12 +265,13 @@ async fn an_unknown_packet_ends_the_connection_as_a_peer_error() {
     // Id 0x7F exists in no phase.
     client.send_raw(&[0x7F]).await;
 
-    let err = server
+    let ending = server
         .await
         .expect("no panic")
+        .result
         .expect_err("must fail the connection");
-    assert_eq!(err.class(), Class::Peer);
-    assert_eq!(err.label(), "unknown_packet");
+    assert_eq!(ending.error().expect("a failure").class(), Class::Peer);
+    assert_eq!(ending.label(), "unknown_packet");
 }
 
 #[tokio::test]
@@ -296,6 +288,7 @@ async fn a_packet_from_another_phase_says_so() {
     let err = server
         .await
         .expect("no panic")
+        .result
         .expect_err("must fail the connection");
     assert_eq!(err.label(), "unexpected_packet");
     assert!(err.to_string().contains("LoginAcknowledged"), "{err}");
@@ -316,12 +309,13 @@ async fn a_hostile_length_prefix_is_a_peer_error_not_a_panic() {
     buf.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0x0F]); // string length: -1
     client.send_raw(&buf).await;
 
-    let err = server
+    let ending = server
         .await
         .expect("the connection task must not panic")
+        .result
         .expect_err("must fail the connection");
-    assert_eq!(err.class(), Class::Peer);
-    assert_eq!(err.label(), "negative_length");
+    assert_eq!(ending.error().expect("a failure").class(), Class::Peer);
+    assert_eq!(ending.label(), "negative_length");
 }
 
 #[tokio::test]
@@ -342,12 +336,13 @@ async fn an_oversized_frame_is_rejected_before_it_is_buffered() {
         .await
         .expect("writes");
 
-    let err = server
+    let ending = server
         .await
         .expect("no panic")
+        .result
         .expect_err("must fail the connection");
-    assert_eq!(err.class(), Class::Peer);
-    assert_eq!(err.label(), "frame_too_large");
+    assert_eq!(ending.error().expect("a failure").class(), Class::Peer);
+    assert_eq!(ending.label(), "frame_too_large");
 }
 
 #[tokio::test]
@@ -361,6 +356,7 @@ async fn logging_in_with_an_unsupported_version_is_refused() {
     let err = server
         .await
         .expect("no panic")
+        .result
         .expect_err("must fail the connection");
     assert_eq!(err.label(), "unsupported_version");
 
@@ -378,13 +374,22 @@ async fn logging_in_with_an_unsupported_version_is_refused() {
 }
 
 #[tokio::test]
-async fn a_peer_hangup_is_not_an_error() {
+async fn a_peer_hangup_is_an_ending_but_not_a_failure() {
+    // It sits in the `Err` half because we did not finish what we were doing -- not because
+    // anything went wrong. Nothing here is anyone's fault, and the two questions have separate
+    // answers so a scanner dropping after its MOTD is never logged as a problem.
     let (client, server) = connect(ConnectionConfig::default());
     drop(client);
-    assert_eq!(
-        server.await.expect("no panic").expect("no error"),
-        Completion::PeerClosed,
-    );
+
+    let ending = server
+        .await
+        .expect("no panic")
+        .result
+        .expect_err("a hangup is an ending");
+    assert!(matches!(ending, Ending::PeerClosed));
+    assert!(ending.error().is_none(), "nobody is to blame for a hangup");
+    assert!(!ending.can_reply());
+    assert_eq!(ending.label(), "peer_closed");
 }
 
 #[tokio::test]
@@ -402,37 +407,59 @@ async fn cancellation_ends_the_connection_cleanly() {
     let _client = TestClient::new(client_io);
 
     shutdown.cancel();
-    assert_eq!(
-        server.await.expect("no panic").expect("no error"),
-        Completion::Cancelled,
-    );
+    assert!(matches!(
+        server.await.expect("no panic").result,
+        Err(Ending::Cancelled),
+    ));
     // The handle notices, so background work can observe it too.
     assert!(handle.shutdown().is_cancelled());
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_idle_connection_is_dropped_by_its_deadline() {
-    // A peer that connects and says nothing costs a task and a socket. The connection owns the clock,
-    // so this does not have to be every caller's problem.
+async fn a_peer_that_stops_reading_does_not_outlast_its_deadline() {
+    // The cheapest attack on a protocol server: connect, ask for something big, never read the
+    // answer. The write buffer fills, the write stops making progress, and if that happened
+    // anywhere the loop could not see, the connection would sit there past every deadline and past
+    // any shutdown -- which is exactly what it used to do.
+    let (server_io, client_io) = tokio::io::duplex(16);
     let config = ConnectionConfig {
-        max_idle: Some(Duration::from_secs(10)),
+        max_lifetime: Some(Duration::from_secs(5)),
         ..ConnectionConfig::default()
     };
-    let (_client, server) = connect(config);
-
-    assert_eq!(
-        server.await.expect("no panic").expect("no error"),
-        Completion::TimedOut,
+    let (connection, _handle) = Connection::new(
+        server_io,
+        RouterDispatcher::new(status_router(
+            |ctx: Ctx<'_, Session>, _packet: StatusRequest| {
+                ctx.send(StatusResponse {
+                    body: "x".repeat(4000),
+                })
+            },
+        )),
+        Session::default(),
+        config,
+        CancellationToken::new(),
     );
+    let server = tokio::spawn(connection.run());
+
+    let mut client = TestClient::new(client_io);
+    client
+        .send(&intention(versions::V1_21, Intent::Status))
+        .await;
+    client.version = versions::V1_21;
+    client.send(&StatusRequest).await;
+
+    // Nothing ever reads `client`.
+    assert!(matches!(
+        server.await.expect("no panic").result,
+        Err(Ending::TimedOut),
+    ));
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_lifetime_deadline_bounds_even_a_chatty_connection() {
-    // The idle deadline resets on every frame, so a peer could hold a connection open forever by
-    // pinging. The lifetime cap is what makes that impossible -- and it is the backstop for an
-    // exclusive task that never resolves.
+    // A peer could otherwise hold a connection open forever by pinging. The lifetime cap is what
+    // makes that impossible -- and it is the backstop for an exclusive task that never resolves.
     let config = ConnectionConfig {
-        max_idle: Some(Duration::from_secs(10)),
         max_lifetime: Some(Duration::from_secs(30)),
         ..ConnectionConfig::default()
     };
@@ -451,10 +478,10 @@ async fn a_lifetime_deadline_bounds_even_a_chatty_connection() {
         }
     });
 
-    assert_eq!(
-        server.await.expect("no panic").expect("no error"),
-        Completion::TimedOut,
-    );
+    assert!(matches!(
+        server.await.expect("no panic").result,
+        Err(Ending::TimedOut),
+    ));
     chatter.abort();
 }
 
@@ -464,17 +491,17 @@ fn status_router<H>(on_status: H) -> Router<Session>
 where
     H: Fn(Ctx<'_, Session>, StatusRequest) -> Result<()> + Send + Sync + 'static,
 {
-    Router::builder(Direction::Serverbound)
+    Router::builder()
         .on::<Intention, _>(|ctx: Ctx<'_, Session>, packet: Intention| {
             ctx.set_version(packet.protocol_version)?;
             ctx.set_phase(Phase::Status)
         })
         .on::<StatusRequest, _>(on_status)
-        .build(SUPPORTED_VERSIONS.iter().copied())
+        .build()
         .expect("builds")
 }
 
-fn connect_to(router: Router<Session>) -> (TestClient, JoinHandle<Result<Completion>>) {
+fn connect_to(router: Router<Session>) -> (TestClient, JoinHandle<Outcome<Session>>) {
     let (server_io, client_io) = tokio::io::duplex(4096);
     let (connection, _handle) = Connection::new(
         server_io,
@@ -493,15 +520,17 @@ fn status_response() -> StatusResponse {
 }
 
 #[tokio::test]
-async fn a_packet_encoded_for_a_phase_the_connection_left_is_refused() {
-    // The mistake the snapshot semantics allow: switch phase, *then* send a packet of the phase you
-    // just left. Operations drain in queue order, so those bytes would reach the client with an ID
-    // it resolves against the configuration table -- a desynchronised connection with no diagnostic
-    // on either side.
+async fn the_phase_a_packet_belongs_to_is_its_own_not_the_connections() {
+    // There used to be a check here: a packet was refused if the connection had moved to another
+    // phase since the handler queued it. It looked like the version guard below and it was not --
+    // `Packet::PHASE` is a constant, so it compared the packet's *identity* against the connection
+    // rather than a snapshot against the present. Phases that share a payload get their own packet
+    // type instead, which is a statement the compiler can check.
     let (mut client, server) = connect_to(status_router(
         |ctx: Ctx<'_, Session>, _packet: StatusRequest| {
             ctx.set_phase(Phase::Configuration)?;
-            ctx.send(status_response())
+            ctx.send(status_response())?;
+            ctx.close()
         },
     ));
 
@@ -511,23 +540,8 @@ async fn a_packet_encoded_for_a_phase_the_connection_left_is_refused() {
     client.version = versions::V1_21;
     client.send(&StatusRequest).await;
 
-    let err = server
-        .await
-        .expect("no panic")
-        .expect_err("must refuse to write the packet");
-    assert_eq!(err.class(), Class::Internal);
-    assert!(
-        matches!(
-            err,
-            Error::Internal(InternalError::StaleEncoding {
-                packet: "StatusResponse",
-                encoded_phase: Phase::Status,
-                phase: Phase::Configuration,
-                ..
-            })
-        ),
-        "{err}",
-    );
+    assert_eq!(client.expect::<StatusResponse>().await, status_response());
+    server.await.expect("no panic").result.expect("no error");
 }
 
 #[tokio::test]
@@ -547,18 +561,21 @@ async fn a_packet_encoded_for_a_superseded_version_is_refused() {
     client.version = versions::V1_21;
     client.send(&StatusRequest).await;
 
-    let err = server
+    let ending = server
         .await
         .expect("no panic")
+        .result
         .expect_err("must refuse to write the packet");
+    let err = ending.error().expect("a failure");
+    assert_eq!(err.class(), Class::Internal);
     assert!(
         matches!(
             err,
             Error::Internal(InternalError::StaleEncoding {
+                packet: "StatusResponse",
                 encoded_version: v,
                 version: w,
-                ..
-            }) if v == versions::V1_21 && w == versions::V26_2
+            }) if *v == versions::V1_21 && *w == versions::V26_2
         ),
         "{err}",
     );
@@ -586,10 +603,7 @@ async fn sending_before_switching_phase_is_the_order_that_works() {
     let status = client.expect::<StatusResponse>().await;
     assert_eq!(status, status_response());
     client.expect_eof().await;
-    assert_eq!(
-        server.await.expect("no panic").expect("no error"),
-        Completion::Closed,
-    );
+    server.await.expect("no panic").result.expect("no error");
 }
 
 #[tokio::test]
@@ -598,10 +612,10 @@ async fn the_router_rejects_conflicting_ids_at_build_time() {
     // startup, not on the first client that happens to send one of them.
     // Closures need their argument types spelled out so they implement `Fn` for *any* lifetime;
     // named handler functions (as in `demo::server`) do not have that wrinkle.
-    let err = Router::builder(Direction::Serverbound)
+    let err = Router::builder()
         .on::<StatusRequest, _>(|_ctx: Ctx<'_, Session>, _packet: StatusRequest| Ok(()))
         .on::<StatusRequest, _>(|_ctx: Ctx<'_, Session>, _packet: StatusRequest| Ok(()))
-        .build(SUPPORTED_VERSIONS.iter().copied())
+        .build()
         .expect_err("must reject");
 
     assert!(
@@ -618,20 +632,126 @@ async fn the_router_rejects_conflicting_ids_at_build_time() {
 }
 
 #[tokio::test]
-async fn the_router_rejects_a_packet_travelling_the_wrong_way() {
-    let err = Router::<Session>::builder(Direction::Serverbound)
+async fn a_router_is_not_bound_to_one_direction() {
+    // A client's router receives exactly the packets a server's sends. The table is keyed by phase
+    // and id, so building one is the same job either way -- what used to be a `WrongDirection`
+    // build error was the driver deciding which half of the protocol you were allowed to be.
+    let router = Router::<Session>::builder()
         .on::<StatusResponse, _>(|_ctx: Ctx<'_, Session>, _packet: StatusResponse| Ok(()))
-        .build(SUPPORTED_VERSIONS.iter().copied())
-        .expect_err("must reject");
+        .on::<PongResponse, _>(|_ctx: Ctx<'_, Session>, _packet: PongResponse| Ok(()))
+        .build()
+        .expect("a clientbound router is a router");
 
+    // Both directions of one phase still collide on the ids they share, which is the honest signal
+    // that this case wants a direction-keyed table rather than a silent preference.
+    let err = Router::<Session>::builder()
+        .on::<StatusRequest, _>(|_ctx: Ctx<'_, Session>, _packet: StatusRequest| Ok(()))
+        .on::<StatusResponse, _>(|_ctx: Ctx<'_, Session>, _packet: StatusResponse| Ok(()))
+        .build()
+        .expect_err("0x00 in the status phase, twice");
+    assert!(
+        matches!(err, BuildError::IdCollision { id: 0x00, .. }),
+        "{err}"
+    );
+
+    drop(router);
+}
+
+#[tokio::test]
+async fn the_router_rejects_an_id_table_written_the_wrong_way_round() {
+    // `ids` takes the first entry that matches, so an ascending table resolves every version above
+    // the second entry to an id from the wrong era -- silently, and only for some clients.
+    struct Backwards;
+
+    impl Packet for Backwards {
+        const NAME: &'static str = "Backwards";
+        const PHASE: Phase = Phase::Login;
+        const DIRECTION: Direction = Direction::Serverbound;
+        const IDS: &'static [(ProtocolVersion, i32)] =
+            &[(versions::V1_20_5, 0x40), (versions::V26_2, 0x41)];
+
+        fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> Result<Self> {
+            Ok(Self)
+        }
+
+        fn encode(&self, _w: &mut Writer<'_>, _version: ProtocolVersion) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    let err = Router::<Session>::builder()
+        .on::<Backwards, _>(|_ctx: Ctx<'_, Session>, _packet: Backwards| Ok(()))
+        .build()
+        .expect_err("must reject");
     assert!(
         matches!(
             err,
-            BuildError::WrongDirection {
-                packet: "StatusResponse",
+            BuildError::UnorderedIds {
+                packet: "Backwards",
                 ..
             }
         ),
         "{err}",
+    );
+}
+
+#[tokio::test]
+async fn a_release_nobody_wrote_down_can_still_log_in() {
+    // Protocol 768 is 1.21.2: a real release, and one no list in this crate mentions. The router
+    // builds its tables from the versions the *packets* name, so 768 is dispatched exactly like
+    // 767 -- which is what the protocol says, since nothing changed between them.
+    assert_eq!(LoginStart::id(ProtocolVersion::new(768)), Some(0x00));
+
+    let (mut client, server) = connect(ConnectionConfig::default());
+    client
+        .send(&intention(ProtocolVersion::new(768), Intent::Login))
+        .await;
+    client.version = ProtocolVersion::new(768);
+    client
+        .send(&LoginStart {
+            user_name: "Hydrofin".to_owned(),
+            user_id: Uuid::from_u128(1),
+        })
+        .await;
+
+    // It gets a real `LoginSuccess`, not an "unknown packet" for the only packet it could send.
+    let success = client.expect::<LoginSuccess>().await;
+    assert_eq!(success.user_name, "Hydrofin");
+    // 768 is below the 26.2 threshold, so the gated field is not on the wire.
+    assert_eq!(success.session_id, None);
+
+    drop(client);
+    assert!(matches!(
+        server.await.expect("no panic").result,
+        Err(Ending::PeerClosed),
+    ));
+}
+
+#[tokio::test]
+async fn a_snapshot_is_refused_rather_than_treated_as_the_newest_release() {
+    // Snapshots set bit 30, so every one of them compares above every release. Left alone, a
+    // 1.20.5 snapshot would be sent the 26.2 session id field and would not survive reading it.
+    let snapshot = ProtocolVersion::new(0x4000_0000 | 132);
+    assert!(snapshot.at_least(versions::V26_2));
+
+    let (mut client, server) = connect(ConnectionConfig::default());
+    client.send(&intention(snapshot, Intent::Login)).await;
+
+    // It is told why, in the phase the handshake put it in.
+    client.version = snapshot;
+    let disconnect = client.expect::<LoginDisconnect>().await;
+    assert!(
+        disconnect.reason.contains("could not use"),
+        "{disconnect:?}"
+    );
+
+    assert_eq!(
+        server
+            .await
+            .expect("no panic")
+            .result
+            .expect_err("refused")
+            .label(),
+        "unsupported_version",
     );
 }

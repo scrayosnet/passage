@@ -24,31 +24,20 @@ also fix issues with the current implementation.
 - Ontop of the server, the Passage router with its adapter can be implemented (or configured).
 - The application should keep the telemetry and even expand upon it by having better traces
 
-## Design proposals
+## How the design is recorded
 
-[`docs/`](docs/README.md) works these requirements into concrete proposals -- one document per
-decision, each with the options, their trade-offs and a recommendation:
+The design lives in the code, in module documentation next to the thing it explains. Two files carry
+the history instead:
 
-| Document                                                        | Decision                                              |
-|-----------------------------------------------------------------|-------------------------------------------------------|
-| [01-problem-analysis.md](docs/01-problem-analysis.md)           | What the current implementation gets wrong, and why   |
-| [02-versioning.md](docs/02-versioning.md)                       | How packets carry protocol-version differences        |
-| [03-dispatch.md](docs/03-dispatch.md)                           | How packets reach protocol logic                      |
-| [04-runtime.md](docs/04-runtime.md)                             | How a connection is driven, ordered and backpressured |
-| [05-errors-and-hardening.md](docs/05-errors-and-hardening.md)   | Error taxonomy, limits, and the no-panic rules        |
-| [06-layering-and-telemetry.md](docs/06-layering-and-telemetry.md)| Crate layering, adapters, tracing and metrics        |
-| [07-reference-implementation.md](docs/07-reference-implementation.md) | The working code in `src/`, and what it proves    |
-| [08-refinements.md](docs/08-refinements.md)                     | The review of the first implementation, and what changed |
+| Document                                       | What it holds                                             |
+|------------------------------------------------|-----------------------------------------------------------|
+| [REVIEW.md](REVIEW.md)                         | A critical scan of this crate against the implementation it replaces, with what was reproduced and how |
+| [REVIEW_DECISIONS.md](REVIEW_DECISIONS.md)     | What was decided about each finding, and how it was solved |
 
-The recommended option of every proposal is implemented in this crate -- including a worked packet
-set and server flow in [`src/demo/`](src/demo) -- so it can be judged by running
-`cargo test -p passage-driver` rather than by reading prose alone.
-
-The first implementation was then reviewed, and three of its decisions were reversed: the `packet!`
-macro was replaced by hand-written codecs, the two ways of doing asynchronous work collapsed into one
-task model plus a read gate, and the deferred state `Update` became an ordinary operation.
-[08-refinements.md](docs/08-refinements.md) records the reasoning; the other documents were updated to
-match, and keep the "tried and removed" notes rather than pretending the earlier shape never existed.
+Everything the review found and the decisions accepted is implemented here -- including a worked
+packet set and server flow in [`src/demo/`](src/demo) -- so it can be judged by running
+`cargo test -p passage-driver` rather than by reading prose alone. Where a decision was deferred
+rather than applied, `REVIEW_DECISIONS.md` says so and why.
 
 ## Static, and per connection
 
@@ -72,8 +61,9 @@ connection*, so it takes a factory rather than a value and calls it once per soc
 ```rust
 let listener = TcpListener::bind("0.0.0.0:25565").await?;
 
-serve(listener, router()?, |addr| Session { peer: Some(*addr), ..Session::default() })
+serve(listener, Arc::new(router()?), |addr| Session { peer: Some(*addr), ..Session::default() })
     .config(config)
+    .max_connections(10_000)
     .with_graceful_shutdown(shutdown)
     .on_finish(log_completion)
     .await;
@@ -81,6 +71,59 @@ serve(listener, router()?, |addr| Session { peer: Some(*addr), ..Session::defaul
 
 One connection without the accept loop is `Connection::new`, which is what `serve` calls per
 socket and what the tests drive over a socket pair.
+
+## Versions are read, not listed
+
+A packet declares the IDs it has had, newest first, and nothing else names a protocol version:
+
+```rust
+const IDS: &[(ProtocolVersion, i32)] = &[(versions::V26_2, 0x05), (versions::V1_20_5, 0x02)];
+```
+
+Because that table is data, the router reads the *thresholds* out of every registered packet and
+builds one dispatch table per version at which dispatch actually changes. There is no list of
+supported versions, which means there is none to leave a release out of: 1.21.2 is served exactly
+like 1.21.1 because nothing between them differs. Snapshots are the one thing refused outright --
+they set bit 30, so every snapshot compares above every release and no threshold can place them.
+
+## Ending is something you can answer
+
+A connection ends in one of two ways, and the difference is **who decided** -- which is exactly the
+`Result` it reports. `Ok(())` means a handler closed it and there is nothing left to do.
+`Err(Ending)` is everything else: the peer hung up, a deadline expired, a shutdown arrived, or
+something failed. All four reach the dispatcher's `on_error`, with everything already queued still
+on its way out:
+
+```rust
+fn on_error(ctx: Ctx<'_, Session>, ending: &Ending) -> Result<()> {
+    let (label, reason) = reason_for(ending);
+    ctx.batch(|batch| {
+        batch.send(LoginDisconnect::text(reason))?;
+        batch.update(move |session: &mut Session| session.refused = Some(label));
+        batch.close();
+        Ok(())
+    })
+}
+```
+
+A batch reaches the connection with nothing interleaved, and queues nothing at all if building it
+fails. That is what a disconnect needs: the message, the record and the close are one act, and a
+message that cannot be encoded must not leave part of one behind.
+
+A hangup belongs on the `Err` side even though nobody did anything wrong. The question the split
+answers is not "was this a failure" -- `Ending::error()` answers that, and says no for three of the
+four -- but "did we finish what we were doing". A client that disappears while its backend is being
+selected has left a selection running, and releasing it is the same job as releasing it after a
+timeout. `on_error` is the one place that job can live, and it runs for every ending we did not
+choose.
+
+Note what the driver is *not* asked to remember. There is one `Completion::Closed`, not a second
+variant for "we refused them" -- the handler that refused knows it did, and writes the reason into
+its own state, which comes back in the connection's `Outcome`. A completion variant could only have
+carried the bare fact; a field carries the reason with it, and that is what a metric wanted anyway.
+Recovering from a failure is the same argument in the other direction: `on_error` gets the last word
+on the wire, but whether an error is survivable at all is decided by the handler that raised it,
+where the packet and the state are still in hand.
 
 ## Shape of a handler
 

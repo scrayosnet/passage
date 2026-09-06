@@ -5,20 +5,26 @@
 //! lookup and one virtual call -- and, crucially, adding a packet does not change any trait, which
 //! means it does not break everything that already exists.
 //!
-//! This is the axum/tonic shape rather than the "one big trait with a method per packet" shape. The
-//! trade-off is discussed in `docs/03-dispatch.md`.
+//! This is the axum/tonic shape rather than the "one big trait with a method per packet" shape.
 //!
-//! # Tables are built once
+//! # Tables are built once, one per *change*
 //!
-//! [`RouterBuilder::build`] resolves every registered packet's ID at every supported version and
-//! produces the dispatch tables up front. So an ID collision is a startup failure rather than a
-//! runtime error on the first client that happens to send the packet, and a connection allocates
-//! nothing: it borrows an [`Arc`] of the table for its version.
+//! [`RouterBuilder::build`] resolves every registered packet's ID and produces the dispatch tables
+//! up front. So an ID collision is a startup failure rather than a runtime error on the first
+//! client that happens to send the packet, and a connection allocates nothing: it borrows an
+//! [`Arc`] of the table for its version.
 //!
-//! A version with no table of its own -- anything outside the supported range, including the
-//! garbage a scanner sends -- gets the version-independent table, which is exactly the packets
-//! whose ID table starts at [`ProtocolVersion::UNKNOWN`]. That is enough to answer a status ping
-//! and refuse a login, and it means the `i32` version space cannot cost memory.
+//! Which versions get a table is not something the caller has to know. Every packet declares its
+//! IDs as data ([`Packet::IDS`]), so the router can read the *thresholds* out of them -- the
+//! versions at which some packet appeared, vanished or was renumbered -- and build one table per
+//! threshold. Between two thresholds nothing about dispatch differs, so one table serves the whole
+//! interval and a version nobody thought to enumerate is dispatched exactly like its neighbours.
+//!
+//! Below the lowest threshold sits the version-independent table: exactly the packets whose IDs
+//! start at [`ProtocolVersion::UNKNOWN`], which is enough to answer a status ping and refuse a
+//! login. Versions that are not comparable at all -- snapshots, negative numbers -- get that table
+//! too, because [`at_least`](ProtocolVersion::at_least) cannot place them (see
+//! [`ProtocolVersion::is_release`]).
 //!
 //! # How a connection reaches this
 //!
@@ -28,12 +34,11 @@
 //! version that connection negotiated. That is where the version-to-table binding lives, and it is
 //! why the table type never leaves this module.
 
-use crate::conn::{Ctx, Dispatcher};
+use crate::conn::{Ctx, Dispatcher, Ending};
 use crate::error::{BuildError, ProtocolError, Result};
-use crate::packet::{Direction, Packet, Phase};
+use crate::packet::{Packet, Phase};
 use crate::version::ProtocolVersion;
 use crate::wire::Reader;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::trace;
 
@@ -93,17 +98,43 @@ where
     }
 }
 
+/// A handler that runs when a connection ends for a reason nobody asked for.
+///
+/// See [`Dispatcher::on_error`] for what it may do and what it is called for.
+pub trait ErrorHandler<S>: Send + Sync + 'static {
+    /// Handles one ending.
+    fn call(&self, ctx: Ctx<'_, S>, ending: &Ending) -> Result<()>;
+}
+
+impl<S, F> ErrorHandler<S> for F
+where
+    F: Fn(Ctx<'_, S>, &Ending) -> Result<()> + Send + Sync + 'static,
+{
+    fn call(&self, ctx: Ctx<'_, S>, ending: &Ending) -> Result<()> {
+        self(ctx, ending)
+    }
+}
+
 /// A decoder and handler pair with the packet type erased.
 type ErasedHandler<S> = Box<dyn for<'c> Fn(Ctx<'c, S>, &[u8]) -> Result<()> + Send + Sync>;
 
 struct Entry<S> {
     name: &'static str,
     phase: Phase,
-    id: fn(ProtocolVersion) -> Option<i32>,
+    /// The packet's own ID table, newest first. Read both to resolve an ID and to find the
+    /// versions at which dispatch changes.
+    ids: &'static [(ProtocolVersion, i32)],
     dispatch: ErasedHandler<S>,
 }
 
-/// The dispatch table for one protocol version: `phase -> id -> index into the router's entries`.
+impl<S> Entry<S> {
+    fn id(&self, version: ProtocolVersion) -> Option<i32> {
+        crate::packet::ids(version, self.ids)
+    }
+}
+
+/// The dispatch table for one interval of protocol versions: `phase -> id -> index into the
+/// router's entries`.
 ///
 /// Indices rather than pointers, so a lookup is two loads with no reference count to touch, and so
 /// the table itself is free of `S` and can be shared as-is.
@@ -128,10 +159,10 @@ impl Table {
 
 /// Collects handlers, then produces an immutable [`Router`].
 pub struct RouterBuilder<S> {
-    inbound: Direction,
     unknown: UnknownPolicy,
     entries: Vec<Entry<S>>,
     tick: Option<Arc<dyn TickHandler<S>>>,
+    on_error: Option<Arc<dyn ErrorHandler<S>>>,
     /// The first registration mistake, reported by [`RouterBuilder::build`].
     ///
     /// Deferred rather than panicked so that assembling a router is fallible in one place instead
@@ -154,12 +185,8 @@ impl<S: 'static> RouterBuilder<S> {
         P: Packet,
         H: Handler<S, P>,
     {
-        if P::DIRECTION != self.inbound {
-            self.invalid.get_or_insert(BuildError::WrongDirection {
-                packet: P::NAME,
-                actual: P::DIRECTION,
-                expected: self.inbound,
-            });
+        if let Some(err) = unordered(P::NAME, P::IDS) {
+            self.invalid.get_or_insert(err);
             return self;
         }
 
@@ -176,7 +203,7 @@ impl<S: 'static> RouterBuilder<S> {
         self.entries.push(Entry {
             name: P::NAME,
             phase: P::PHASE,
-            id: P::id,
+            ids: P::IDS,
             dispatch,
         });
         self
@@ -189,14 +216,24 @@ impl<S: 'static> RouterBuilder<S> {
         self
     }
 
-    /// Builds the dispatch tables for `versions`.
+    /// Registers the handler that gets the last word when a connection ends badly.
+    ///
+    /// This is where a disconnect message comes from -- see [`Dispatcher::on_error`].
+    #[must_use]
+    pub fn on_error<H: ErrorHandler<S>>(mut self, handler: H) -> Self {
+        self.on_error = Some(Arc::new(handler));
+        self
+    }
+
+    /// Builds the dispatch tables.
     ///
     /// This is the only place a router can fail. Every ID is resolved and every collision found
     /// here, so nothing about dispatch can go wrong once a connection is running.
-    pub fn build(
-        self,
-        versions: impl IntoIterator<Item = ProtocolVersion>,
-    ) -> std::result::Result<Router<S>, BuildError> {
+    ///
+    /// It takes no version list. The versions that matter are the ones the registered packets
+    /// themselves name, and asking the caller to enumerate the rest only invited them to leave one
+    /// out -- with no signal until a client on that exact version could not log in.
+    pub fn build(self) -> std::result::Result<Router<S>, BuildError> {
         if let Some(err) = self.invalid {
             return Err(err);
         }
@@ -208,25 +245,48 @@ impl<S: 'static> RouterBuilder<S> {
         }
 
         let entries = self.entries.into_boxed_slice();
-        let fallback = Arc::new(build_table(&entries, ProtocolVersion::UNKNOWN)?);
-
-        let mut tables = HashMap::new();
-        for version in versions {
-            if version == ProtocolVersion::UNKNOWN {
-                continue;
-            }
-            tables.insert(version, Arc::new(build_table(&entries, version)?));
+        let mut tables = Vec::with_capacity(breakpoints(&entries).len());
+        for version in breakpoints(&entries) {
+            tables.push((version, Arc::new(build_table(&entries, version)?)));
         }
 
         Ok(Router {
-            inbound: self.inbound,
             unknown: self.unknown,
             entries,
-            tables,
-            fallback,
+            tables: tables.into_boxed_slice(),
             tick: self.tick,
+            on_error: self.on_error,
         })
     }
+}
+
+/// The first out-of-order pair in an ID table, if there is one.
+fn unordered(packet: &'static str, ids: &'static [(ProtocolVersion, i32)]) -> Option<BuildError> {
+    ids.windows(2).find_map(|pair| {
+        (pair[0].0 <= pair[1].0).then_some(BuildError::UnorderedIds {
+            packet,
+            previous: pair[0].0,
+            version: pair[1].0,
+        })
+    })
+}
+
+/// The versions at which dispatch changes: every threshold any packet names, plus the floor.
+///
+/// Sorted ascending, so a lookup is a binary search and a version between two entries belongs to
+/// the lower one.
+fn breakpoints<S>(entries: &[Entry<S>]) -> Vec<ProtocolVersion> {
+    // The floor is always present: it is what a pre-handshake connection, and anything the version
+    // table cannot place, dispatches against.
+    let mut versions = vec![ProtocolVersion::UNKNOWN];
+    versions.extend(
+        entries
+            .iter()
+            .flat_map(|entry| entry.ids.iter().map(|(since, _)| *since)),
+    );
+    versions.sort_unstable();
+    versions.dedup();
+    versions
 }
 
 fn build_table<S>(
@@ -236,7 +296,7 @@ fn build_table<S>(
     let mut by_phase: [Vec<Option<u16>>; Phase::COUNT] = Default::default();
 
     for (index, entry) in entries.iter().enumerate() {
-        let Some(id) = (entry.id)(version) else {
+        let Some(id) = entry.id(version) else {
             continue;
         };
         if !(0..=MAX_PACKET_ID).contains(&id) {
@@ -274,12 +334,13 @@ fn build_table<S>(
 ///
 /// Wrap it in an [`Arc`] and share it across every connection.
 pub struct Router<S> {
-    inbound: Direction,
     unknown: UnknownPolicy,
     entries: Box<[Entry<S>]>,
-    tables: HashMap<ProtocolVersion, Arc<Table>>,
-    fallback: Arc<Table>,
+    /// One table per version at which dispatch changes, ascending. Never empty: the floor is
+    /// always present.
+    tables: Box<[(ProtocolVersion, Arc<Table>)]>,
     tick: Option<Arc<dyn TickHandler<S>>>,
+    on_error: Option<Arc<dyn ErrorHandler<S>>>,
 }
 
 // Derived `Debug` would demand `S: Debug` and would try to format the handlers, neither of which
@@ -287,39 +348,32 @@ pub struct Router<S> {
 impl<S> std::fmt::Debug for Router<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Router")
-            .field("inbound", &self.inbound)
             .field("unknown", &self.unknown)
             .field("packets", &self.entries.len())
-            .field("versions", &self.tables.len())
+            .field("tables", &self.tables.len())
             .field("ticks", &self.tick.is_some())
+            .field("handles_errors", &self.on_error.is_some())
             .finish()
     }
 }
 
 impl<S: 'static> Router<S> {
-    /// Starts building a router for a peer that receives packets travelling in `inbound` direction
-    /// -- [`Direction::Serverbound`] for a server, [`Direction::Clientbound`] for a client.
+    /// Starts building a router.
+    ///
+    /// A router is not bound to a direction. [`Direction`](crate::packet::Direction) is part of a
+    /// packet's identity and says which way it travels, but the table is keyed by phase and ID
+    /// alone -- so a client, a server and a proxy all build one the same way. Registering both
+    /// directions of one phase will collide on the IDs they share, which is the honest signal that
+    /// a direction-keyed table is what that case needs.
     #[must_use]
-    pub fn builder(inbound: Direction) -> RouterBuilder<S> {
+    pub fn builder() -> RouterBuilder<S> {
         RouterBuilder {
-            inbound,
             unknown: UnknownPolicy::default(),
             entries: Vec::new(),
             tick: None,
+            on_error: None,
             invalid: None,
         }
-    }
-
-    /// The direction this router receives packets in.
-    #[must_use]
-    pub fn inbound(&self) -> Direction {
-        self.inbound
-    }
-
-    /// The configured unknown-packet policy.
-    #[must_use]
-    pub fn unknown_policy(&self) -> UnknownPolicy {
-        self.unknown
     }
 
     /// Whether a tick handler is registered. A connection only arms its timer if there is one.
@@ -328,9 +382,21 @@ impl<S: 'static> Router<S> {
         self.tick.is_some()
     }
 
-    /// The table for `version`, or the version-independent one if there is none.
+    /// The table covering `version`.
+    ///
+    /// A version that [`is_release`](ProtocolVersion::is_release) gets the table of the highest
+    /// breakpoint at or below it. Anything else -- a snapshot, a negative number -- gets the floor,
+    /// because it cannot be ordered against the thresholds in any way a codec could act on.
     fn table(&self, version: ProtocolVersion) -> Arc<Table> {
-        Arc::clone(self.tables.get(&version).unwrap_or(&self.fallback))
+        let index = if version.is_release() {
+            self.tables
+                .partition_point(|(since, _)| version.at_least(*since))
+                .saturating_sub(1)
+        } else {
+            0
+        };
+        // The floor is always present, so index 0 always exists.
+        Arc::clone(&self.tables[index].1)
     }
 }
 
@@ -415,7 +481,6 @@ impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
             }
             return Err(ProtocolError::UnknownPacket {
                 phase,
-                direction: router.inbound,
                 version: ctx.version(),
                 id,
             }
@@ -438,5 +503,62 @@ impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
 
     fn ticks(&self) -> bool {
         self.router.ticks()
+    }
+
+    fn on_error(&self, ctx: Ctx<'_, S>, ending: &Ending) -> Result<()> {
+        match &self.router.on_error {
+            Some(handler) => handler.call(ctx, ending),
+            None => Ok(()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::version::versions;
+
+    struct Fake;
+
+    fn entry<S>(ids: &'static [(ProtocolVersion, i32)]) -> Entry<S> {
+        Entry {
+            name: "Fake",
+            phase: Phase::Login,
+            ids,
+            dispatch: Box::new(|_, _| Ok(())),
+        }
+    }
+
+    #[test]
+    fn breakpoints_are_the_versions_the_packets_name() {
+        let entries: Vec<Entry<Fake>> = vec![
+            entry(&[(versions::V26_2, 0x05), (versions::V1_20_5, 0x02)]),
+            entry(&[(versions::V1_20_5, 0x03)]),
+            entry(&[(ProtocolVersion::UNKNOWN, 0x00)]),
+        ];
+        assert_eq!(
+            breakpoints(&entries),
+            vec![ProtocolVersion::UNKNOWN, versions::V1_20_5, versions::V26_2],
+        );
+    }
+
+    #[test]
+    fn an_unordered_id_table_is_a_build_error() {
+        assert!(
+            unordered(
+                "Fake",
+                &[(versions::V1_20_5, 0x02), (versions::V26_2, 0x05)]
+            )
+            .is_some()
+        );
+        assert!(
+            unordered(
+                "Fake",
+                &[(versions::V26_2, 0x05), (versions::V1_20_5, 0x02)]
+            )
+            .is_none()
+        );
+        // A version listed twice is also out of order: the second entry is unreachable.
+        assert!(unordered("Fake", &[(versions::V26_2, 0x05), (versions::V26_2, 0x02)]).is_some());
     }
 }

@@ -9,7 +9,7 @@ mod common;
 
 use common::TestClient;
 use passage_driver::conn::{
-    Completion, Connection, ConnectionConfig, ConnectionHandle, Ctx, Dispatcher,
+    Connection, ConnectionConfig, ConnectionHandle, Ctx, Dispatcher, Outcome,
 };
 use passage_driver::error::Result;
 use passage_driver::packet::Phase;
@@ -77,11 +77,7 @@ impl Dispatcher<()> for Recorder {
 fn connect<D: Dispatcher<()> + Send + 'static>(
     dispatcher: D,
     config: ConnectionConfig,
-) -> (
-    TestClient,
-    ConnectionHandle<()>,
-    JoinHandle<Result<Completion>>,
-) {
+) -> (TestClient, ConnectionHandle<()>, JoinHandle<Outcome<()>>) {
     let (server_io, client_io) = tokio::io::duplex(4096);
     let (connection, handle) =
         Connection::new(server_io, dispatcher, (), config, CancellationToken::new());
@@ -113,10 +109,11 @@ async fn a_connection_runs_on_a_dispatcher_that_is_not_a_router() {
     client.send_raw(&[0x09]).await;
     client.expect_eof().await;
 
-    assert_eq!(
-        server.await.expect("no panic").expect("closes cleanly"),
-        Completion::Closed,
-    );
+    server
+        .await
+        .expect("no panic")
+        .result
+        .expect("closes cleanly");
     assert_eq!(
         *log.lock().expect("not poisoned"),
         Log {
@@ -143,10 +140,11 @@ async fn a_dispatcher_that_does_not_tick_is_never_ticked() {
 
     assert_eq!(log.lock().expect("not poisoned").ticks, 0);
     handle.close().expect("the connection is live");
-    assert_eq!(
-        server.await.expect("no panic").expect("closes cleanly"),
-        Completion::Closed,
-    );
+    server
+        .await
+        .expect("no panic")
+        .result
+        .expect("closes cleanly");
 }
 
 #[tokio::test(start_paused = true)]
@@ -166,10 +164,11 @@ async fn a_dispatcher_that_ticks_is_ticked_on_the_configured_interval() {
     assert!((9..=11).contains(&ticked), "ticked {ticked} times");
 
     handle.close().expect("the connection is live");
-    assert_eq!(
-        server.await.expect("no panic").expect("closes cleanly"),
-        Completion::Closed,
-    );
+    server
+        .await
+        .expect("no panic")
+        .result
+        .expect("closes cleanly");
 }
 
 #[tokio::test]
@@ -182,9 +181,10 @@ async fn a_dispatcher_can_be_chosen_at_runtime() {
     client.send_raw(&[0x05]).await;
     client.expect_eof().await;
 
-    assert_eq!(
-        server.await.expect("no panic").expect("closes cleanly"),
-        Completion::Closed,
-    );
+    server
+        .await
+        .expect("no panic")
+        .result
+        .expect("closes cleanly");
     assert_eq!(log.lock().expect("not poisoned").frames, vec![(5, 0)]);
 }

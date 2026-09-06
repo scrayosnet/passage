@@ -13,12 +13,13 @@
 //! # Design in one page
 //!
 //! * **Packets carry their own version mapping.** A packet implements [`Packet`](packet::Packet)
-//!   once, with an ID table keyed by protocol version ([`ids`](packet::ids)) and fields gated by a
-//!   version comparison ([`at_least`](version::ProtocolVersion::at_least)). One type serves every
-//!   version;
-//!   [`Router`](router::Router) derives the decode table from the same declaration, so there is no
-//!   second place to forget. Codecs are written out rather than generated, which is what lets a
-//!   field name its own length limit and a decoder produce a domain type instead of a raw `VarInt`.
+//!   once, with an ID table keyed by protocol version ([`IDS`](packet::Packet::IDS)) and fields
+//!   gated by a version comparison ([`at_least`](version::ProtocolVersion::at_least)). One type
+//!   serves every version, and because the table is *data*, [`Router`](router::Router) reads the
+//!   thresholds out of it and builds one dispatch table per version at which something actually
+//!   changes -- so no list of supported versions exists to be forgotten. Codecs are written out
+//!   rather than generated, which is what lets a field name its own length limit and a decoder
+//!   produce a domain type instead of a raw `VarInt`.
 //! * **Handlers are registered, not implemented.** [`RouterBuilder::on`](router::RouterBuilder::on)
 //!   takes a typed handler per packet. Adding a packet does not widen a trait, so it does not break
 //!   anything that already exists. Tables are built once at startup, so an ID collision is a boot
@@ -39,7 +40,12 @@
 //! * **Waiting is explicit.** [`Ctx::exclusive`](conn::Ctx::exclusive) says the peer must stay quiet
 //!   until a future resolves -- so a packet that arrives anyway is reported rather than replayed,
 //!   and a hangup mid-authentication is noticed at once. [`Ctx::spawn`](conn::Ctx::spawn) is for
-//!   work that must overlap with further traffic.
+//!   work that must overlap with further traffic, and runs on the connection's own task;
+//!   [`Ctx::detach`](conn::Ctx::detach) is for work that might block and must not stop it.
+//! * **Ending is something you can answer.** A connection that ends for a reason nobody asked for
+//!   -- a failure, a deadline, a shutdown -- goes to [`Dispatcher::on_error`](conn::Dispatcher::on_error)
+//!   first, with everything already queued still on its way out. That is where a disconnect message
+//!   comes from, and the reason a refused login no longer looks to the player like a crash.
 //! * **Errors say who is to blame.** [`Class`](error::Class) separates a scanner's malformed packet
 //!   from our own bug, handlers classify their own failures, and completing a connection is [`Ok`],
 //!   never an error variant. Wiring mistakes are [`BuildError`](error::BuildError)s and cannot
@@ -67,6 +73,7 @@
 //! use passage_driver::conn::ConnectionConfig;
 //! use passage_driver::demo::server::{Session, log_completion, router};
 //! use passage_driver::server::serve;
+//! use std::sync::Arc;
 //! use std::time::Duration;
 //! use tokio::net::TcpListener;
 //! use tokio_util::sync::CancellationToken;
@@ -74,13 +81,13 @@
 //! # async fn run(shutdown: CancellationToken) -> Result<(), Box<dyn std::error::Error>> {
 //! let listener = TcpListener::bind("0.0.0.0:25565").await?;
 //!
-//! // Built once at startup and shared by every connection.
-//! let router = router()?;
+//! // Built once at startup and shared by every connection. It names no protocol versions: the
+//! // packets carry their own, and the dispatch tables follow.
+//! let router = Arc::new(router()?);
 //!
 //! let config = ConnectionConfig {
 //!     tick_interval: Some(Duration::from_secs(16)),
 //!     max_lifetime: Some(Duration::from_secs(60)),
-//!     max_idle: Some(Duration::from_secs(30)),
 //!     ..ConnectionConfig::default()
 //! };
 //!
@@ -90,6 +97,7 @@
 //!     ..Session::default()
 //! })
 //! .config(config)
+//! .max_connections(10_000)
 //! .with_graceful_shutdown(shutdown)
 //! .on_finish(log_completion)
 //! .await;

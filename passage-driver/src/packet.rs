@@ -105,16 +105,22 @@ pub trait Packet: Sized + Send + Sync + 'static {
     /// The direction this packet travels in.
     const DIRECTION: Direction;
 
-    /// The packet ID in the given protocol version, or [`None`] if the packet does not exist there.
-    ///
-    /// Implement this with [`ids`], which keeps the version table declarative:
+    /// The ID of this packet in each version that changed it, **ordered newest to oldest**:
     ///
     /// ```ignore
-    /// fn id(version: ProtocolVersion) -> Option<i32> {
-    ///     ids(version, &[(versions::V1_21_2, 0x03), (versions::V1_20_5, 0x02)])
-    /// }
+    /// const IDS: &[(ProtocolVersion, i32)] =
+    ///     &[(versions::V1_21_2, 0x03), (versions::V1_20_5, 0x02)];
     /// ```
-    fn id(version: ProtocolVersion) -> Option<i32>;
+    ///
+    /// Data rather than a function, because the router does not only *ask* for IDs -- it reads the
+    /// thresholds to work out where the protocol changes shape, and builds one dispatch table per
+    /// change rather than one per version anybody remembered to list. See
+    /// [`RouterBuilder::build`](crate::router::RouterBuilder::build).
+    ///
+    /// The order is load-bearing and checked at build time
+    /// ([`BuildError::UnorderedIds`](crate::error::BuildError::UnorderedIds)): a table written
+    /// oldest-first would silently resolve to the wrong ID.
+    const IDS: &'static [(ProtocolVersion, i32)];
 
     /// Decodes the packet payload (without length prefix and ID).
     ///
@@ -124,6 +130,14 @@ pub trait Packet: Sized + Send + Sync + 'static {
 
     /// Encodes the packet payload (without length prefix and ID).
     fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> Result<()>;
+
+    /// The packet ID in `version`, or [`None`] if the packet does not exist there.
+    ///
+    /// Resolved from [`IDS`](Packet::IDS); there is no reason to override it.
+    #[must_use]
+    fn id(version: ProtocolVersion) -> Option<i32> {
+        ids(version, Self::IDS)
+    }
 }
 
 /// Resolves a packet ID from a table of `(first version, id)` pairs, **ordered newest to oldest**.

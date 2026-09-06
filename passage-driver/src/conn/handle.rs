@@ -17,15 +17,13 @@ use tokio_util::sync::CancellationToken;
 /// This is the whole vocabulary a handler has. If something is not expressible as an `Op`, a
 /// handler cannot do it.
 pub enum Op<S> {
-    /// Write an already-encoded packet, if the connection is still in the configuration it was
-    /// encoded for.
+    /// Write an already-encoded packet, if the connection is still in the version it was encoded
+    /// for.
     Send {
         /// The ID varint and payload, plus the packet name for tracing.
         encoded: Encoded,
         /// The protocol version the bytes were encoded for.
         version: ProtocolVersion,
-        /// The phase the packet belongs to.
-        phase: Phase,
     },
 
     /// Enable encryption for every byte from here on.
@@ -51,6 +49,15 @@ pub enum Op<S> {
     /// Flush the socket and notify the waiter once everything queued before has been written.
     Flush(oneshot::Sender<()>),
 
+    /// Carry out every operation in order, with nothing from anywhere else in between.
+    Batch(Vec<Op<S>>),
+
+    /// Fail the connection with this error, after writing everything queued before it.
+    ///
+    /// The error travels as an operation so that it lands *after* the packets a handler queued
+    /// rather than instead of them.
+    Fail(Error),
+
     /// Finish the connection after writing everything queued before.
     Close,
 }
@@ -65,8 +72,67 @@ impl<S> std::fmt::Debug for Op<S> {
             Op::With(_) => f.write_str("With"),
             Op::Spawn { exclusive, .. } => write!(f, "Spawn {{ exclusive: {exclusive} }}"),
             Op::Flush(_) => f.write_str("Flush"),
+            Op::Batch(ops) => write!(f, "Batch({ops:?})"),
+            Op::Fail(err) => write!(f, "Fail({err})"),
             Op::Close => f.write_str("Close"),
         }
+    }
+}
+
+/// A group of operations that reaches the connection as one.
+///
+/// The queue is shared: a background task holding a [`ConnectionHandle`] can send into it at any
+/// moment, so two calls in a row are not guaranteed to be adjacent. Anything whose *adjacency*
+/// matters -- "this disconnect message, then close", "switch phase, then send" -- belongs in a
+/// batch, which the connection carries out with nothing interleaved.
+///
+/// Built by [`ConnectionHandle::batch`]; nothing is queued if the closure that fills it fails.
+///
+/// Two operations are deliberately absent. [`set_version`](ConnectionHandle::set_version), because
+/// a batch encodes everything for the version it was created with, so a version change inside one
+/// could not affect the packets around it and would only look as if it did. And
+/// [`fail`](ConnectionHandle::fail), because a handler that wants to say something and then give up
+/// can send and return `Err` -- the connection writes what was queued before the failure either
+/// way.
+pub struct Batch<S> {
+    ops: Vec<Op<S>>,
+    version: ProtocolVersion,
+    limits: Limits,
+}
+
+impl<S> Batch<S> {
+    /// Encodes a packet and adds it to the batch. See [`ConnectionHandle::send`].
+    pub fn send<P: Packet>(&mut self, packet: P) -> Result<&mut Self> {
+        let encoded = Encoded::of(&packet, self.version, self.limits)?;
+        Ok(self.push(Op::Send {
+            encoded,
+            version: self.version,
+        }))
+    }
+
+    /// Adds an encryption switch. See [`ConnectionHandle::encrypt`].
+    pub fn encrypt(&mut self, cipher: Box<dyn Cipher>) -> &mut Self {
+        self.push(Op::Encrypt(cipher))
+    }
+
+    /// Adds a phase change. See [`ConnectionHandle::set_phase`].
+    pub fn set_phase(&mut self, phase: Phase) -> &mut Self {
+        self.push(Op::SetPhase(phase))
+    }
+
+    /// Adds a change to the connection state. See [`ConnectionHandle::update`].
+    pub fn update(&mut self, change: impl FnOnce(&mut S) + Send + 'static) -> &mut Self {
+        self.push(Op::With(Box::new(change)))
+    }
+
+    /// Ends the batch by closing the connection. See [`ConnectionHandle::close`].
+    pub fn close(&mut self) -> &mut Self {
+        self.push(Op::Close)
+    }
+
+    fn push(&mut self, op: Op<S>) -> &mut Self {
+        self.ops.push(op);
+        self
     }
 }
 
@@ -149,15 +215,13 @@ impl<S> ConnectionHandle<S> {
     /// gated field left unset, or a packet too large for a frame is reported to the code that made
     /// the mistake instead of surfacing later as a connection failure with no obvious author.
     ///
-    /// The version and the packet's phase travel with the bytes, and the connection refuses to write
-    /// them if the connection has moved on -- see
-    /// [`InternalError::StaleEncoding`](crate::error::InternalError::StaleEncoding).
+    /// The version travels with the bytes, and the connection refuses to write them if it has moved
+    /// on since -- see [`InternalError::StaleEncoding`](crate::error::InternalError::StaleEncoding).
     pub fn send<P: Packet>(&self, packet: P) -> Result<()> {
         let encoded = Encoded::of(&packet, self.version, self.limits)?;
         self.queue(Op::Send {
             encoded,
             version: self.version,
-            phase: P::PHASE,
         })
     }
 
@@ -182,8 +246,7 @@ impl<S> ConnectionHandle<S> {
     ///
     /// Because this is an operation, it lands exactly between the packet queued before it and the
     /// one queued after -- so "send the last packet of this phase, then switch" is expressible, and
-    /// the peer's next frame is decoded against the table the handler intended. The reverse order
-    /// is the mistake, and it is refused rather than written.
+    /// the peer's next frame is decoded against the table the handler intended.
     pub fn set_phase(&self, phase: Phase) -> Result<()> {
         self.queue(Op::SetPhase(phase))
     }
@@ -215,11 +278,40 @@ impl<S> ConnectionHandle<S> {
         rx.await.map_err(|_| Error::Closed)
     }
 
-    /// Runs a future alongside the connection, while packets keep being dispatched.
+    /// Queues several operations so that nothing can land between them.
+    ///
+    /// Nothing is queued at all if `build` fails, so a batch is all-or-nothing on both sides:
+    ///
+    /// ```ignore
+    /// ctx.batch(|batch| {
+    ///     batch.send(Disconnect { reason })?;
+    ///     batch.close();
+    ///     Ok(())
+    /// })
+    /// ```
+    pub fn batch(&self, build: impl FnOnce(&mut Batch<S>) -> Result<()>) -> Result<()> {
+        let mut batch = Batch {
+            ops: Vec::new(),
+            version: self.version,
+            limits: self.limits,
+        };
+        build(&mut batch)?;
+        self.queue(Op::Batch(batch.ops))
+    }
+
+    /// Runs a future *on the connection's own task*, while packets keep being dispatched.
     ///
     /// Use this for work that must overlap with further protocol traffic -- Passage's backend
     /// selection, which runs while keep-alives are exchanged. Anything it needs from the connection
     /// it takes through a cloned [`ConnectionHandle`]. An error from the future fails the connection.
+    ///
+    /// # It is not a `tokio::spawn`
+    ///
+    /// The future is polled by the connection loop, between packets. That is what makes
+    /// [`exclusive`](ConnectionHandle::exclusive) possible and what keeps the ordering guarantees
+    /// intact -- and it means a future that **blocks, or does not yield, stops the connection**: no
+    /// frames are read, no keep-alive is sent, no deadline fires. Work that might block belongs in
+    /// [`detach`](ConnectionHandle::detach).
     pub fn spawn(&self, future: impl Future<Output = Result<()>> + Send + 'static) -> Result<()> {
         self.queue(Op::Spawn {
             future: Box::pin(future),
@@ -236,7 +328,8 @@ impl<S> ConnectionHandle<S> {
     /// buffered and replayed into a half-finished session.
     ///
     /// The connection reopens the gate when the future resolves, so there is nothing to reset by hand
-    /// and no way to leave the connection gated by accident.
+    /// and no way to leave the connection gated by accident. Like
+    /// [`spawn`](ConnectionHandle::spawn), it runs on the connection's task.
     pub fn exclusive(
         &self,
         future: impl Future<Output = Result<()>> + Send + 'static,
@@ -247,6 +340,35 @@ impl<S> ConnectionHandle<S> {
         })
     }
 
+    /// Runs a future on its own task, where it cannot starve the connection.
+    ///
+    /// The counterpart to [`spawn`](ConnectionHandle::spawn), for work that may block or take a
+    /// long slice of CPU: a synchronous resolver, a signature check, an adapter whose client is not
+    /// cooperative. It talks back through this handle like any other task, and an error from it
+    /// fails the connection through [`fail`](ConnectionHandle::fail).
+    ///
+    /// What it cannot do is hold the read gate: [`exclusive`](ConnectionHandle::exclusive) counts
+    /// tasks the connection itself polls, and this is not one of them.
+    ///
+    /// Unlike everything else here it returns nothing, because there is nothing that can go wrong
+    /// at this end: the task is spawned whether or not the connection is still there, and a task
+    /// reporting to a connection that has ended is the ordinary case rather than a failure.
+    ///
+    /// # Panics
+    ///
+    /// If called outside a Tokio runtime, like [`tokio::spawn`] itself.
+    pub fn detach(&self, future: impl Future<Output = Result<()>> + Send + 'static)
+    where
+        S: Send + 'static,
+    {
+        let conn = self.clone();
+        tokio::spawn(async move {
+            if let Err(err) = future.await {
+                let _ = conn.fail(err);
+            }
+        });
+    }
+
     /// Waits until everything queued so far has been written to the socket.
     pub async fn flush(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
@@ -254,10 +376,26 @@ impl<S> ConnectionHandle<S> {
         rx.await.map_err(|_| Error::Closed)
     }
 
+    /// Fails the connection, after writing everything queued so far.
+    ///
+    /// This is for code that has no `Err` to return: a [`detach`](ConnectionHandle::detach)ed task,
+    /// or anything else holding a handle outside a handler call. Inside a handler, returning `Err`
+    /// does the same thing and reads better -- the packets queued before it are written either way.
+    pub fn fail(&self, error: Error) -> Result<()> {
+        self.queue(Op::Fail(error))
+    }
+
     /// Ends the connection once everything queued so far has been written.
     ///
-    /// This is a normal completion, not an error: it is how a status response, a disconnect or a
-    /// transfer ends a connection.
+    /// This is a normal completion, not an error: it is how a status response, a transfer and a
+    /// refused login all end a connection.
+    ///
+    /// *Why* it ended is not the driver's to record. A handler that turns a peer away knows the
+    /// reason, and the state it writes it into comes back in
+    /// [`Outcome`](super::Outcome) -- with the reason attached, which a completion variant could
+    /// never carry. Closing and then returning `Ok(())` is also how a handler that has already sent
+    /// its own disconnect message declines the one
+    /// [`Dispatcher::on_error`](super::Dispatcher::on_error) would otherwise add.
     pub fn close(&self) -> Result<()> {
         self.queue(Op::Close)
     }
@@ -338,7 +476,12 @@ impl<'a, S> Ctx<'a, S> {
         self.conn.update(change)
     }
 
-    /// Runs a future alongside the connection. See [`ConnectionHandle::spawn`].
+    /// Queues several operations with nothing in between. See [`ConnectionHandle::batch`].
+    pub fn batch(&self, build: impl FnOnce(&mut Batch<S>) -> Result<()>) -> Result<()> {
+        self.conn.batch(build)
+    }
+
+    /// Runs a future on the connection's task. See [`ConnectionHandle::spawn`].
     pub fn spawn(&self, future: impl Future<Output = Result<()>> + Send + 'static) -> Result<()> {
         self.conn.spawn(future)
     }
@@ -349,6 +492,19 @@ impl<'a, S> Ctx<'a, S> {
         future: impl Future<Output = Result<()>> + Send + 'static,
     ) -> Result<()> {
         self.conn.exclusive(future)
+    }
+
+    /// Runs a future on its own task. See [`ConnectionHandle::detach`].
+    pub fn detach(&self, future: impl Future<Output = Result<()>> + Send + 'static)
+    where
+        S: Send + 'static,
+    {
+        self.conn.detach(future);
+    }
+
+    /// Fails the connection in queue order. See [`ConnectionHandle::fail`].
+    pub fn fail(&self, error: Error) -> Result<()> {
+        self.conn.fail(error)
     }
 
     /// Ends the connection once everything queued so far has been written.

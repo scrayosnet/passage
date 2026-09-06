@@ -14,6 +14,14 @@
 //! constants. `grep -rn "at_least" src/` then lists every version-dependent field, and
 //! `grep -rn "ids(" src/` every version-dependent ID -- together, a complete inventory.
 //!
+//! # Snapshots are not versions you can compare
+//!
+//! Snapshot builds encode their protocol version with bit 30 set (`0x4000_0000 | n`), so *every*
+//! snapshot compares above *every* release. A plain `>=` therefore says a 1.20.5 snapshot is newer
+//! than the 26.2 protocol, and every version-gated field would be written for a client that cannot
+//! read it. [`ProtocolVersion::is_release`] is how a handler refuses them; see
+//! [`MIN_LOGIN_VERSION`](crate::demo::server::MIN_LOGIN_VERSION) for the shape.
+//!
 //! # Why there is no `Feature` enum
 //!
 //! An earlier revision routed every comparison through a named gate: a `Feature` variant, a
@@ -72,11 +80,37 @@ impl ProtocolVersion {
     ///
     /// This is the *only* way to branch on a version. It is an inclusive lower bound, which matches
     /// how the protocol changes: a field appears in some version and stays.
+    ///
+    /// It is meaningful only for a version that [`is_release`](ProtocolVersion::is_release): a
+    /// snapshot is numerically above every release and would cross every threshold.
     #[must_use]
     pub const fn at_least(self, other: Self) -> bool {
         self.0 >= other.0
     }
+
+    /// Whether this is a snapshot build.
+    ///
+    /// Snapshots set bit 30 of the protocol number, which puts all of them above all releases. They
+    /// are not ordered against releases in any useful way, so nothing gated on
+    /// [`at_least`](ProtocolVersion::at_least) can be resolved for one.
+    #[must_use]
+    pub const fn is_snapshot(self) -> bool {
+        self.0 & SNAPSHOT_BIT != 0
+    }
+
+    /// Whether this version can be compared against the version table at all.
+    ///
+    /// False for snapshots and for the negative numbers a client is free to send.
+    /// [`UNKNOWN`](ProtocolVersion::UNKNOWN) counts as comparable: it is below every threshold,
+    /// which is exactly what the pre-handshake state needs.
+    #[must_use]
+    pub const fn is_release(self) -> bool {
+        self.0 >= 0 && !self.is_snapshot()
+    }
 }
+
+/// The bit a snapshot sets in its protocol number.
+const SNAPSHOT_BIT: i32 = 0x4000_0000;
 
 impl fmt::Display for ProtocolVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -139,6 +173,25 @@ mod tests {
         // unexpectedly, and neither may panic.
         assert!(!ProtocolVersion::new(i32::MIN).at_least(versions::V1_20_5));
         assert!(ProtocolVersion::new(i32::MAX).at_least(versions::V1_20_5));
+        // Which is precisely why neither is a version a codec may be resolved against.
+        assert!(!ProtocolVersion::new(i32::MIN).is_release());
+        assert!(!ProtocolVersion::new(i32::MAX).is_release());
+    }
+
+    #[test]
+    fn a_snapshot_outranks_every_release_and_is_refused_for_it() {
+        // 24w03a, a 1.20.5 snapshot: numerically above the 26.2 protocol, which is exactly the
+        // trap. Anything gated on `at_least` would be written for a client that cannot read it.
+        let snapshot = ProtocolVersion::new(0x4000_0000 | 132);
+        assert!(snapshot.at_least(versions::V26_2));
+        assert!(snapshot.is_snapshot());
+        assert!(!snapshot.is_release());
+
+        // Releases are not snapshots, and neither is the pre-handshake floor.
+        for version in [versions::V1_20_5, versions::V1_21, versions::V26_2] {
+            assert!(version.is_release(), "{version}");
+        }
+        assert!(ProtocolVersion::UNKNOWN.is_release());
     }
 
     #[test]

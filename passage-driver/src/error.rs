@@ -10,11 +10,27 @@
 //! implementation ended up with `Ok(()) | Err(Error::ConnectionClosed)` being treated identically
 //! at every call site -- one forgotten match arm away from logging normal traffic as a failure.
 //!
-//! Wiring mistakes are not in here at all. They are [`BuildError`]s, produced once by
+//! # Two things that are deliberately not in here
+//!
+//! **Wiring mistakes.** They are [`BuildError`]s, produced once by
 //! [`RouterBuilder::build`](crate::router::RouterBuilder::build) at startup, and a connection can
 //! never encounter one.
+//!
+//! **Why a connection stopped.** That is [`Ending`](crate::conn::Ending), and the reason it is a
+//! separate type is scope. [`Error`] is what *any fallible operation* returns -- a `VarInt` that
+//! ran off the end of a frame, a handler that refused a login, a socket that broke -- so
+//! [`Reader`](crate::wire::Reader), [`Packet`](crate::packet::Packet) and every handler produce and
+//! consume it. An `Ending` is produced in exactly one place, the connection loop, and consumed in
+//! one, [`Dispatcher::on_error`](crate::conn::Dispatcher::on_error).
+//!
+//! Folding the two together would put "the shutdown token was cancelled" in the type
+//! `Reader::var_int` returns, where it means nothing and nothing says so -- which is the same shape
+//! as the `Err(ConnectionClosed)` mistake above. It would also break [`Class`]: an `Ending` that is
+//! a hangup, a cancellation or a deadline has nobody to blame, and a taxonomy of blame with a
+//! "nobody" in it stops being one. `Ending` contains an `Error` where a connection stopped because
+//! something failed, and that containment is the whole of the relationship between them.
 
-use crate::packet::{Direction, Phase};
+use crate::packet::Phase;
 use crate::version::ProtocolVersion;
 
 /// Who caused an error. This drives the observability and disconnect policy.
@@ -119,12 +135,10 @@ pub enum ProtocolError {
     },
 
     /// No packet is registered for this ID in the current phase and version.
-    #[error("unknown packet id {id:#04x} in phase {phase:?} ({direction:?}, version {version})")]
+    #[error("unknown packet id {id:#04x} in phase {phase:?} (version {version})")]
     UnknownPacket {
         /// The phase the connection was in.
         phase: Phase,
-        /// The direction the packet was read in.
-        direction: Direction,
         /// The protocol version of the connection.
         version: ProtocolVersion,
         /// The packet ID that could not be resolved.
@@ -204,32 +218,32 @@ pub enum InternalError {
         limit: usize,
     },
 
-    /// A queued packet was encoded for a configuration the connection had left by the time the
+    /// A queued packet was encoded for a protocol version the connection had left by the time the
     /// operation was drained.
     ///
-    /// A handler sees a *snapshot* of the version and phase, and encodes against it. That is only
-    /// wrong if the same handler also moved the connection first -- `set_phase(Configuration)`
-    /// followed by a send of a `Login` packet, or a send after `set_version`. Operations drain in
-    /// queue order, so the correct orderings (send, *then* switch) can never trip this; only the
+    /// A handler sees a *snapshot* of the version and encodes against it. That is only wrong if the
+    /// same handler also moved the connection first -- a send after `set_version`. Operations drain
+    /// in queue order, so the correct ordering (send, *then* switch) can never trip this; only the
     /// mistake can.
     ///
     /// Without the check those bytes would go out with an ID the peer resolves against a different
     /// table, which is a desynchronised connection with no diagnostic on either side.
+    ///
+    /// There is no phase counterpart, and deliberately so: a packet belongs to exactly one phase
+    /// ([`Packet::PHASE`](crate::packet::Packet::PHASE)), so "the phase it was encoded for" was
+    /// never a snapshot of anything -- it was the packet's own identity, and checking a constant
+    /// against the connection only ever restated what the type already said.
     #[error(
-        "`{packet}` was encoded for version {encoded_version} phase {encoded_phase:?}, but the \
-         connection reached version {version} phase {phase:?} before it was written"
+        "`{packet}` was encoded for version {encoded_version}, but the connection reached version \
+         {version} before it was written"
     )]
     StaleEncoding {
         /// The packet that was queued.
         packet: &'static str,
         /// The version it was encoded for.
         encoded_version: ProtocolVersion,
-        /// The phase it belongs to.
-        encoded_phase: Phase,
         /// The version the connection is in now.
         version: ProtocolVersion,
-        /// The phase the connection is in now.
-        phase: Phase,
     },
 }
 
@@ -352,15 +366,20 @@ impl Error {
 /// [`Connection::new`](crate::conn::Connection::new) cannot fail.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum BuildError {
-    /// A packet was registered on a router that does not receive packets travelling its way.
-    #[error("packet `{packet}` travels {actual:?} but this router receives {expected:?} packets")]
-    WrongDirection {
+    /// A packet's ID table is not ordered newest to oldest.
+    ///
+    /// [`ids`](crate::packet::ids) takes the first entry that matches, and the router reads the
+    /// same table to work out where the protocol changes shape. Both are wrong for a table written
+    /// the other way round, and neither would say so at runtime -- the packet would simply resolve
+    /// to an ID from the wrong era.
+    #[error("packet `{packet}` lists version {version} after {previous}; ids go newest to oldest")]
+    UnorderedIds {
         /// The packet that was registered.
         packet: &'static str,
-        /// The direction the packet travels in.
-        actual: Direction,
-        /// The direction the router receives.
-        expected: Direction,
+        /// The entry that came first.
+        previous: ProtocolVersion,
+        /// The entry that should have come before it.
+        version: ProtocolVersion,
     },
 
     /// A packet's ID is outside the range the dispatch table covers.

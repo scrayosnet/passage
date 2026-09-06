@@ -12,7 +12,7 @@
 //!   sending it to an older client is an internal error instead of a malformed frame.
 
 use crate::error::{InternalError, ProtocolError, Result};
-use crate::packet::{Direction, Packet, Phase, ids};
+use crate::packet::{Direction, Packet, Phase};
 use crate::version::{ProtocolVersion, versions};
 use crate::wire::{Reader, Wire, Writer};
 use uuid::Uuid;
@@ -120,9 +120,7 @@ impl Packet for Intention {
 
     /// Version-independent, because this has to decode *before* a version is known -- which is
     /// exactly what an ID table anchored at [`ProtocolVersion::UNKNOWN`] expresses.
-    fn id(version: ProtocolVersion) -> Option<i32> {
-        ids(version, &[(ProtocolVersion::UNKNOWN, 0x00)])
-    }
+    const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> Result<Self> {
         Ok(Self {
@@ -151,9 +149,7 @@ impl Packet for StatusRequest {
     const PHASE: Phase = Phase::Status;
     const DIRECTION: Direction = Direction::Serverbound;
 
-    fn id(version: ProtocolVersion) -> Option<i32> {
-        ids(version, &[(ProtocolVersion::UNKNOWN, 0x00)])
-    }
+    const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
     fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> Result<Self> {
         Ok(Self)
@@ -176,9 +172,7 @@ impl Packet for StatusResponse {
     const PHASE: Phase = Phase::Status;
     const DIRECTION: Direction = Direction::Clientbound;
 
-    fn id(version: ProtocolVersion) -> Option<i32> {
-        ids(version, &[(ProtocolVersion::UNKNOWN, 0x00)])
-    }
+    const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> Result<Self> {
         Ok(Self {
@@ -203,9 +197,7 @@ impl Packet for PingRequest {
     const PHASE: Phase = Phase::Status;
     const DIRECTION: Direction = Direction::Serverbound;
 
-    fn id(version: ProtocolVersion) -> Option<i32> {
-        ids(version, &[(ProtocolVersion::UNKNOWN, 0x01)])
-    }
+    const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x01)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> Result<Self> {
         Ok(Self { payload: r.i64()? })
@@ -229,9 +221,7 @@ impl Packet for PongResponse {
     const PHASE: Phase = Phase::Status;
     const DIRECTION: Direction = Direction::Clientbound;
 
-    fn id(version: ProtocolVersion) -> Option<i32> {
-        ids(version, &[(ProtocolVersion::UNKNOWN, 0x01)])
-    }
+    const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x01)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> Result<Self> {
         Ok(Self { payload: r.i64()? })
@@ -257,9 +247,7 @@ impl Packet for LoginStart {
     const PHASE: Phase = Phase::Login;
     const DIRECTION: Direction = Direction::Serverbound;
 
-    fn id(version: ProtocolVersion) -> Option<i32> {
-        ids(version, &[(versions::V1_20_5, 0x00)])
-    }
+    const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V1_20_5, 0x00)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> Result<Self> {
         Ok(Self {
@@ -284,9 +272,7 @@ impl Packet for LoginAcknowledged {
     const PHASE: Phase = Phase::Login;
     const DIRECTION: Direction = Direction::Serverbound;
 
-    fn id(version: ProtocolVersion) -> Option<i32> {
-        ids(version, &[(versions::V1_20_5, 0x03)])
-    }
+    const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V1_20_5, 0x03)];
 
     fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> Result<Self> {
         Ok(Self)
@@ -319,9 +305,7 @@ impl Packet for LoginSuccess {
     const PHASE: Phase = Phase::Login;
     const DIRECTION: Direction = Direction::Clientbound;
 
-    fn id(version: ProtocolVersion) -> Option<i32> {
-        ids(version, &[(versions::V1_20_5, 0x02)])
-    }
+    const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V1_20_5, 0x02)];
 
     fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self> {
         Ok(Self {
@@ -352,6 +336,54 @@ impl Packet for LoginSuccess {
     }
 }
 
+/// Ends a login with a reason the client shows the player.
+///
+/// This is the packet that makes [`Dispatcher::on_error`](crate::conn::Dispatcher::on_error) worth
+/// having: without it, a refused login and a crashed server look identical from the outside.
+///
+/// It is a *login-phase* packet, and its configuration-phase counterpart is a different type with a
+/// different ID and a different encoding -- a JSON string here, a network-NBT text component there.
+/// That is the honest reason phase is part of a packet's identity, and the reason this demo can
+/// only speak in the login phase: [`wire`](crate::wire) has no NBT yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LoginDisconnect {
+    /// The reason, as a JSON text component.
+    pub reason: String,
+}
+
+impl LoginDisconnect {
+    /// The reason as a plain message, which is the whole of what this demo needs.
+    #[must_use]
+    pub fn text(reason: &str) -> Self {
+        Self {
+            // Not `serde_json`: the driver has no serialisation dependency, and a demo does not
+            // earn one. A real packet set would build a text component properly.
+            reason: format!(r#"{{"text":"{}"}}"#, reason.replace('"', "'")),
+        }
+    }
+}
+
+impl Packet for LoginDisconnect {
+    const NAME: &'static str = "LoginDisconnect";
+    const PHASE: Phase = Phase::Login;
+    const DIRECTION: Direction = Direction::Clientbound;
+    /// Anchored at [`ProtocolVersion::UNKNOWN`], and that is not laziness: this ID has not moved
+    /// since the login phase existed, and the packet has to reach clients too old for anything
+    /// else -- telling a 1.20.4 player which version to install is the *only* thing that connection
+    /// is good for.
+    const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
+
+    fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> Result<Self> {
+        Ok(Self {
+            reason: r.string("reason", MAX_STATUS_LEN)?,
+        })
+    }
+
+    fn encode(&self, w: &mut Writer<'_>, _version: ProtocolVersion) -> Result<()> {
+        w.string(&self.reason)
+    }
+}
+
 /// Tells the client to reconnect to another server.
 ///
 /// Does not exist before 1.20.5, which the ID table states outright.
@@ -368,9 +400,7 @@ impl Packet for Transfer {
     const PHASE: Phase = Phase::Configuration;
     const DIRECTION: Direction = Direction::Clientbound;
 
-    fn id(version: ProtocolVersion) -> Option<i32> {
-        ids(version, &[(versions::V1_20_5, 0x0B)])
-    }
+    const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V1_20_5, 0x0B)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> Result<Self> {
         Ok(Self {
@@ -398,9 +428,7 @@ impl Packet for KeepAlive {
     const PHASE: Phase = Phase::Configuration;
     const DIRECTION: Direction = Direction::Clientbound;
 
-    fn id(version: ProtocolVersion) -> Option<i32> {
-        ids(version, &[(versions::V1_20_5, 0x04)])
-    }
+    const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V1_20_5, 0x04)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> Result<Self> {
         Ok(Self { id: r.i64()? })
@@ -424,9 +452,7 @@ impl Packet for KeepAliveResponse {
     const PHASE: Phase = Phase::Configuration;
     const DIRECTION: Direction = Direction::Serverbound;
 
-    fn id(version: ProtocolVersion) -> Option<i32> {
-        ids(version, &[(versions::V1_20_5, 0x04)])
-    }
+    const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V1_20_5, 0x04)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> Result<Self> {
         Ok(Self { id: r.i64()? })

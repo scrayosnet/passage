@@ -7,15 +7,15 @@
 mod common;
 
 use common::{TestClient, intention, intention_to};
-use passage_driver::conn::{Completion, ConnectionConfig, Ctx};
+use passage_driver::conn::{ConnectionConfig, Ctx};
 use passage_driver::demo::packets::{
     Intent, Intention, PingRequest, PongResponse, StatusRequest, StatusResponse,
 };
-use passage_driver::demo::server::{SUPPORTED_VERSIONS, Session, router};
+use passage_driver::demo::server::{Session, router};
 use passage_driver::error::{Class, Result};
-use passage_driver::packet::{Direction, Phase};
+use passage_driver::packet::Phase;
 use passage_driver::router::Router;
-use passage_driver::server::{Listener, serve};
+use passage_driver::server::{Finished, Listener, make_with, serve};
 use passage_driver::version::versions;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -31,9 +31,9 @@ type Accepted = io::Result<(DuplexStream, SocketAddr)>;
 
 /// How a connection ended, in a form a test can compare.
 ///
-/// [`Result<Completion>`] is not `Clone` -- an error carries its source -- so what gets recorded is
-/// the completion, or who was to blame and what for.
-type Outcome = std::result::Result<Completion, (Class, &'static str)>;
+/// An [`Ending`] is not `Clone` -- a failure carries its source -- so what gets recorded is the
+/// completion, or the ending's label and whatever blame came with it.
+type Ended = std::result::Result<(), (Option<Class>, &'static str)>;
 
 /// A listener fed by a channel: the test decides what is accepted, and when.
 struct TestListener {
@@ -80,19 +80,19 @@ impl Incoming {
 struct Harness {
     incoming: Incoming,
     shutdown: CancellationToken,
-    finished: Arc<Mutex<Vec<Outcome>>>,
+    finished: Arc<Mutex<Vec<Ended>>>,
     server: JoinHandle<()>,
 }
 
 impl Harness {
     /// What has been recorded so far.
-    fn outcomes(&self) -> Vec<Outcome> {
+    fn outcomes(&self) -> Vec<Ended> {
         self.finished.lock().expect("not poisoned").clone()
     }
 
     /// Waits for `count` connections to have finished, so assertions do not race the tasks that
     /// end them.
-    async fn wait_for(&self, count: usize) -> Vec<Outcome> {
+    async fn wait_for(&self, count: usize) -> Vec<Ended> {
         for _ in 0..1_000 {
             let outcomes = self.outcomes();
             if outcomes.len() >= count {
@@ -116,7 +116,7 @@ fn start(router: Router<Session>, drain: Option<Duration>) -> Harness {
     let recorder = Arc::clone(&finished);
     let mut server = serve(
         TestListener { incoming: rx },
-        router,
+        Arc::new(router),
         // The point of a factory rather than a value: the address is only known per connection.
         |addr: &SocketAddr| Session {
             peer: Some(*addr),
@@ -125,12 +125,15 @@ fn start(router: Router<Session>, drain: Option<Duration>) -> Harness {
     )
     .config(ConnectionConfig::default())
     .with_graceful_shutdown(shutdown.clone())
-    .on_finish(move |result: &Result<Completion>| {
-        let outcome = match result {
-            Ok(completion) => Ok(*completion),
-            Err(err) => Err((err.class(), err.label())),
+    .on_finish(move |finished: &Finished<'_, Session, SocketAddr>| {
+        let ended = match finished.result {
+            Ok(()) => Ok(()),
+            Err(ending) => Err((
+                ending.error().map(passage_driver::error::Error::class),
+                ending.label(),
+            )),
         };
-        recorder.lock().expect("not poisoned").push(outcome);
+        recorder.lock().expect("not poisoned").push(ended);
     });
 
     if let Some(after) = drain {
@@ -170,7 +173,7 @@ async fn serves_a_connection_the_listener_accepts() {
 
     let response = ping(&mut client, "mc.justchunks.net").await;
     assert!(response.body.contains("mc.justchunks.net"), "{response:?}");
-    assert_eq!(harness.wait_for(1).await, vec![Ok(Completion::Closed)]);
+    assert_eq!(harness.wait_for(1).await, vec![Ok(())]);
 }
 
 #[tokio::test]
@@ -209,7 +212,7 @@ async fn every_connection_gets_its_own_state() {
 #[tokio::test]
 async fn the_state_factory_sees_the_address_the_listener_reported() {
     // Two handlers, so the assertion is on the state and nothing else.
-    let peer_router = Router::builder(Direction::Serverbound)
+    let peer_router = Router::builder()
         .on::<Intention, _>(|ctx: Ctx<'_, Session>, packet: Intention| {
             ctx.set_version(packet.protocol_version)?;
             ctx.set_phase(Phase::Status)
@@ -220,7 +223,7 @@ async fn the_state_factory_sees_the_address_the_listener_reported() {
             })?;
             ctx.close()
         })
-        .build(SUPPORTED_VERSIONS.iter().copied())
+        .build()
         .expect("builds");
 
     let harness = start(peer_router, None);
@@ -260,6 +263,101 @@ async fn a_finished_connection_does_not_end_the_server() {
 
     assert_eq!(harness.wait_for(3).await.len(), 3);
     assert!(!harness.server.is_finished());
+}
+
+#[tokio::test]
+async fn a_panicking_connection_is_reported_rather_than_vanishing() {
+    // The one outcome that used to escape reporting entirely: the connection task unwound, the
+    // join handle was dropped, and nothing downstream ever heard about it.
+    let (tx, rx) = mpsc::unbounded_channel();
+    let finished: Arc<Mutex<Vec<Ended>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&finished);
+
+    let server = tokio::spawn(
+        serve(
+            TestListener { incoming: rx },
+            make_with(|| PanickingDispatcher),
+            |_: &SocketAddr| (),
+        )
+        .on_finish(move |finished: &Finished<'_, (), SocketAddr>| {
+            let ending = finished.result.as_ref().expect_err("a panic is a failure");
+            recorder.lock().expect("not poisoned").push(Err((
+                ending.error().map(passage_driver::error::Error::class),
+                ending.label(),
+            )));
+        })
+        .run(),
+    );
+
+    let incoming = Incoming(tx);
+    let mut client = incoming.connect(1);
+    client.send_raw(&[0x00]).await;
+
+    for _ in 0..1_000 {
+        if !finished.lock().expect("not poisoned").is_empty() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        *finished.lock().expect("not poisoned"),
+        vec![Err((Some(Class::Internal), "panic"))],
+    );
+    // And the server carries on: one connection's bug is not the listener's problem.
+    assert!(!server.is_finished());
+    server.abort();
+}
+
+/// A dispatcher that panics on the first frame, standing in for a handler bug.
+struct PanickingDispatcher;
+
+impl passage_driver::conn::Dispatcher<()> for PanickingDispatcher {
+    fn set_version(&mut self, _version: passage_driver::version::ProtocolVersion) {}
+
+    fn dispatch(&self, _ctx: Ctx<'_, ()>, _id: i32, _payload: &[u8]) -> Result<()> {
+        panic!("a handler bug");
+    }
+
+    fn tick(&self, _ctx: Ctx<'_, ()>) -> Result<()> {
+        Ok(())
+    }
+
+    fn ticks(&self) -> bool {
+        false
+    }
+}
+
+#[tokio::test]
+async fn a_refused_peer_never_reaches_the_protocol() {
+    // Rate limiting, in the only place it can see the address a PROXY header reported and still not
+    // hold up the accept loop.
+    let (tx, rx) = mpsc::unbounded_channel();
+    let server = tokio::spawn(
+        serve(
+            TestListener { incoming: rx },
+            Arc::new(router().expect("builds")),
+            |addr: &SocketAddr| Session {
+                peer: Some(*addr),
+                ..Session::default()
+            },
+        )
+        .on_accept(|addr: &SocketAddr| addr.port() != 2)
+        .run(),
+    );
+
+    let incoming = Incoming(tx);
+    let mut refused = incoming.connect(2);
+    let mut allowed = incoming.connect(1);
+
+    refused.expect_eof().await;
+    assert!(
+        ping(&mut allowed, "mc.justchunks.net")
+            .await
+            .body
+            .contains("mc.justchunks.net")
+    );
+
+    server.abort();
 }
 
 #[tokio::test(start_paused = true)]
@@ -325,6 +423,6 @@ async fn the_drain_timeout_cancels_a_connection_that_will_not_end() {
 
     assert_eq!(
         *finished.lock().expect("not poisoned"),
-        vec![Ok(Completion::Cancelled)],
+        vec![Err((None, "cancelled"))],
     );
 }

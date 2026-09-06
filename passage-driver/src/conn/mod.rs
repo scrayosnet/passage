@@ -52,7 +52,7 @@
 //!   1. queued operations   (writes, state, phase, version, spawn, close)  <- drained first
 //!   2. finished handler tasks
 //!   3. shutdown
-//!   4. deadlines           (lifetime, idle)
+//!   4. the lifetime deadline
 //!   5. tick                (keep-alives; not while the peer must stay quiet)
 //!   6. the next frame
 //! ```
@@ -78,11 +78,46 @@
 //! Work that must genuinely overlap with further traffic uses [`ConnectionHandle::spawn`] instead.
 //! That is the difference between "the framework decided to run my handlers concurrently" and "I
 //! asked for concurrency here".
+//!
+//! Both of those run on the connection's own task, which is what makes the gate and the ordering
+//! work -- and what makes a future that blocks stop the connection.
+//! [`ConnectionHandle::detach`] is the escape hatch for work that might.
+//!
+//! # Ending
+//!
+//! A connection ends in one of two ways, and the difference is **who decided**. That is the
+//! `Result` in [`Outcome::result`], so there is one place to look and nothing to translate:
+//!
+//! * **`Ok(())` -- we did.** A handler queued [`Op::Close`]. There is nothing to report and nothing
+//!   left to do, which is also how a handler that has already sent its own disconnect message
+//!   declines the one `on_error` would add: close, and return `Ok(())`.
+//! * **`Err(`[`Ending`]`)` -- something else did.** The peer hung up, a deadline expired, the
+//!   shutdown token was cancelled, or something failed. All four go to [`Dispatcher::on_error`],
+//!   which takes an `Ending` for that reason and no other.
+//!
+//! A hangup belongs on the second side even though nobody did anything wrong. The question the
+//! split answers is not "was this a failure" -- [`Ending::error`] answers that, and says no for
+//! three of the four -- but "did we finish what we were doing". A client that disappears while its
+//! backend is being selected has left a selection running, and releasing it is the same job as
+//! releasing it after a timeout. `on_error` is the one place that job can live.
+//!
+//! Either way, everything already queued is written before the socket closes: a handler that
+//! queues a disconnect and *then* fails gets both. What bounds that final stretch is
+//! [`ConnectionConfig::close_timeout`], not the shutdown token -- a cancelled token is one of the
+//! reasons there is something to say.
+//!
+//! # Sequence is the handler's business
+//!
+//! The connection knows about phases, not about steps. Within one phase the protocol is a
+//! sequence -- login start, then cookie response, then encryption response -- and nothing here
+//! enforces it: a peer may send the third packet first and the router will dispatch it. Handlers
+//! that care check [`Ctx::state`] and refuse what does not fit, which is the same place the rest
+//! of the session's facts live. See `demo::server` for the shape.
 
 mod connection;
 mod dispatch;
 mod handle;
 
-pub use connection::{Completion, Connection, ConnectionConfig};
+pub use connection::{Connection, ConnectionConfig, Ending, Outcome};
 pub use dispatch::Dispatcher;
-pub use handle::{ConnectionHandle, Ctx, Op};
+pub use handle::{Batch, ConnectionHandle, Ctx, Op};

@@ -1,17 +1,18 @@
 //! The connection loop.
 //!
-//! See the [module docs](crate::conn) for the vocabulary, the priority order of the loop and
-//! the read gate.
+//! See the [module docs](crate::conn) for the vocabulary, the priority order of the loop, the read
+//! gate and what happens when a connection ends.
 
-use crate::codec::{Frame, FrameCodec};
+use crate::codec::{Encoded, Frame, FrameCodec};
 use crate::conn::{ConnectionHandle, Ctx, Dispatcher, Op};
-use crate::error::{InternalError, ProtocolError, Result};
+use crate::error::{Error, InternalError, ProtocolError, Result};
 use crate::packet::Phase;
 use crate::version::ProtocolVersion;
 use crate::wire::Limits;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use futures::{SinkExt, StreamExt};
+use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -21,23 +22,105 @@ use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace};
 
-/// How a connection ended.
-///
-/// Ending is not an error. Distinguishing *how* it ended is what lets the caller log a scanner
-/// hang-up at `debug` and a decoding bug at `warn` without inspecting error variants.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Completion {
-    /// A handler asked to close the connection (status response sent, transfer sent, disconnect).
-    Closed,
+/// How long a connection may spend writing what it owes the peer once it is already ending.
+const DEFAULT_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// What ended a connection that we did not end ourselves.
+///
+/// The `Err` half of [`Outcome::result`], and exactly what
+/// [`Dispatcher::on_error`](crate::conn::Dispatcher::on_error) is called for -- the two are the same
+/// set, which is why the trait can take this and nothing else.
+///
+/// The line it draws is **who decided**. `Ok(())` means a handler asked to close, and there is
+/// nothing left to do or say. Everything else is here, including a peer that simply hung up: the
+/// point is not that a hangup is a *failure* -- it is not, and [`error`](Ending::error) says so --
+/// but that we did not finish what we were doing. Whatever a connection reserved, counted or
+/// promised on the way in needs releasing on the way out, and that has to happen for a client that
+/// vanished mid-login exactly as it does for one that timed out.
+#[derive(Debug, thiserror::Error)]
+pub enum Ending {
     /// The peer hung up.
+    ///
+    /// Nothing can be sent after this. It is still an ending rather than a completion because the
+    /// peer leaving is not us being finished with it -- a client that disappears while its backend
+    /// is being selected has left a selection running.
+    #[error("the peer hung up")]
     PeerClosed,
 
-    /// The connection was cancelled by a shutdown.
+    /// The shutdown token was cancelled.
+    #[error("the connection was cancelled")]
     Cancelled,
 
     /// A deadline expired.
+    #[error("the connection ran out of time")]
     TimedOut,
+
+    /// A handler, a decode, a background task or the transport failed.
+    #[error(transparent)]
+    Failed(#[from] Error),
+}
+
+impl Ending {
+    /// The error that ended the connection, if anything failed at all.
+    ///
+    /// `None` for a hangup, a cancellation or a deadline. Those are things that *happened*, not
+    /// things that went wrong, and nobody is to blame for them -- which is also why there is no
+    /// `class()` here. Blame is a property of an [`Error`], and three of these four have none.
+    #[must_use]
+    pub fn error(&self) -> Option<&Error> {
+        match self {
+            Ending::Failed(err) => Some(err),
+            Ending::PeerClosed | Ending::Cancelled | Ending::TimedOut => None,
+        }
+    }
+
+    /// Whether anything can still be written to the peer.
+    ///
+    /// Only a hangup answers this for certain. A broken transport or a peer that stopped reading
+    /// will refuse the write too, but there is no way to know that without trying -- so this is the
+    /// one case worth checking before composing a message nobody will read.
+    #[must_use]
+    pub fn can_reply(&self) -> bool {
+        !matches!(self, Ending::PeerClosed)
+    }
+
+    /// A stable, low-cardinality label for metrics. Never contains peer-controlled data.
+    ///
+    /// Defined for every ending, not just the failures, because "how did connections end" is one
+    /// question and wants one label.
+    #[must_use]
+    pub fn label(&self) -> &'static str {
+        match self {
+            Ending::PeerClosed => "peer_closed",
+            Ending::Cancelled => "cancelled",
+            Ending::TimedOut => "timed_out",
+            Ending::Failed(err) => err.label(),
+        }
+    }
+}
+
+/// Everything a connection knows about itself when it ends.
+///
+/// The state comes back by value because it is the connection's -- nothing else ever held it -- and
+/// because a caller reporting on the connection needs it: the hostname that was asked for, the
+/// profile that was verified, the intent from the handshake. See
+/// [`Server::on_finish`](crate::server::Server::on_finish).
+#[derive(Debug)]
+pub struct Outcome<S> {
+    /// How it ended: `Ok` if a handler closed it, `Err` for every other way.
+    ///
+    /// There is nothing in the `Ok` half because there is nothing to say -- the handler that closed
+    /// knows why, and wrote whatever mattered into [`state`](Outcome::state).
+    pub result: Result<(), Ending>,
+
+    /// The connection state, as it was left.
+    pub state: S,
+
+    /// The protocol version it settled on.
+    pub version: ProtocolVersion,
+
+    /// The phase it reached.
+    pub phase: Phase,
 }
 
 /// Static configuration of a connection.
@@ -48,6 +131,10 @@ pub struct ConnectionConfig {
 
     /// How often the tick handler runs, if at all. Ignored if
     /// [`Dispatcher::ticks`](crate::conn::Dispatcher::ticks) is `false`.
+    ///
+    /// This is also where a read deadline belongs: a tick handler sees the phase and the state, so
+    /// "nothing has arrived and we are still waiting for the handshake" is a check it can make and
+    /// the connection cannot.
     pub tick_interval: Option<Duration>,
 
     /// Hard cap on the whole connection.
@@ -56,11 +143,19 @@ pub struct ConnectionConfig {
     /// handful. This belongs to the connection rather than to the caller because the connection owns the
     /// clock and the socket -- wrapping [`Connection::run`] in [`tokio::time::timeout`] drops the
     /// future mid-flight, so the shutdown path never runs and in-flight tasks are not cancelled
-    /// cleanly. It is also the backstop for a task that never resolves while the read gate is shut.
+    /// cleanly. It is also the backstop for a task that never resolves while the read gate is shut,
+    /// and for a peer that stops reading (every socket write is raced against it).
     pub max_lifetime: Option<Duration>,
 
-    /// How long the peer may send nothing before the connection is dropped.
-    pub max_idle: Option<Duration>,
+    /// How long the connection may spend writing what it owes the peer *after* it has started
+    /// ending.
+    ///
+    /// The final flush cannot be bounded by [`max_lifetime`](ConnectionConfig::max_lifetime) or by
+    /// the shutdown token, because an expired deadline and a cancelled token are two of the reasons
+    /// there is a disconnect message to write in the first place. Without this bound, a peer that
+    /// stops reading would keep the connection -- and any graceful shutdown waiting on it -- alive
+    /// forever.
+    pub close_timeout: Option<Duration>,
 
     /// The protocol version before the handshake is processed.
     pub initial_version: ProtocolVersion,
@@ -75,7 +170,7 @@ impl Default for ConnectionConfig {
             limits: Limits::default(),
             tick_interval: None,
             max_lifetime: None,
-            max_idle: None,
+            close_timeout: Some(DEFAULT_CLOSE_TIMEOUT),
             initial_version: ProtocolVersion::UNKNOWN,
             initial_phase: Phase::Handshake,
         }
@@ -88,8 +183,8 @@ type Task = BoxFuture<'static, (bool, Result<()>)>;
 /// Drives one connection.
 pub struct Connection<S, T, D> {
     framed: Framed<T, FrameCodec>,
-    /// Where frames and ticks go. The connection holds no dispatch table of its own, and no
-    /// reference to a router -- see [`Dispatcher`].
+    /// Where frames, ticks and endings go. The connection holds no dispatch table of its own, and
+    /// no reference to a router -- see [`Dispatcher`].
     dispatcher: D,
     state: S,
     handle: ConnectionHandle<S>,
@@ -102,7 +197,8 @@ pub struct Connection<S, T, D> {
     phase: Phase,
     ticker: Option<tokio::time::Interval>,
     lifetime: Option<Pin<Box<Sleep>>>,
-    idle: Option<Pin<Box<Sleep>>>,
+    /// Armed once the connection starts ending; bounds everything written from then on.
+    closing: Option<Pin<Box<Sleep>>>,
     shutdown: CancellationToken,
     config: ConnectionConfig,
 }
@@ -169,9 +265,7 @@ where
             lifetime: config
                 .max_lifetime
                 .map(|after| Box::pin(sleep_until(Instant::now() + after))),
-            idle: config
-                .max_idle
-                .map(|after| Box::pin(sleep_until(Instant::now() + after))),
+            closing: None,
             shutdown,
             config,
         };
@@ -180,10 +274,48 @@ where
 
     /// Runs the connection to completion.
     ///
-    /// Returns how it ended, or the error that ended it. Peer errors are returned like any other:
-    /// the caller decides the log level from [`Error::class`](crate::error::Error::class).
-    pub async fn run(mut self) -> Result<Completion> {
-        let completion = loop {
+    /// Peer errors come back like any other: the caller decides the log level from
+    /// [`Error::class`](crate::error::Error::class).
+    pub async fn run(mut self) -> Outcome<S> {
+        let result = self.serve().await;
+        self.finish().await;
+        Outcome {
+            result,
+            state: self.state,
+            version: self.version,
+            phase: self.phase,
+        }
+    }
+
+    /// Runs the loop, and gives the dispatcher the last word on anything it did not ask for.
+    async fn serve(&mut self) -> Result<(), Ending> {
+        let Err(ending) = self.drive().await else {
+            // A handler closed it, so there is nothing left to say.
+            return Ok(());
+        };
+
+        // Everything from here on is written under the closing deadline instead of the shutdown
+        // token -- a cancelled token is one of the reasons there is something to say.
+        self.arm_closing();
+
+        // Whatever the failing handler queued before it failed is still written: "send this
+        // disconnect, then fail" has to mean what it says.
+        self.settle().await;
+
+        let ctx = Ctx::new(&self.state, &self.handle, self.phase);
+        if let Err(err) = self.dispatcher.on_error(ctx, &ending) {
+            // Logged, not reported. The connection is ending for the reason below; that the
+            // apology would not encode is a detail of the answer, not a second cause.
+            debug!(cause = %err, "the dispatcher could not answer the ending");
+        }
+        self.settle().await;
+
+        Err(ending)
+    }
+
+    /// The main loop: frames in, operations out, until something ends it.
+    async fn drive(&mut self) -> Result<(), Ending> {
+        loop {
             let step = tokio::select! {
                 biased;
 
@@ -198,9 +330,8 @@ where
                 // 3. Cancellation.
                 () = self.shutdown.cancelled() => Step::Shutdown,
 
-                // 4. Deadlines.
+                // 4. The deadline.
                 () = expire(&mut self.lifetime), if self.lifetime.is_some() => Step::Expired,
-                () = expire(&mut self.idle), if self.idle.is_some() => Step::Expired,
 
                 // 5. Ticks -- but never while the peer must stay quiet. A keep-alive sent into a
                 //    gated window would invite the very packet the gate rejects.
@@ -213,8 +344,8 @@ where
 
             match step {
                 Step::Op(op) => {
-                    if let Some(completion) = self.handle_op(op).await? {
-                        break completion;
+                    if self.handle_op(op).await?.is_break() {
+                        return Ok(());
                     }
                     // One write for a batch of packets rather than one per packet.
                     if self.ops.is_empty() {
@@ -229,40 +360,32 @@ where
                     }
                     result?;
                 }
-                Step::Shutdown => break Completion::Cancelled,
-                Step::Expired => break Completion::TimedOut,
+                Step::Shutdown => return Err(Ending::Cancelled),
+                Step::Expired => return Err(Ending::TimedOut),
                 Step::Tick => self.handle_tick()?,
-                Step::Frame(None) => break Completion::PeerClosed,
+                Step::Frame(None) => return Err(Ending::PeerClosed),
                 Step::Frame(Some(frame)) => self.handle_frame(frame?)?,
             }
-        };
-
-        self.finish().await;
-        Ok(completion)
+        }
     }
 
-    /// Carries out one queued operation. Returns a completion if the connection should end.
-    async fn handle_op(&mut self, op: Op<S>) -> Result<Option<Completion>> {
+    /// Carries out one queued operation, and says whether it ended the connection.
+    async fn handle_op(&mut self, op: Op<S>) -> Result<ControlFlow<()>, Ending> {
         match op {
-            Op::Send {
-                encoded,
-                version,
-                phase,
-            } => {
-                // The bytes were encoded against a snapshot. Refuse them if the connection has
-                // moved on since, rather than writing an ID the peer resolves in another table.
-                if version != self.version || phase != self.phase {
-                    return Err(InternalError::StaleEncoding {
+            Op::Send { encoded, version } => {
+                // The bytes were encoded against a snapshot of the version. Refuse them if the
+                // connection has moved on since, rather than writing an ID the peer resolves in
+                // another table.
+                if version != self.version {
+                    return Err(Error::from(InternalError::StaleEncoding {
                         packet: encoded.name,
                         encoded_version: version,
-                        encoded_phase: phase,
                         version: self.version,
-                        phase: self.phase,
-                    }
+                    })
                     .into());
                 }
                 trace!(packet = encoded.name, "writing packet");
-                self.framed.feed(encoded).await?;
+                self.write(encoded).await?;
             }
             Op::Encrypt(cipher) => {
                 debug!("enabling encryption");
@@ -296,12 +419,21 @@ where
                 // The waiter having gone away is fine: it only means nobody is listening anymore.
                 let _ = waiter.send(());
             }
+            // Boxed because an operation may hold operations. Only batches pay for it.
+            Op::Batch(ops) => {
+                for op in ops {
+                    if Box::pin(self.handle_op(op)).await?.is_break() {
+                        return Ok(ControlFlow::Break(()));
+                    }
+                }
+            }
+            Op::Fail(err) => return Err(err.into()),
             Op::Close => {
                 self.flush().await?;
-                return Ok(Some(Completion::Closed));
+                return Ok(ControlFlow::Break(()));
             }
         }
-        Ok(None)
+        Ok(ControlFlow::Continue(()))
     }
 
     fn handle_tick(&mut self) -> Result<()> {
@@ -310,9 +442,6 @@ where
     }
 
     fn handle_frame(&mut self, frame: Frame) -> Result<()> {
-        // Anything the peer sends counts as liveness, including what is rejected below.
-        self.reset_idle();
-
         if self.exclusive > 0 {
             return Err(ProtocolError::EarlyPacket {
                 phase: self.phase,
@@ -325,31 +454,112 @@ where
         self.dispatcher.dispatch(ctx, frame.id, &frame.payload)
     }
 
-    fn reset_idle(&mut self) {
-        if let (Some(idle), Some(after)) = (self.idle.as_mut(), self.config.max_idle) {
-            idle.as_mut().reset(Instant::now() + after);
-        }
+    /// Buffers a packet, under whichever deadline currently applies.
+    ///
+    /// The socket has to be written *somewhere*, and every candidate has the same problem: a peer
+    /// that stops reading fills the write buffer and the write stops making progress. Doing it
+    /// inside the loop's `select!` would mean re-entering a half-finished write on every wakeup,
+    /// so it happens here instead -- with an escape, so a peer that will not read cannot outlast
+    /// its deadline or ignore a shutdown.
+    async fn write(&mut self, encoded: Encoded) -> Result<(), Ending> {
+        let write = self.framed.feed(encoded);
+        guarded(&self.shutdown, &mut self.lifetime, &mut self.closing, write).await
     }
 
-    /// Writes whatever has been buffered, if anything.
-    async fn flush(&mut self) -> Result<()> {
+    /// Writes whatever has been buffered, if anything, under the same guard as [`write`].
+    async fn flush(&mut self) -> Result<(), Ending> {
         if self.framed.write_buffer().is_empty() {
             return Ok(());
         }
-        self.framed.flush().await
+        let flush = self.framed.flush();
+        guarded(&self.shutdown, &mut self.lifetime, &mut self.closing, flush).await
+    }
+
+    /// Switches the write guard over to the closing deadline.
+    ///
+    /// `closing` being armed is exactly the statement "this connection is ending", and every write
+    /// after it is bounded by that one clock instead of by the token and the lifetime -- both of
+    /// which may be the very reason it is ending.
+    fn arm_closing(&mut self) {
+        if self.closing.is_none()
+            && let Some(after) = self.config.close_timeout
+        {
+            self.closing = Some(Box::pin(sleep_until(Instant::now() + after)));
+        }
+    }
+
+    /// Carries out everything still queued, for a connection that is already ending.
+    ///
+    /// The same [`handle_op`](Self::handle_op) as the loop uses -- an ending is not a different
+    /// vocabulary, only a different clock, and [`arm_closing`](Self::arm_closing) has already
+    /// switched that over. What differs is what a failure means: the reason the connection is
+    /// ending has been decided, and losing it to a broken socket on the way out would replace the
+    /// diagnosis with the symptom, so failures here are logged and the drain stops.
+    async fn settle(&mut self) {
+        while let Ok(op) = self.ops.try_recv() {
+            match self.handle_op(op).await {
+                // A handler had already asked to end; there is nothing after it to write.
+                Ok(ControlFlow::Break(())) => return,
+                Ok(ControlFlow::Continue(())) => {}
+                Err(ending) => {
+                    debug!(?ending, "gave up on what was still queued");
+                    return;
+                }
+            }
+        }
+        if let Err(ending) = self.flush().await {
+            debug!(?ending, "gave up flushing what was still queued");
+        }
     }
 
     /// Ends the connection: stop everything we started, then let the socket go.
-    async fn finish(mut self) {
-        self.shutdown.cancel();
+    async fn finish(&mut self) {
         // The tasks are polled on this task, so dropping them *is* cancellation.
         self.tasks.clear();
-        if let Err(err) = self.framed.flush().await {
-            debug!(cause = %err, "failed to flush on close");
+
+        self.arm_closing();
+        if let Err(ending) = self.flush().await {
+            debug!(?ending, "failed to flush on close");
         }
-        if let Err(err) = self.framed.close().await {
-            debug!(cause = %err, "failed to close the socket");
+        let close = self.framed.close();
+        if let Err(ending) =
+            guarded(&self.shutdown, &mut self.lifetime, &mut self.closing, close).await
+        {
+            debug!(?ending, "failed to close the socket");
         }
+
+        // Last, so that anything still watching the token sees it only once there is nothing left
+        // to write. Cancelling first would race the flush above against every detached task.
+        self.shutdown.cancel();
+    }
+}
+
+/// Awaits a socket operation under whichever deadline applies.
+///
+/// While the connection is running that is the shutdown token and the lifetime. Once `closing` is
+/// armed the connection is already ending, and that one clock takes over -- because a cancelled
+/// token and an expired deadline are two of the three reasons there is a last packet to write.
+async fn guarded<T>(
+    shutdown: &CancellationToken,
+    lifetime: &mut Option<Pin<Box<Sleep>>>,
+    closing: &mut Option<Pin<Box<Sleep>>>,
+    future: impl Future<Output = Result<T>>,
+) -> Result<T, Ending> {
+    if closing.is_some() {
+        return tokio::select! {
+            biased;
+
+            result = future => Ok(result?),
+            () = expire(closing) => Err(Ending::TimedOut),
+        };
+    }
+
+    tokio::select! {
+        biased;
+
+        result = future => Ok(result?),
+        () = shutdown.cancelled() => Err(Ending::Cancelled),
+        () = expire(lifetime), if lifetime.is_some() => Err(Ending::TimedOut),
     }
 }
 
