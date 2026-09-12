@@ -112,9 +112,12 @@ impl Ending {
 /// Everything a connection knows about itself when it ends.
 ///
 /// The state comes back by value because it is the connection's -- nothing else ever held it -- and
-/// because a caller reporting on the connection needs it: the hostname that was asked for, the
-/// profile that was verified, the intent from the handshake. See
-/// [`Server::on_finish`](crate::server::Server::on_finish).
+/// because a caller driving a connection directly may want what it accumulated: the hostname that
+/// was asked for, the profile that was verified, the intent from the handshake.
+///
+/// [`Server`](crate::server::Server) drops it. That is not an oversight: a fact worth recording is
+/// better recorded by the handler that established it, while it still has the packet and the phase
+/// in hand, than by something downstream reading it back out of a struct.
 #[derive(Debug)]
 pub struct Outcome<S> {
     /// How it ended: `Ok` if a handler closed it, `Err` for every other way.

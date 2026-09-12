@@ -37,6 +37,14 @@
 //!   [`RouterDispatcher`](router::RouterDispatcher). So the table lives with the thing that owns
 //!   routing, a connection can be driven by a test double or a recorder, and the two halves can be
 //!   read separately.
+//! * **Everything between the accept and the protocol is a layer.** A PROXY header, a TLS
+//!   handshake, a rate limiter -- all the same shape, all [`Layer`](server::Layer), all set with
+//!   [`Server::layer`](server::Server::layer). The accept loop knows about none of them
+//!   individually, and the crate ships none: a layer belongs next to the thing it implements.
+//! * **Each layer keeps its own books.** A layer that refuses says [`None`] and nothing more,
+//!   because it is the one holding the reason. There is no hook told about every possible fate --
+//!   the driver records what the *driver* knows, in a span per connection and one event saying how
+//!   it ended, and every other layer records what it knows where it knows it.
 //! * **Waiting is explicit.** [`Ctx::exclusive`](conn::Ctx::exclusive) says the peer must stay quiet
 //!   until a future resolves -- so a packet that arrives anyway is reported rather than replayed,
 //!   and a hangup mid-authentication is noticed at once. [`Ctx::spawn`](conn::Ctx::spawn) is for
@@ -70,7 +78,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use passage_driver::demo::server::{Session, log_completion, router};
+//! use passage_driver::demo::server::{Session, router};
 //! use passage_driver::server::Server;
 //! use std::sync::Arc;
 //! use std::time::Duration;
@@ -94,7 +102,6 @@
 //!     .max_lifetime(Some(Duration::from_secs(60)))
 //!     .max_connections(10_000)
 //!     .graceful_shutdown(shutdown)
-//!     .on_finish(log_completion)
 //!     .await;
 //! # Ok(())
 //! # }

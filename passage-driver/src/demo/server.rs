@@ -18,11 +18,10 @@ use crate::demo::packets::{
 use crate::error::{BuildError, Class, Error, ProtocolError, Result};
 use crate::packet::Phase;
 use crate::router::{Router, UnknownPolicy};
-use crate::server::Finished;
 use crate::version::{ProtocolVersion, versions};
 use std::net::SocketAddr;
 use std::time::Duration;
-use tracing::{debug, warn};
+use tracing::debug;
 use uuid::Uuid;
 
 /// The oldest protocol version that can log in: 1.20.5 introduced the configuration phase, cookies
@@ -52,8 +51,9 @@ pub struct Session {
     ///
     /// This is where "we refused them" lives, rather than in a variant of the driver's own
     /// vocabulary. The driver knows the connection closed; only this handler knows it was a refusal
-    /// *and* what for -- and a low-cardinality reason like this is what a metric wants anyway.
-    /// [`Outcome::state`](crate::conn::Outcome::state) hands it back to whoever reports.
+    /// *and* what for -- which is why it is also the handler that logs it.
+    /// [`Outcome::state`](crate::conn::Outcome::state) hands it back to a caller driving a
+    /// connection without the accept loop.
     pub refused: Option<&'static str>,
     /// The keep-alive we are waiting for an answer to.
     pub awaiting_keep_alive: Option<i64>,
@@ -299,10 +299,21 @@ fn on_error(ctx: Ctx<'_, Session>, ending: &Ending) -> Result<()> {
         Ending::PeerClosed => return Ok(()),
     };
 
+    // Logged here rather than handed to something downstream, and this is the only place it can
+    // honestly be logged: the driver is about to record an ordinary ending, and the fact that *this*
+    // one was a refusal, of this player, for this reason, is known here and nowhere else. It lands
+    // inside the connection's span, so it reads against the ending the driver records next.
+    debug!(
+        host = ctx.state.host,
+        player = ctx.state.profile.as_ref().map(|(name, _)| name.as_str()),
+        reason = label,
+        "refusing the peer",
+    );
+
     ctx.batch(|batch| {
         batch.send(LoginDisconnect::text(reason))?;
-        // Recorded in the state, so the connection can end as an ordinary `Closed` and the report
-        // still knows this one was a refusal -- with the reason, which no completion could carry.
+        // Also recorded in the state, which is what `Outcome` hands back to anyone driving a
+        // connection directly -- a test, or a caller that is not using the accept loop.
         batch.update(move |session: &mut Session| session.refused = Some(label));
         batch.close();
         Ok(())
@@ -319,48 +330,4 @@ async fn authenticate(claimed_name: &str) -> Result<(String, Uuid)> {
 async fn select_backend() -> Result<(String, i32)> {
     tokio::time::sleep(Duration::from_millis(1)).await;
     Ok(("backend-1.justchunks.net".to_owned(), 25565))
-}
-
-/// Logs a finished connection at the level its outcome deserves.
-///
-/// This lives with the server rather than in the driver: what to log, and how loudly, is the
-/// caller's policy. What the driver provides is enough information to decide -- the peer, the
-/// duration, the state the connection was left in, and an [`Ending`] it did not choose with the
-/// [`Class`] of anything that went wrong. Everything the old implementation's metrics needed is in
-/// here, which was the point.
-///
-/// This is also the piece the previous implementation could not express: `Err(ConnectionClosed)`
-/// meant both "done" and "broken", so every call site had to special-case it and any new error
-/// variant silently fell into the wrong bucket.
-pub fn log_completion(finished: &Finished<'_, Session, SocketAddr>) {
-    let peer = finished.addr;
-    let host = finished.state().map_or("", |session| session.host.as_str());
-    let elapsed = finished.elapsed;
-
-    // A refusal ends as an ordinary completion, so this is what tells the two apart -- and it comes
-    // out of the session, because the handler that refused is the one that knew why.
-    if let Some(refused) = finished.state().and_then(|session| session.refused) {
-        debug!(?peer, host, ?elapsed, reason = refused, "peer refused");
-        return;
-    }
-
-    // One match over every way a connection can end, because there is one type for it.
-    match finished.result {
-        Ok(()) => debug!(?peer, host, ?elapsed, "connection finished"),
-        // Not a failure, and not something to log loudly: a scanner that took its MOTD and left
-        // looks exactly like this.
-        Err(Ending::PeerClosed) => debug!(?peer, host, ?elapsed, "peer hung up"),
-        Err(Ending::Cancelled) => {
-            debug!(?peer, host, ?elapsed, "connection cancelled by shutdown");
-        }
-        Err(Ending::TimedOut) => debug!(?peer, host, ?elapsed, "connection timed out"),
-        Err(Ending::Failed(err)) => match err.class() {
-            Class::Peer | Class::Transport => {
-                debug!(?peer, host, ?elapsed, cause = %err, kind = err.label(), "connection dropped");
-            }
-            Class::Internal => {
-                warn!(?peer, host, ?elapsed, cause = %err, kind = err.label(), "connection failed");
-            }
-        },
-    }
 }

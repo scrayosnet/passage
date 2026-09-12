@@ -63,7 +63,6 @@ Server::builder()
     .tick_interval(Duration::from_secs(16))
     .max_connections(10_000)
     .graceful_shutdown(shutdown)
-    .on_finish(log_completion)
     .await;
 ```
 
@@ -137,25 +136,54 @@ where the packet and the state are still in hand.
 
 ## Each layer keeps its own books
 
-Four things can turn a peer away, and none of them reports to the others:
+Four things can turn a peer away, and none of them tells the others:
 
-| Layer              | Decides                        | Still holding                            |
-|--------------------|--------------------------------|------------------------------------------|
-| `Listener::prepare`| the preamble did not complete  | the TLS error, the malformed header      |
-| `Admit`            | not this peer, not right now   | the bucket, the ban list, the rate       |
-| a handler          | this *session* is refused      | the packet, the phase, the session state |
-| the connection     | it ended, and how              | the `Ending`, the state, the version     |
+| Layer          | Decides                       | Still holding                            |
+|----------------|-------------------------------|------------------------------------------|
+| a `Layer`      | not this peer, not like this  | the TLS error, the bucket, the ban list  |
+| a handler      | this *session* is refused     | the packet, the phase, the session state |
+| the connection | it ended, and how             | the `Ending`, the state, the version     |
+| the driver     | what to record about all that | nothing else -- and it records only its own |
 
-Each one holds, at the moment it decides, everything a metric about that decision could want -- so
-each one counts its own. `Admit` takes `&self` precisely so it can be a named type with a counter in
-it, and `on_finish` is left reporting what it is named for: connections that ran and then ended.
+Each one holds, at the moment it decides, everything a log line or a metric about that decision
+could want -- so each one records its own. A `Layer` that refuses returns `None` and nothing more;
+`&self` is what lets it be a named type with a counter in it. A handler that refuses a login logs
+the player and the reason, which it is holding and nobody else is.
 
-The alternative is one hook told about every possible fate. It sounds like consolidation and is the
-opposite: every layer has to flatten what it knows into a vocabulary the driver invented for it, the
-hook grows an arm per layer, and the place that ends up knowing everything is the place furthest
-from where any of it happened. That is the same trade the driver refuses one level down -- there is
-no `Ending::Refused`, because the handler that refused a login knows it did and writes the reason
-into its own state.
+The driver's share is deliberately small: a `connection` span, and one event when a connection ends
+saying how long it took, which `Ending` it had and which version and phase it reached -- at `warn`
+if the cause was ours, `debug` otherwise. Everything a handler logs lands inside that span, so the
+correlation a central reporter used to provide comes from the span instead.
+
+There is no hook told about every possible fate, and that is the point. It sounds like
+consolidation and is the opposite: every layer has to flatten what it knows into a vocabulary the
+driver invented for it, the hook grows an arm per layer, and the place that ends up knowing
+everything is the place furthest from where any of it happened. That is the same trade the driver
+refuses one level down -- there is no `Ending::Refused`, because the handler that refused a login
+knows it did.
+
+## Everything before the protocol is a layer
+
+A socket usually needs something done to it before the protocol starts. All of it is one shape --
+take the socket and the address, hand back a socket and an address, or refuse:
+
+```rust
+Server::builder()
+    .listener(listener)
+    .layer(ProxyProtocol::new(trusted))   // rewrites the address
+    .layer(Tls::new(acceptor))            // changes the socket type
+    .layer(rate_limiter)                  // refuses, and counts its own refusals
+    .dispatch(router)
+    .state(session)
+```
+
+Layers run in the order written, each seeing what the one before produced, all on the connection's
+own task -- so a peer that connects and says nothing holds up nobody else. A `Listener` is therefore
+only a *source* of sockets: one associated type for the socket, one for the address, one method.
+
+The driver ships no layers. A PROXY implementation belongs next to the PROXY parser and reaches the
+builder as an extension trait over `Server`, which is why nothing in the accept loop mentions
+proxies, TLS or rate limits.
 
 ## Shape of a handler
 

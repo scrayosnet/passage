@@ -25,3 +25,4 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "test-util", "io-util", "macros", "time"] }
+tracing-subscriber = { workspace = true }

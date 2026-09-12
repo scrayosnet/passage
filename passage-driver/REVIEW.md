@@ -7,8 +7,8 @@ erasing to boxes** (§E). The second one turned out to be right in some places a
 and the line between them is the most useful thing in this document.
 
 **Every finding below has been applied**, except those marked *Not done* or *withdrawn*, with the
-reasons given in place. C1 is the interesting one: it was built, and then taken back out, and the
-entry says why. Sections are kept in their original order so the argument for each change is still
+reasons given in place. C1 and C2 are the interesting ones: both were built, both were then taken
+back out, and §F says what replaced them. Sections are kept in their original order so the argument for each change is still
 readable next to what it became; line numbers are current as of this commit.
 
 At a glance:
@@ -23,13 +23,14 @@ At a glance:
 | B1 | The per-version table did not need an `Arc` | an index into `router.tables` |
 | B2 | `Server::run` was the accept loop and the connection body | `connection()`, a free `async fn` |
 | B3 | `MakeDispatcher for Arc<Router<S>>` was on the wrong side of the seam | moved to `router.rs` |
-| B4 | `Finished` carried the result twice | `outcome` private; `state()`/`version()`/`phase()` |
+| B4 | `Finished` carried the result twice | **superseded** -- there is no report to carry it |
 | C1 | A refused peer never reached `on_finish` | **withdrawn** -- each layer counts its own |
-| C2 | `Listener::prepare` could not be configured | `type Pending`, produced by `accept` |
+| C2 | `Listener::prepare` could not be configured | right finding, wrong fix -- it is a `Layer` |
 | C3 | `elapsed` excluded queueing delay | the clock starts in the accept loop |
 | C4 | Two tasks per connection | one, with `catch_unwind` |
 | D | Four things built four ways | `X::builder()` for all three, typestate on the server |
 | E | Boxes that should be parameters, and boxes that should not | `Server` propagates; `Router` erases |
+| F1 | Two bespoke mechanisms for one job, and a central reporter | one `Layer` stack; the driver logs its own |
 
 86 tests pass, plus doctests; clippy and rustfmt are clean and `cargo doc` emits no warnings.
 
@@ -141,16 +142,17 @@ only reason `server.rs` imported `Router` at all.
 **Resolved.** The impl moved to `router.rs:435-441`. `server` no longer names a router anywhere, and
 the two seams read the same way.
 
-### B4. `Finished` carried the result twice
+### B4. `Finished` carried the result twice -- **superseded by F1**
 
 `Finished::result` and `Finished::outcome.unwrap().result` were the same value whenever the
 connection did not panic, and nothing in the type said which to read. The asymmetry showed in the
 accessors: `state()` existed because reaching through `outcome` was awkward, but `version` and
 `phase` got none.
 
-**Resolved.** `result` stays -- the panic case has no `Outcome` to take one from -- `outcome` is
-private, and the accessor set is finished: `state()`, `version()`, `phase()`, each returning
-`Option` for exactly one reason, "unless its task panicked".
+It was fixed as proposed -- `outcome` private, the accessor set finished -- and then the whole type
+went with `on_finish`; see F1. Worth keeping the note, because the symptom was real and was pointing
+at something bigger than itself: a struct that cannot say which of its two fields to read is usually
+a struct that is doing a job nobody asked it to do.
 
 ---
 
@@ -194,26 +196,21 @@ lose the address it failed on, which is why `accept` returns it.
 
 ### C2. `Listener::prepare` could not see the listener, so no preamble could be configured
 
-`prepare` is an associated function with no `&self`, deliberately: it runs on the connection's task,
+`prepare` was an associated function with no `&self`, deliberately: it runs on the connection's task,
 so it cannot borrow the listener across tasks. The consequence was that **a preamble needing any
 configuration could not be written** -- a TLS listener needs its `TlsAcceptor`, a PROXY listener
 needs the set of proxies it trusts, a socket option needs a value. This had already bitten once:
 `TCP_NODELAY` could not be made a setting and went in hardcoded.
 
-**Resolved.** `accept` -- which *does* see `&self` -- now hands the connection task whatever
-`prepare` will need (`server.rs:99-132`):
+**The finding was right; the fix was wrong.** It was fixed with a `Pending` associated type, so that
+`accept` -- which *does* see `&self` -- could hand the connection task whatever `prepare` would
+need. That works, and it is a workaround for a misplacement: reading a PROXY header is not something
+a *listener* does. It is something done *to an accepted socket*, which is equally true of a TLS
+handshake and of a rate limiter, and those three had two separate mechanisms and two special cases in
+the connection body between them.
 
-```rust
-type Pending: Send + 'static;
-
-fn accept(&mut self) -> impl Future<Output = io::Result<(Self::Pending, Self::Addr)>> + Send;
-fn prepare(pending: Self::Pending, addr: &mut Self::Addr)
-    -> impl Future<Output = io::Result<Self::Io>> + Send;
-```
-
-`tests/server.rs` has a `PreambleListener` that carries its own rule through `Pending`, refuses on
-it, and rewrites the address the way a PROXY header would.
-
+Replaced by the [`Layer`] stack -- see F1. `Listener` is now a source of sockets and nothing else:
+two associated types, one method, no default to override.
 ### C3. `elapsed` excluded queueing delay but said it did not
 
 `Finished::elapsed` was documented as "from the accept to the last byte" while the `Instant` was
@@ -316,36 +313,29 @@ outward until it reaches something that has to erase it anyway.
 | `Op::With`, `Op::Spawn`, `Op::Encrypt` | `Box<dyn …>` | **kept erased** -- one queue holds all of them |
 | `RouterDispatcher::table` | `Arc<Table>` | **indirection removed entirely** -- B1 |
 
-### E1. `Server`'s two callbacks are now type parameters
+### E1. `Server`'s callbacks are type parameters, not boxes
 
 A `Server` is built and awaited in a single expression; nobody stores one or names its type. `state`
-was already `Arc<F>` in the very same struct, so the two callbacks were the inconsistency.
+was already `Arc<F>` in the very same struct, so the boxed callbacks beside it were the
+inconsistency.
 
-**Resolved.** Two traits, each with a no-op `()` impl (`server.rs:291-334`):
+**Resolved**, and it outlived the callbacks themselves: `on_accept` became the layer stack and
+`on_finish` went away entirely (F1), but both are still carried as `A` rather than boxed, and the
+unset case is still a `()` that compiles away rather than an `Option` tested per connection. The
+layer stack needs it for a second reason the predicate never did -- `Stack<A, B>` has to name
+`A::Io` to let a layer change the socket type, which an `Arc<dyn>` cannot express at all.
 
-```rust
-pub trait Admit<A>: Send + Sync + 'static { fn admit(&self, addr: &A) -> bool; }
-impl<A> Admit<A> for () { fn admit(&self, _: &A) -> bool { true } }
-```
+**The wrinkle, and the way out.** `S` was used by the struct only through its callbacks; making those
+parameters left `S` unconstrained, which Rust rejects. Rather than add `PhantomData<fn() -> S>`, `S`
+was **dropped from the struct entirely** and recovered on the impl blocks from `F`'s output --
+`where F: Fn(&L::Addr) -> S` constrains it through the `Fn` bound's associated type. Checked by
+compiling a reduction, because the rule that governs it (an impl parameter must be constrained by the
+self type, the trait ref *or a predicate*) is exactly the kind that reads as if it might not apply.
+`Server` lost a parameter instead of gaining a marker field.
 
-A `()` that compiles away beats `Option<G>`: it removes the branch per connection as well as the
-allocation. Be honest about the size of that -- the virtual call happened once per *finished*
-connection -- so the argument is consistency with `state` and `MakeDispatcher`, not throughput.
-
-Both traits keep a blanket impl over the corresponding `Fn`, so a named reporter or rate limiter with
-state of its own is still possible. The cost, worth recording: a closure passed to `on_finish` needs
-its parameter annotated, because inference only flows from a bound that names `Fn` directly. A
-function item (`log_completion`) needs nothing.
-
-**The wrinkle, and the way out.** `S` was used by the struct only through
-`on_finish: Option<OnFinish<S, L::Addr>>`; making that a parameter left `S` unconstrained, which Rust
-rejects. Rather than add `PhantomData<fn() -> S>`, `S` was **dropped from the struct entirely** and
-recovered on the impl blocks from `F`'s output -- `where F: Fn(&L::Addr) -> S` constrains it through
-the `Fn` bound's associated type. Checked by compiling a reduction, because the rule that governs it
-(an impl parameter must be constrained by the self type, the trait ref *or a predicate*) is exactly
-the kind that reads as if it might not apply. `Server` lost a parameter instead of gaining a marker
-field.
-
+The one cost worth recording: a closure passed to a setter whose bound is a *trait* rather than `Fn`
+needs its parameter annotated, because inference only flows from a bound naming `Fn` directly. That
+is why `.state(|addr| ...)` infers and `.layer(|addr: &SocketAddr| ...)` does not.
 ### E2. `Router`'s handlers stay erased -- and this is the case that proves the rule
 
 Making them parameters gives `Router<S, T, E>`. Unlike `Server`, `Router` is named constantly: it
@@ -377,7 +367,73 @@ choice.
 
 ---
 
-## F. Smaller things
+## F. One mechanism instead of three
+
+### F1. Two bespoke mechanisms for one job, and a reporter told about all of it
+
+Three things could happen to a peer between the accept and the protocol, and they had two separate
+mechanisms and two special cases in the connection body:
+
+* a preamble, through [`Listener::prepare`] and the `Pending` associated type it needed (C2);
+* an admission check, through `Server::on_accept`;
+* and both of them reporting to `Server::on_finish`, which was also the reporter for everything a
+  connection did (C1).
+
+They are one shape. A PROXY header rewrites the address; a TLS handshake replaces the socket; a rate
+limiter refuses. All three take a socket and an address and hand back a socket and an address, or
+refuse -- so there is one trait for them, and the accept loop knows about none of them individually:
+
+```rust
+pub trait Layer<Io, Addr>: Send + Sync + 'static {
+    type Io: AsyncRead + AsyncWrite + Send + Unpin + 'static;
+    fn admit(&self, io: Io, addr: Addr)
+        -> impl Future<Output = Option<(Self::Io, Addr)>> + Send;
+}
+```
+
+`Option`, not `Result`: **`None` carries no reason because the layer that refused is the one holding
+it** -- the expired bucket, the untrusted source, the certificate that failed to verify. A `Result`
+would only let a layer summarise what it already knows into a vocabulary `server.rs` had to invent,
+and hand it somewhere further away. This is C1's conclusion, now enforced by the signature.
+
+Three stock impls carry everything: `()` (no layers, the identity), any `Fn(&Addr) -> bool` (the
+predicate case), and `Stack<A, B>` (composition, which is how `Server::layer` accumulates them).
+`Stack` is why `Io` is an associated type rather than fixed -- it names `A::Io` to let a layer change
+the socket type, which a boxed callback could not have expressed.
+
+**What went.** `Listener::Pending`, `Listener::prepare` and its `&mut Addr`, the identity `prepare`
+every trivial listener had to write, `Server::on_accept`, and both special cases in the connection
+body -- which is now one `let else`. `Listener` is two associated types and one method.
+
+### F2. The reporting hook, and what replaced it
+
+`on_finish` was the last place the crate handed everything to a central authority, and the objection
+to it is the same one that killed C1, one level further out: a hook that has to be told every fate
+makes each layer flatten what it knows, and puts the only complete picture in the place furthest
+from where any of it happened.
+
+What the driver could honestly report was never the application's facts -- it was its own. So it
+reports those itself, and nothing else: an `info` span per connection carrying the peer, and one
+event when a connection ends with the duration, the [`Ending`]'s label, and the version and phase it
+reached -- at `warn` when the cause was ours, `debug` otherwise.
+
+Everything a handler logs lands inside that span, which is what a central reporter was really
+providing: correlation. The demo shows the shape -- `on_error` now logs the player and the reason
+where it refuses them, instead of stashing a label in `Session::refused` for a reporter to read back
+later. (The field stays: it is what `Outcome` hands to a caller driving a connection without the
+accept loop, and `tests/ending.rs` asserts on it.)
+
+`Finished`, `Report`, `Server::on_finish` and `demo::log_completion` are gone, and `Server` lost a
+type parameter with them.
+
+**The cost, stated plainly.** The driver's own reporting is now the only end-of-connection record, so
+a caller wanting to aggregate endings their own way writes a `tracing` layer rather than a closure.
+And it made the server tests read the log instead of a `Vec` -- which is arguably the better test,
+since the log line is now the feature. `tests/common` grows a ~40-line recorder for it.
+
+---
+
+## G. Smaller things
 
 * **`Server` was not `#[must_use]`.** Now it is, on the type, which also covers every setter --
   `Server::builder()…` dropped without awaiting warns. (The per-method `#[must_use]`s came off;
@@ -401,23 +457,26 @@ choice.
 
 ## Where the implementation departs from what this review proposed
 
-Four places, all where writing the code showed the proposal was not quite right:
+Five places, all where writing the code showed the proposal was not quite right:
 
-1. **C2 keeps the address out of `prepare`'s return.** The proposed signature was
-   `prepare(pending) -> io::Result<(Io, Addr)>`, which leaves a *failed* preamble with no peer to
-   name -- not in a log line, and not in whatever count the listener keeps for itself. So `accept`
-   returns the address and `prepare` takes it by `&mut`, which also reads better: correcting the
-   address is exactly what the PROXY case does, and leaving it alone is one `_`.
-2. **D1 has no separate `ServerBuilder` type and no `.serve()`.** `Server` is the builder; a second
+1. **C1 was built and then removed**, and C2's fix with it. Both are recorded where they were
+   proposed rather than deleted, because the reasoning that produced them is the reasoning worth not
+   repeating: two findings about *things not being reported* were both really findings about the
+   report existing at all.
+2. **A `Layer` may not change the `Addr` type**, only its value. It could -- one more associated
+   type -- and a TLS layer could then hand the state factory a verified client identity instead of a
+   socket address. It is not worth it yet: `.state()` would bind to the stack's output rather than
+   the listener's, so adding a layer later would silently change what the factory receives.
+3. **D1 has no separate `ServerBuilder` type and no `.serve()`.** `Server` is the builder; a second
    type would have been two names for one thing, and `.serve()` a third name for `run()`/`.await`.
-3. **D2 forwards the connection knobs instead of giving `ConnectionConfig` a builder**, even though
+4. **D2 forwards the connection knobs instead of giving `ConnectionConfig` a builder**, even though
    D3 happened -- see D2 for why.
-4. **D3 keeps three positional arguments** rather than typestating `state`, because `()` is a
+5. **D3 keeps three positional arguments** rather than typestating `state`, because `()` is a
    legitimate `S` and cannot also mean "unset".
 
 ---
 
-## G. What was not traded away
+## H. What was not traded away
 
 Load-bearing, and easy to lose in a refactor this size. All still true:
 
