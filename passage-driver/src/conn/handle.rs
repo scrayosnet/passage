@@ -144,7 +144,8 @@ impl<S> Batch<S> {
 /// The handle carries the protocol version it was created for. The version is pinned once, by the
 /// handshake, and the connection re-stamps its own handle when that happens -- so a handle taken
 /// from a [`Ctx`] is always current, and one taken from
-/// [`Connection::new`](crate::conn::Connection::new) is not (it predates the handshake, and is
+/// [`ConnectionBuilder::build`](crate::conn::ConnectionBuilder::build) is not (it predates the
+/// handshake, and is
 /// meant for [`close`](ConnectionHandle::close) and [`shutdown`](ConnectionHandle::shutdown) rather
 /// than for sending).
 ///

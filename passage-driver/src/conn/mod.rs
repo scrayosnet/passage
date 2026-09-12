@@ -118,6 +118,6 @@ mod connection;
 mod dispatch;
 mod handle;
 
-pub use connection::{Connection, ConnectionConfig, Ending, Outcome};
+pub use connection::{Connection, ConnectionBuilder, ConnectionConfig, Ending, Outcome};
 pub use dispatch::Dispatcher;
 pub use handle::{Batch, ConnectionHandle, Ctx, Op};

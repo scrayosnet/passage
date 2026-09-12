@@ -26,18 +26,13 @@ also fix issues with the current implementation.
 
 ## How the design is recorded
 
-The design lives in the code, in module documentation next to the thing it explains. Two files carry
-the history instead:
+The design lives in the code, in module documentation next to the thing it explains. One file carries
+the history instead: [REVIEW.md](REVIEW.md), a critical scan of the crate, with what each finding
+turned into.
 
-| Document                                       | What it holds                                             |
-|------------------------------------------------|-----------------------------------------------------------|
-| [REVIEW.md](REVIEW.md)                         | A critical scan of this crate against the implementation it replaces, with what was reproduced and how |
-| [REVIEW_DECISIONS.md](REVIEW_DECISIONS.md)     | What was decided about each finding, and how it was solved |
-
-Everything the review found and the decisions accepted is implemented here -- including a worked
-packet set and server flow in [`src/demo/`](src/demo) -- so it can be judged by running
-`cargo test -p passage-driver` rather than by reading prose alone. Where a decision was deferred
-rather than applied, `REVIEW_DECISIONS.md` says so and why.
+Everything the review found is implemented here -- including a worked packet set and server flow in
+[`src/demo/`](src/demo) -- so it can be judged by running `cargo test -p passage-driver` rather than
+by reading prose alone. Where a finding was deliberately not acted on, `REVIEW.md` says so and why.
 
 ## Static, and per connection
 
@@ -49,27 +44,37 @@ a `Connection` is created for each accepted socket and owns everything mutable.
 | `Router`            | `Connection`                                     |
 | `ConnectionConfig`  | `ConnectionHandle`                               |
 | the handlers        | the state `S`, and a `Ctx` per handler call      |
-| the dispatch tables | a `RouterDispatcher`, holding the table for the negotiated version |
+| the dispatch tables | a `RouterDispatcher`, bound to the table for the negotiated version |
 
 The two never meet directly: a `Connection` depends on the `Dispatcher` trait, which `conn`
 declares and `router` implements. So the connection holds no table and resolves no packet ID, and
 it can be driven by a test double instead -- see [`tests/dispatch.rs`](tests/dispatch.rs).
 
-`server::serve` is the bridge, in the shape Axum uses -- with one difference: state here is *per
+`server::Server` is the bridge, in the shape Axum uses -- with one difference: state here is *per
 connection*, so it takes a factory rather than a value and calls it once per socket.
 
 ```rust
 let listener = TcpListener::bind("0.0.0.0:25565").await?;
 
-serve(listener, Arc::new(router()?), |addr| Session { peer: Some(*addr), ..Session::default() })
-    .config(config)
+Server::builder()
+    .listener(listener)
+    .dispatch(Arc::new(router()?))
+    .state(|addr| Session { peer: Some(*addr), ..Session::default() })
+    .tick_interval(Duration::from_secs(16))
     .max_connections(10_000)
-    .with_graceful_shutdown(shutdown)
+    .graceful_shutdown(shutdown)
     .on_finish(log_completion)
     .await;
 ```
 
-One connection without the accept loop is `Connection::new`, which is what `serve` calls per
+Everything is built the same way -- `Router::builder()`, `Server::builder()`,
+`Connection::builder()`. The three a server cannot do without are type parameters that start unset,
+so `.await` does not exist until a listener, something to dispatch to and a state factory have all
+been given: "you cannot forget one" survives the move away from positional arguments.
+`serve(listener, dispatch, state)` is the same three, positionally, for when naming them adds
+nothing.
+
+One connection without the accept loop is `Connection::builder`, which is what the server uses per
 socket and what the tests drive over a socket pair.
 
 ## Versions are read, not listed
@@ -129,6 +134,28 @@ carried the bare fact; a field carries the reason with it, and that is what a me
 Recovering from a failure is the same argument in the other direction: `on_error` gets the last word
 on the wire, but whether an error is survivable at all is decided by the handler that raised it,
 where the packet and the state are still in hand.
+
+## Each layer keeps its own books
+
+Four things can turn a peer away, and none of them reports to the others:
+
+| Layer              | Decides                        | Still holding                            |
+|--------------------|--------------------------------|------------------------------------------|
+| `Listener::prepare`| the preamble did not complete  | the TLS error, the malformed header      |
+| `Admit`            | not this peer, not right now   | the bucket, the ban list, the rate       |
+| a handler          | this *session* is refused      | the packet, the phase, the session state |
+| the connection     | it ended, and how              | the `Ending`, the state, the version     |
+
+Each one holds, at the moment it decides, everything a metric about that decision could want -- so
+each one counts its own. `Admit` takes `&self` precisely so it can be a named type with a counter in
+it, and `on_finish` is left reporting what it is named for: connections that ran and then ended.
+
+The alternative is one hook told about every possible fate. It sounds like consolidation and is the
+opposite: every layer has to flatten what it knows into a vocabulary the driver invented for it, the
+hook grows an arm per layer, and the place that ends up knowing everything is the place furthest
+from where any of it happened. That is the same trade the driver refuses one level down -- there is
+no `Ending::Refused`, because the handler that refused a login knows it did and writes the reason
+into its own state.
 
 ## Shape of a handler
 

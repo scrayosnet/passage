@@ -1,504 +1,437 @@
 # Review: `router.rs` and `server.rs`
 
-A close read of the two modules that assemble everything else, looking for code that is duplicated,
-dead, or more complicated than the job needs. Two directions from the last round are folded in as
-sections of their own: **construction should use builders** (§D) and **types should carry their
-parameters rather than erasing to boxes** (§E). The second one turns out to be right in some places
-and wrong in others, and the line between them is worth stating outright.
+A close read of the two modules that assemble everything else, looking for code that was duplicated,
+dead, or more complicated than the job needed. Two directions were folded in as sections of their
+own: **construction should use builders** (§D) and **types should carry their parameters rather than
+erasing to boxes** (§E). The second one turned out to be right in some places and wrong in others,
+and the line between them is the most useful thing in this document.
 
-Everything else — `conn`, `wire`, `codec`, `packet` — is out of scope except where these two reach
-into it. Line numbers are current as of this commit.
+**Every finding below has been applied**, except those marked *Not done* or *withdrawn*, with the
+reasons given in place. C1 is the interesting one: it was built, and then taken back out, and the
+entry says why. Sections are kept in their original order so the argument for each change is still
+readable next to what it became; line numbers are current as of this commit.
 
 At a glance:
 
-| | Finding | Cost to fix |
+| | Finding | What it became |
 |---|---|---|
-| A1 | `breakpoints()` is computed twice per build | one line |
-| A2 | `RouterDispatcher::router()` has no callers | delete |
-| A3 | Three handler traits are the same construction three times | ~46 lines removed, one API decision |
-| A4 | `Entry::id` wraps a free function for one caller | inline |
-| A5 | Two benchmark numbers that read as one | edit the docs |
-| B1 | The per-version table does not need an `Arc` | small, contained |
-| B2 | `Server::run` is the accept loop and the connection body in one function | extract a function |
-| B3 | `MakeDispatcher for Arc<Router<S>>` is implemented on the wrong side of the seam | move one impl |
-| B4 | `Finished` carries the result twice | narrow the public surface |
-| C1 | A refused peer never reaches `on_finish` | needs a decision on shape |
-| C2 | `Listener::prepare` cannot see the listener, so no preamble can be configured | one associated type |
-| C3 | `elapsed` excludes queueing delay but is documented as including it | two lines |
-| C4 | Two tasks per connection, paid even when nothing reports | measure first |
+| A1 | `breakpoints()` was computed twice per build | bound once |
+| A2 | `RouterDispatcher::router()` had no callers | deleted |
+| A3 | Three handler traits were the same construction three times | three type aliases; `.on::<P>(f)` |
+| A4 | `Entry::id` wrapped a free function for one caller | inlined |
+| A5 | Two benchmark numbers that read as one | both replaced with what they were claiming |
+| B1 | The per-version table did not need an `Arc` | an index into `router.tables` |
+| B2 | `Server::run` was the accept loop and the connection body | `connection()`, a free `async fn` |
+| B3 | `MakeDispatcher for Arc<Router<S>>` was on the wrong side of the seam | moved to `router.rs` |
+| B4 | `Finished` carried the result twice | `outcome` private; `state()`/`version()`/`phase()` |
+| C1 | A refused peer never reached `on_finish` | **withdrawn** -- each layer counts its own |
+| C2 | `Listener::prepare` could not be configured | `type Pending`, produced by `accept` |
+| C3 | `elapsed` excluded queueing delay | the clock starts in the accept loop |
+| C4 | Two tasks per connection | one, with `catch_unwind` |
+| D | Four things built four ways | `X::builder()` for all three, typestate on the server |
+| E | Boxes that should be parameters, and boxes that should not | `Server` propagates; `Router` erases |
+
+86 tests pass, plus doctests; clippy and rustfmt are clean and `cargo doc` emits no warnings.
 
 ---
 
 ## A. Duplicated and dead
 
-### A1. `breakpoints()` runs twice for every build
-
-`src/router.rs:251-252`:
+### A1. `breakpoints()` ran twice for every build
 
 ```rust
 let mut tables = Vec::with_capacity(breakpoints(&entries).len());
 for version in breakpoints(&entries) {
 ```
 
-The function allocates a `Vec`, walks every entry's ID table, sorts and dedups — and the first call
-exists only to read `.len()` for a capacity hint. Bind it once. It is a startup cost and nobody will
-ever notice it, but it is the only place in the crate where a pure function's result is thrown away
-and immediately recomputed, and it reads like an oversight because it is one.
+The function allocates a `Vec`, walks every entry's ID table, sorts and dedups -- and the first call
+existed only to read `.len()` for a capacity hint. It was a startup cost nobody would ever notice,
+but it was the only place in the crate where a pure function's result was thrown away and
+immediately recomputed, and it read like an oversight because it was one.
 
-### A2. `RouterDispatcher::router()` is dead
+**Resolved.** Bound once (`router.rs:223-227`).
 
-`src/router.rs:452-455`. No callers in `src/` or `tests/`. This is the same class as `Router::inbound`
-and `Router::unknown_policy`, removed last round for the same reason: a public accessor with no
-reader is a promise made to nobody, and it pins a field's type into the API.
+### A2. `RouterDispatcher::router()` was dead
 
-Delete it, or give it a use. (There is a plausible one — a `Dispatcher` wrapper that decorates a
-`RouterDispatcher` would want to reach the router — but nothing in the crate does that today.)
+No callers in `src/` or `tests/`. The same class as `Router::inbound` and `Router::unknown_policy`,
+removed a round earlier for the same reason: a public accessor with no reader is a promise made to
+nobody, and it pins a field's type into the API.
+
+**Resolved.** Deleted.
 
 ### A3. Three handler traits, three blanket impls, one shape
 
-`src/router.rs:75-120`. `Handler<S, P>`, `TickHandler<S>` and `ErrorHandler<S>` are the same
-construction written three times: a trait with a single `call` method taking a `Ctx` and returning
-`Result<()>`, plus a blanket impl over the corresponding `Fn`. Forty-six lines and three public
-names, and the only difference between them is what sits after the `Ctx` argument.
+`Handler<S, P>`, `TickHandler<S>` and `ErrorHandler<S>` were the same construction written three
+times: a trait with a single `call` method taking a `Ctx` and returning `Result<()>`, plus a blanket
+impl over the corresponding `Fn`. Forty-six lines and three public names, and the only difference
+between them was what sat after the `Ctx` argument.
 
-Two of them can go with no change at the call site. `RouterBuilder` stores them as
-`Arc<dyn TickHandler<S>>` / `Arc<dyn ErrorHandler<S>>`, and
-
-```rust
-tick: Option<Arc<dyn for<'c> Fn(Ctx<'c, S>) -> Result<()> + Send + Sync>>,
-on_error: Option<Arc<dyn for<'c> Fn(Ctx<'c, S>, &Ending) -> Result<()> + Send + Sync>>,
-```
-
-is the same type with the trait spelled out — the module already writes exactly this shape for
-`ErasedHandler` (`:122`). `.on_tick(|ctx| ...)` is unchanged.
-
-`Handler<S, P>` can go too, and the call site gets *better*:
+**Resolved.** All three are now type aliases for the function types they always described
+(`router.rs:70-90`), which is the shape the module already used for `ErasedHandler`:
 
 ```rust
-pub fn on<P: Packet>(
-    mut self,
-    handler: impl Fn(Ctx<'_, S>, P) -> Result<()> + Send + Sync + 'static,
-) -> Self
+type TickHandler<S> = Arc<dyn for<'c> Fn(Ctx<'c, S>) -> Result<()> + Send + Sync>;
 ```
 
-turns `.on::<Intention, _>(on_intention)` into `.on::<Intention>(on_intention)`. The `_` that every
-registration carries today exists only to stand for the handler type the trait bound introduced.
+`on` takes `impl Fn(Ctx<'_, S>, P) -> Result<()> + Send + Sync + 'static`, so every registration in
+the crate lost a `_`: `.on::<Intention, _>(on_intention)` is now `.on::<Intention>(on_intention)`.
+The elided `Ctx<'_, S>` does become the `for<'c>` bound the erased box needs, and turbofishing `P`
+alone beside an `impl Trait` argument is accepted -- both checked by compiling a reduction rather
+than assumed.
 
-Both halves were checked by compiling a reduction rather than assumed: the elided `Ctx<'_, S>` does
-become the `for<'c>` bound the erased box needs, and turbofishing `P` alone next to an
-`impl Trait` argument is accepted.
+**What was given up**, as predicted: a caller can no longer implement the trait on a named struct, so
+a stateful handler must be a closure capturing an `Arc`. That is what the demo and every test did
+anyway, and three near-identical traits were being maintained for a capability nothing used.
 
-**What is lost.** A caller can no longer implement the trait on a named struct — a stateful handler
-must be a closure capturing an `Arc`, which is what the demo does anyway. That is a real if small
-extensibility loss, so it is a decision rather than a cleanup. But as things stand, three
-near-identical traits are being maintained for a capability nothing in the crate or its tests uses.
+### A4. `Entry::id` wrapped a free function for a single caller
 
-### A4. `Entry::id` wraps a free function for a single caller
+Three lines around `crate::packet::ids(version, self.ids)`, called once.
 
-`src/router.rs:133-136` is a three-line method around `crate::packet::ids(version, self.ids)`, called
-once, from `build_table` (`:302`). Inline it and the `Entry` impl block disappears.
+**Resolved.** Inlined; the `Entry` impl block is gone.
 
 ### A5. Two measurements that read as the same measurement
 
-`src/conn/dispatch.rs:16-17` — "0.9 ns against a 12 ns table lookup". `src/router.rs:409-412` —
-"dispatch two loads instead of a hash lookup and a pair of atomics: measured, 1.8 ns against 14 ns".
+`dispatch.rs` claimed "0.9 ns against a 12 ns table lookup"; `router.rs` claimed "two loads instead
+of a hash lookup and a pair of atomics: measured, 1.8 ns against 14 ns". Different comparisons, close
+enough in magnitude and phrasing to be taken for one number told twice, and neither said on what.
 
-These are different comparisons (a virtual call against a static one; a cached table against a
-per-frame lookup), but they sit close enough in both magnitude and phrasing that a reader takes them
-for one number told twice, and neither says on what. Either give each a sentence saying what was
-measured, or drop the digits and keep the shape of the claim. Numbers in doc comments outlive the
-machine they were taken on.
+**Resolved.** Both now state the shape of the claim without the digits -- the virtual call is "the
+cheapest thing on the path", and the cached table "turns dispatch into a pair of indexed loads,
+where looking the version up per frame would repeat a binary search over the breakpoints for every
+packet". Numbers in doc comments outlive the machine they were taken on.
 
 ---
 
-## B. Simplifications worth making
+## B. Simplifications
 
-### B1. The per-version dispatch table does not need to be behind an `Arc`
+### B1. The per-version dispatch table did not need to be behind an `Arc`
 
-`src/router.rs:344`, `:394-403`, `:413-416`. Today: `tables: Box<[(ProtocolVersion, Arc<Table>)]>`,
-and every accepted connection clones one of those `Arc`s into its `RouterDispatcher`.
+`tables: Box<[(ProtocolVersion, Arc<Table>)]>`, and every accepted connection cloned one of those
+`Arc`s into its `RouterDispatcher` -- which already held `Arc<Router<S>>`, inside which the tables
+live. The table it pointed at could not outlive the router, so the reference count was counting
+something already guaranteed.
 
-But a `RouterDispatcher` already holds `Arc<Router<S>>`, and the tables live inside the router — so
-the table it points at cannot outlive it, and the reference count is counting something that is
-already guaranteed. Store the index:
+**Resolved.** `Router::table` returns a `usize` (`router.rs:371-377`) and `RouterDispatcher` stores
+it. That removes an allocation per breakpoint, an atomic increment per accepted connection and a
+decrement per finished one, and a wrapper type from the module. It is still *resolved once* rather
+than per frame, which was the entire point of caching it, and `Clone for RouterDispatcher` became
+one `Arc` clone instead of two.
 
-```rust
-pub struct RouterDispatcher<S> {
-    router: Arc<Router<S>>,
-    /// Index into `router.tables`, rebound by `set_version`.
-    table: usize,
-}
-```
+### B2. `Server::run` was two functions wearing one name
 
-That removes an allocation per breakpoint, an atomic increment per accepted connection and a
-decrement per finished one, and one wrapper type from the module. `Router::table` returns a `usize`;
-`dispatch` reads `self.router.tables[self.table].1`. It is still *cached* — no search per frame,
-which was the entire point of holding it — at the price of one more dereference and no atomics.
-`Clone for RouterDispatcher` also becomes one `Arc` clone instead of two.
+About a hundred and twenty lines covering four concerns: taking an admission permit, accepting and
+classifying accept errors, running one connection end to end, and draining.
 
-### B2. `Server::run` is two functions wearing one name
+**Resolved.** The third is now `connection()`, a free `async fn` (`server.rs:733-806`). The accept
+loop fits on a screen, and the connection body -- where C4 lands, and where anything else about a
+running connection would -- reads without a listener anywhere in sight.
 
-`src/server.rs:334-454`. About a hundred and twenty lines covering four concerns: taking an admission permit,
-accepting and classifying accept errors, running one connection end to end, and draining.
+The two consecutive `select!`s both carry `() = self.shutdown.cancelled() => break`, which is
+correct (they guard different awaits) but reads like a copy-paste waiting to be "cleaned up". It now
+carries a comment saying what the second one is for.
 
-The third — everything inside `tasks.spawn(async move { … })` (`:390-434`) — is the part a reader
-wants to read on its own, and it is the part that will grow: C1 below adds reporting to it, and any
-observability work lands there too. Extracted into a free `async fn` taking the handful of values it
-captures, the accept loop fits on a screen and the connection body becomes testable without a
-listener at all.
+### B3. `MakeDispatcher for Arc<Router<S>>` was implemented on the wrong side of the seam
 
-Incidentally, the two consecutive `select!`s both carry `() = self.shutdown.cancelled() => break`
-(`:349`, `:358`). That is correct — they guard different awaits — but it is worth noticing that the
-permit arm exists mostly to make the shutdown check happen twice, which is the sort of thing that
-looks like a copy-paste and gets "cleaned up" by someone in a hurry. A comment would earn its keep.
+The crate has a stated pattern for seams, and `conn/dispatch.rs` states it: *the consumer declares
+the trait, the provider implements it for its own type.* `conn` declares `Dispatcher`; `router`
+implements it for `RouterDispatcher`; no type in `conn` names the router. `MakeDispatcher` did it the
+other way round -- `server` declared it **and** implemented it for the router's type -- which was the
+only reason `server.rs` imported `Router` at all.
 
-### B3. `MakeDispatcher for Arc<Router<S>>` is implemented on the wrong side of the seam
+**Resolved.** The impl moved to `router.rs:435-441`. `server` no longer names a router anywhere, and
+the two seams read the same way.
 
-`src/server.rs:127-146`. The crate has a stated pattern for seams, and `conn/dispatch.rs:1-6` states
-it: *the consumer declares the trait, the provider implements it for its own type.* `conn` declares
-`Dispatcher`; `router` implements it for `RouterDispatcher`; no type in `conn` names the router.
+### B4. `Finished` carried the result twice
 
-`MakeDispatcher` does it the other way round — `server` declares it **and** implements it for the
-router's type — which is why `server.rs` imports `Router` and `RouterDispatcher` at all (`:49`).
-Moving that one impl into `router.rs` removes `server`'s only dependency on `router`, and makes the
-two seams read the same way. Nothing else changes; the trait is public either way.
+`Finished::result` and `Finished::outcome.unwrap().result` were the same value whenever the
+connection did not panic, and nothing in the type said which to read. The asymmetry showed in the
+accessors: `state()` existed because reaching through `outcome` was awkward, but `version` and
+`phase` got none.
 
-### B4. `Finished` carries the result twice
-
-`src/server.rs:176-200`. `Finished::result` and `Finished::outcome.unwrap().result` are the same
-value whenever the connection did not panic, and nothing in the type says which one to read.
-
-The asymmetry shows in the accessors: `state()` exists because reaching through `outcome` is
-awkward, but `version` and `phase` got none — so a caller who wants those goes through `outcome`
-anyway and ends up holding a second `result`.
-
-`result` has to stay, because the panic case has no `Outcome` to take one from. So make `outcome`
-private and finish the accessor set:
-
-```rust
-pub fn state(&self) -> Option<&S>
-pub fn version(&self) -> Option<ProtocolVersion>
-pub fn phase(&self) -> Option<Phase>
-```
-
-Each `Option` means the same thing — "unless it panicked" — and the public surface has exactly one
-`result` on it. `demo::server::log_completion` already only uses `result`, `addr`, `elapsed` and
-`state()`, so nothing in the crate needs the field.
+**Resolved.** `result` stays -- the panic case has no `Outcome` to take one from -- `outcome` is
+private, and the accessor set is finished: `state()`, `version()`, `phase()`, each returning
+`Option` for exactly one reason, "unless its task panicked".
 
 ---
 
 ## C. Behaviour gaps found while reading
 
-### C1. A refused peer never reaches `on_finish`
+### C1. A refused peer never reaches `on_finish` -- **withdrawn, and the finding was wrong**
 
-`src/server.rs:394-407`. A `Listener::prepare` that fails and an `on_accept` that returns `false`
-both `return` before anything is reported. So the hook whose whole purpose is to be the one place a
-connection's fate is observed cannot see two of the fates:
+The claim was that a `Listener::prepare` that failed and an `on_accept` that returned `false` both
+`return` before anything is reported, so the hook whose purpose is to be the one place a
+connection's fate is observed cannot see two of the fates -- and concretely, that a per-IP rate
+limiter installed via `on_accept` could not be measured.
 
-* the preamble failed — a PROXY header that would not parse, a TLS handshake that was refused;
-* we turned the peer away at the door.
+That last step does not follow, and it is where the finding went wrong. **A rate limiter that
+refuses a peer is the thing that knows it refused it.** It is holding the bucket that was empty and
+the address that emptied it; incrementing a counter there is one line, at the point where the reason
+is still in hand. Nothing has to be passed anywhere.
 
-Both are a `debug!` line and nothing else. Concretely: a per-IP rate limiter installed via
-`on_accept` cannot be measured from `on_finish`, so the metric that says "how many did we refuse"
-has nowhere to come from. This is the same class of hole as a panicking connection vanishing from
-the report, which was worth closing.
+This was built as proposed -- a `Refusal` enum, a `Conclusion` enum, `Finished` widened to carry
+either -- and then reverted, because the review had argued itself into the position this crate
+already rejects one level down. From the README, written before any of this:
 
-It is not free to fix, because `Finished::result` is a `&Result<(), Ending>` and neither of these
-has an `Ending` — they never reached the protocol, so nothing *ended*. Two honest options:
+> Note what the driver is *not* asked to remember. There is one `Completion::Closed`, not a second
+> variant for "we refused them" -- the handler that refused knows it did, and writes the reason into
+> its own state.
 
-1. **A second hook**, `on_refused(&A, Refusal)`. Cheap, and splits reporting across two callbacks.
-2. **Widen `Finished`** so "did not reach the protocol" is a case it can carry, and keep one hook.
+The admission check is that same argument one layer up. What the widening actually bought was: two
+public enums, a `Finished` whose every accessor became an `Option` for two unrelated reasons, a
+reporting hook that had to grow an arm for each layer upstream of it, and -- the real cost -- a rule
+that each layer must flatten what it knows into a vocabulary `server.rs` invents for it.
+`Refusal::Preamble(io::Error)` is a fair summary of nothing: the listener that produced it knew
+whether it was a truncated PROXY header or a rejected certificate, and threw that away to fit.
 
-The second is better and it is the one to argue for: one hook means one place metrics are emitted
-and one match to keep exhaustive, which is the property that made folding the panic case into
-`Ending::Failed` worth doing. The shape needs deciding — it should not be squeezed into `Ending`,
-whose documented meaning is "what ended a connection that we did not end ourselves", and a refusal is
-the opposite of that.
+**What is there instead.** `Admit` takes `&self`, so an implementation can be a named type holding a
+counter, a bucket and a clock; its documentation says that counting refusals is its job and shows
+the three lines. `tests/server.rs` has a `RateLimiter` that does exactly that, and asserts both that
+its own count is right *and* that `on_finish` saw only the connection that ran. `Finished` is back to
+`result` plus the three `Outcome` accessors -- B4 as originally proposed, and nothing more.
 
-### C2. `Listener::prepare` cannot see the listener, so no preamble can be configured
+The one thing genuinely worth keeping from the exercise is in §C2: a preamble that fails should not
+lose the address it failed on, which is why `accept` returns it.
 
-`src/server.rs:97-102`. `prepare` is an associated function with no `&self`, and deliberately so: it
-runs on the connection's task, so it cannot borrow the listener across tasks.
+### C2. `Listener::prepare` could not see the listener, so no preamble could be configured
 
-The consequence is that **a preamble needing any configuration cannot be written**:
+`prepare` is an associated function with no `&self`, deliberately: it runs on the connection's task,
+so it cannot borrow the listener across tasks. The consequence was that **a preamble needing any
+configuration could not be written** -- a TLS listener needs its `TlsAcceptor`, a PROXY listener
+needs the set of proxies it trusts, a socket option needs a value. This had already bitten once:
+`TCP_NODELAY` could not be made a setting and went in hardcoded.
 
-* a TLS listener needs its `TlsAcceptor` — inherently per-listener state;
-* a PROXY-protocol listener needs the set of proxies it trusts;
-* a socket option needs a value to set.
-
-This has bitten once already: `TCP_NODELAY` could not be made a setting last round for exactly this
-reason and went in hardcoded, which is documented in `REVIEW_DECISIONS.md` as a deviation.
-
-The fix is to let `accept` — which *does* see `&self` — hand the connection task whatever `prepare`
-will need:
+**Resolved.** `accept` -- which *does* see `&self` -- now hands the connection task whatever
+`prepare` will need (`server.rs:99-132`):
 
 ```rust
-pub trait Listener: Send + 'static {
-    type Io: AsyncRead + AsyncWrite + Send + Unpin + 'static;
-    type Addr: fmt::Debug + Send + 'static;
+type Pending: Send + 'static;
 
-    /// What `accept` produced, before the preamble has run.
-    type Pending: Send + 'static;
-
-    fn accept(&mut self) -> impl Future<Output = io::Result<Self::Pending>> + Send;
-
-    fn prepare(
-        pending: Self::Pending,
-    ) -> impl Future<Output = io::Result<(Self::Io, Self::Addr)>> + Send;
-}
+fn accept(&mut self) -> impl Future<Output = io::Result<(Self::Pending, Self::Addr)>> + Send;
+fn prepare(pending: Self::Pending, addr: &mut Self::Addr)
+    -> impl Future<Output = io::Result<Self::Io>> + Send;
 ```
 
-`Pending` is `(TcpStream, SocketAddr)` for the plain case — the default `prepare` stays a no-op — and
-`(TcpStream, SocketAddr, Arc<TlsAcceptor>)` for TLS, where the `Arc` clone is taken in `accept`, on
-the listener's task, where `&self` is available. The accept loop still awaits nothing but `accept`,
-which was the property `prepare` was introduced to protect.
+`tests/server.rs` has a `PreambleListener` that carries its own rule through `Pending`, refuses on
+it, and rewrites the address the way a PROXY header would.
 
-**Cost:** one associated type, and implementors of a configured listener write a small struct. That
-is the price of the hook being usable for the two things it exists for.
+### C3. `elapsed` excluded queueing delay but said it did not
 
-### C3. `elapsed` excludes queueing delay but says it does not
+`Finished::elapsed` was documented as "from the accept to the last byte" while the `Instant` was
+taken on the first line inside the spawned task. Under load -- precisely when the number is worth
+having -- the gap between `spawn` and the first poll of that task is real queueing delay, and it was
+silently excluded, so the metric flattered the server exactly when the server was struggling.
 
-`src/server.rs:177-178` documents `Finished::elapsed` as "from the accept to the last byte".
-`src/server.rs:391` takes the instant on the *first line inside the spawned task*.
+**Resolved.** The clock starts in the accept loop (`server.rs:666-668`) and is passed in.
 
-Under load — precisely when the number is worth having — the gap between `tasks.spawn` and the first
-poll of that task is real queueing delay, and it is silently excluded. So the metric flatters the
-server exactly when the server is struggling.
+### C4. Two tasks per connection, paid even when nothing would read the result
 
-Take the `Instant` in the loop before `tasks.spawn` and move it into the task. Two lines, and the
-doc comment becomes true.
+The outer task is what `TaskTracker` tracks for draining; the inner `tokio::spawn(connection.run())`
+existed so a panic in a handler was observable rather than unwinding past the report. Sound, and
+documented -- but a second `tokio::spawn` for every accepted connection, paid unconditionally.
 
-### C4. Two tasks per connection, paid even when nothing will read the result
-
-`src/server.rs:390` and `:415`. The outer task is what `TaskTracker` tracks for draining; the inner
-`tokio::spawn(connection.run())` exists so a panic in a handler is observable rather than unwinding
-past the report. That reasoning is sound and documented.
-
-But it is a second `tokio::spawn` for every accepted connection, and it is paid unconditionally —
-including when `on_finish` is `None` (`:417`), where the outcome is awaited and then dropped.
-
-`futures::FutureExt::catch_unwind` over `AssertUnwindSafe(connection.run())` does the same job on one
-task. The caveat is real and should be stated rather than waved past: `AssertUnwindSafe` is a claim
-about what happens after a panic, and the claim here is defensible — the only thing observed
-afterwards is *that* it panicked, and `S` is dropped rather than read. Under `panic = "abort"`
-neither approach does anything.
-
-Worth measuring before changing. Worth writing down either way that the second spawn is a choice with
-a price, because right now the comment explains why it is correct without noting what it costs.
+**Resolved.** `AssertUnwindSafe(connection.run()).catch_unwind()` does the same job on one task
+(`server.rs:781-805`). The caveat is stated rather than waved past: `AssertUnwindSafe` is a claim
+about what is observed after a panic, and here the only thing observed is *that* it panicked -- the
+state is dropped, never read. Under `panic = "abort"` neither approach does anything. The panic
+payload is turned into a message by `panic_message`, so the existing test still sees
+`Class::Internal` and the label `panic`.
 
 ---
 
 ## D. Construction: four things built four ways
 
-The crate builds four things and uses a different idiom for each:
+The crate built four things with a different idiom for each -- a fallible builder, a free function
+whose builder and value were one type, a five-argument constructor returning a tuple, and a
+public-fields struct. The crate-level example used three of them in nine lines, which is where it
+showed: there was no answer to "how do you make one of these in this crate".
 
-| What | How |
-|---|---|
-| `Router` | `Router::builder()` … `.build() -> Result<Router, BuildError>` — fallible builder, separate types |
-| `Server` | `serve(listener, make, state)` … `.await` — free function; builder and value are one type; infallible |
-| `Connection` | `Connection::new(io, dispatcher, state, config, shutdown) -> (Connection, Handle)` — five positional arguments, returns a tuple |
-| `ConnectionConfig` | `ConnectionConfig { tick_interval: …, ..Default::default() }` — public fields |
-
-The crate-level example uses three of them in nine lines (`src/lib.rs:80-103`), which is where it
-shows: `Arc::new(router()?)`, then a struct literal with `..Default::default()`, then a free function
-with three positional arguments and chained setters. Each is defensible alone; together they mean
-there is no answer to "how do you make one of these in this crate".
-
-Given the stated preference, the consistent answer is `X::builder()`.
+There is now one answer, `X::builder()`, and the nine-line example is one chain.
 
 ### D1. `Server::builder()`
 
-```rust
-Server::builder()
-    .listener(listener)
-    .dispatch(router)                    // Arc<Router<S>>, or make_with(..)
-    .state(|addr| Session { peer: Some(*addr), ..Session::default() })
-    .max_lifetime(Duration::from_secs(60))
-    .max_connections(10_000)
-    .graceful_shutdown(shutdown)
-    .on_finish(log_completion)
-    .serve()
-    .await;
-```
+**Resolved.** `Server` *is* the builder: `Server<L, F, M, A, R>` starts as `Server<(), (), ()>` and
+each of the three required setters replaces one parameter, so `run()` -- and `IntoFuture`, and
+therefore `.await` -- exist only once a listener, something to dispatch to and a state factory have
+all been given. "You cannot forget one" survives the move away from positional arguments, which is
+the thing a plain builder usually gives up.
 
-Typestate carries the three required arguments: `ServerBuilder<L, M, F>` starts as
-`ServerBuilder<(), (), ()>` and each of the three setters swaps one parameter, so `.serve()` only
-exists once all three are set — "you cannot forget one" survives the move away from positional
-arguments, which is the thing a plain builder usually gives up.
+The setters are split across four impl blocks by what each needs to know, and that is not
+decoration: a setter that takes a closure has to be able to *type* it, and `|addr| ...` can only be
+inferred from a bound that names `Fn` directly. So `.state()` and `.on_accept()` carry their bounds
+and the chain is written listener-first.
 
-This also makes §E1 free: the builder is where the callback type parameters get threaded, and the
-builder's own type is never written down by anyone.
+`serve(listener, make, state)` is kept as the positional shorthand, defined as those three setters.
 
-Keep `serve(listener, make, state)` as the two-line shorthand if it earns its keep; it is the shape
-the README leads with, and there is no reason a crate cannot have both as long as one is defined in
-terms of the other.
+### D2. The connection knobs are forwarded
 
-### D2. Forward the connection knobs, or give `ConnectionConfig` a builder
+`.config(ConnectionConfig)` was where the builder stopped and struct-literal-with-`..default()`
+started. The five knobs -- `limits`, `tick_interval`, `max_lifetime`, `close_timeout`,
+`initial_phase`, and `initial_version` for completeness -- are now setters on the server, with
+`.config()` kept for the wholesale case.
 
-`.config(ConnectionConfig)` (`src/server.rs:260`) is where the builder stops and struct-literal-with-
-`..default()` starts. Either forward the five knobs onto the server builder (`.limits()`,
-`.tick_interval()`, `.max_lifetime()`, `.close_timeout()`, `.initial_phase()`) or give
-`ConnectionConfig` a builder of its own and keep `.config()` for the wholesale case.
-
-Forwarding is fewer concepts and reads better at the call site. A `ConnectionConfig::builder()` is
-the better answer if `Connection::builder()` happens too, since then both paths share it.
+Forwarding was chosen over a `ConnectionConfig::builder()`: `ConnectionConfig` is plain data with
+public fields and a `Default`, and a builder for it would have been a fourth idiom for a struct
+literal. It is now also `Copy` (see §F).
 
 ### D3. `Connection::builder()`
 
-`Connection::new(io, dispatcher, state, config, shutdown)` is five positional arguments returning a
-tuple, and it is the constructor most likely to be called wrong — `dispatcher`, `state` and `config`
-are all "some `S`-shaped thing" at a glance. It is also the one the tests call most, and every test
-helper in `tests/` wraps it to avoid repeating the argument list.
+`Connection::new(io, dispatcher, state, config, shutdown)` was five positional arguments returning a
+tuple, and the constructor most likely to be called wrong -- `dispatcher`, `state` and `config` all
+look like "some `S`-shaped thing" at a glance. It was also the one the tests called most.
 
-Lower priority than D1, because it is not on the common path — but it is the place where positional
-arguments actually cost something today.
+**Resolved.** `Connection::builder(io, dispatcher, state)` with `.config()`, `.shutdown()` and
+`.build()`. The three arguments that stayed positional are the ones a connection cannot exist
+without *and* are of three unmistakably different kinds; the two that were confusable are now set by
+name. `Connection::new` is private.
 
-### D4. One setter is named unlike the others
+Typestate was not used for `state`, unlike the server: `()` is a perfectly legitimate `S` -- one test
+uses it -- so it cannot double as the marker for "unset".
 
-`with_graceful_shutdown` (`src/server.rs:271`) is the only `with_`-prefixed setter; the rest are bare
-nouns (`config`, `drain_timeout`, `max_connections`) and `on_`-verbs (`on_accept`, `on_finish`). The
-name is borrowed from hyper and axum, so there is a case for keeping it on familiarity grounds. There
-is no case for it being the only one of its kind.
+### D4. One setter was named unlike the others
+
+`with_graceful_shutdown` was the only `with_`-prefixed setter; the rest were bare nouns and
+`on_`-verbs. **Resolved:** `graceful_shutdown`.
 
 ---
 
 ## E. Type parameters and boxes
 
-The request is that types propagate their parameters instead of erasing to `Box`/`Arc<dyn>`. That is
-right in some of these places and wrong in others, and the line between them is sharp enough to write
-down:
+The request was that types propagate their parameters instead of erasing to `Box`/`Arc<dyn>`. That is
+right in some places and wrong in others, and the line between them is sharp enough to write down:
 
 > **Erase what has to be named. Propagate what is only ever built and consumed in one expression.**
 
 A type parameter is free when nobody writes the type down. It becomes expensive the moment someone
-has to name it — in a struct field, a function's return type, a `static` — because at that point the
+has to name it -- in a struct field, a function's return type, a `static` -- because at that point the
 parameter is not an implementation detail of ours, it is in *their* signature too, and it propagates
 outward until it reaches something that has to erase it anyway.
 
-Applied here:
-
-| Where | Today | Verdict |
+| Where | Was | Verdict |
 |---|---|---|
-| `Server::on_accept`, `on_finish` (`server.rs:203-206`) | `Option<Arc<dyn Fn …>>` | **propagate** — E1 |
-| `Server::state` (`:215`) | `Arc<F>` — already a parameter | the precedent, in the same struct |
-| `Server::IntoFuture` (`:465`) | `BoxFuture<'static, ()>` | **blocked by the language** — E3 |
-| `Router::tick`, `on_error` (`router.rs:345-346`) | `Arc<dyn …>` | **keep erased** — E2 |
-| `Router` packet handlers (`:122`) | `Box<dyn Fn …>` per packet | **keep erased** — heterogeneous by construction; this is the design |
-| `Op::With`, `Op::Spawn`, `Op::Encrypt` | `Box<dyn …>` | **keep erased** — one queue holds all of them; F5 in the previous round |
-| `RouterDispatcher::table` (`:415`) | `Arc<Table>` | **remove the indirection entirely** — B1 |
+| `Server::on_accept`, `on_finish` | `Option<Arc<dyn Fn …>>` | **propagated** -- E1 |
+| `Server::state` | `Arc<F>` -- already a parameter | the precedent, in the same struct |
+| `Server::IntoFuture` | `BoxFuture<'static, ()>` | **blocked by the language** -- E3 |
+| `Router::tick`, `on_error` | `Arc<dyn …>` | **kept erased** -- E2 |
+| `Router` packet handlers | `Box<dyn Fn …>` per packet | **kept erased** -- heterogeneous by construction |
+| `Op::With`, `Op::Spawn`, `Op::Encrypt` | `Box<dyn …>` | **kept erased** -- one queue holds all of them |
+| `RouterDispatcher::table` | `Arc<Table>` | **indirection removed entirely** -- B1 |
 
-### E1. `Server`'s two callbacks should be type parameters
+### E1. `Server`'s two callbacks are now type parameters
 
-`Server` is built and awaited in a single expression; nobody stores one or names its type. `state` is
-already `Arc<F>` in the very same struct, so the pattern is there and the two callbacks are the
-inconsistency, not the other way round.
+A `Server` is built and awaited in a single expression; nobody stores one or names its type. `state`
+was already `Arc<F>` in the very same struct, so the two callbacks were the inconsistency.
 
-For "not set", a unit type implementing the trait as a no-op beats `Option<G>`: it removes the branch
-per connection as well as the allocation.
+**Resolved.** Two traits, each with a no-op `()` impl (`server.rs:291-334`):
 
 ```rust
-pub trait Admit<A> { fn admit(&self, addr: &A) -> bool; }
+pub trait Admit<A>: Send + Sync + 'static { fn admit(&self, addr: &A) -> bool; }
 impl<A> Admit<A> for () { fn admit(&self, _: &A) -> bool { true } }
-
-pub trait Report<S, A> { fn report(&self, finished: &Finished<'_, S, A>); }
-impl<S, A> Report<S, A> for () { fn report(&self, _: &Finished<'_, S, A>) {} }
 ```
 
-Two `Arc` allocations and two virtual calls go away. Be honest about the size of that: the virtual
-call happens once per *finished connection*, so the argument here is consistency with `state` and
-with `MakeDispatcher`, not throughput.
+A `()` that compiles away beats `Option<G>`: it removes the branch per connection as well as the
+allocation. Be honest about the size of that -- the virtual call happened once per *finished*
+connection -- so the argument is consistency with `state` and `MakeDispatcher`, not throughput.
 
-**One wrinkle worth knowing before starting.** `S` is currently used by the struct only through
-`on_finish: Option<OnFinish<S, L::Addr>>` (`:221`). Make that a parameter and `S` is unconstrained,
-which Rust rejects. Two ways out, and the second is better:
+Both traits keep a blanket impl over the corresponding `Fn`, so a named reporter or rate limiter with
+state of its own is still possible. The cost, worth recording: a closure passed to `on_finish` needs
+its parameter annotated, because inference only flows from a bound that names `Fn` directly. A
+function item (`log_completion`) needs nothing.
 
-* add `PhantomData<fn() -> S>` — the usual price;
-* **drop `S` from the struct entirely.** It is recoverable on the impl block from `F`'s output —
-  `impl<L, S, F, M, A, R> Server<L, F, M, A, R> where F: Fn(&L::Addr) -> S` constrains `S` through
-  the `Fn` bound's associated type. Checked by compiling a reduction, because the rule that governs
-  it (an impl parameter must be constrained by the self type, the trait ref *or a predicate*) is
-  exactly the kind that reads as if it might not apply. `Server` loses a parameter instead of
-  gaining a marker field.
+**The wrinkle, and the way out.** `S` was used by the struct only through
+`on_finish: Option<OnFinish<S, L::Addr>>`; making that a parameter left `S` unconstrained, which Rust
+rejects. Rather than add `PhantomData<fn() -> S>`, `S` was **dropped from the struct entirely** and
+recovered on the impl blocks from `F`'s output -- `where F: Fn(&L::Addr) -> S` constrains it through
+the `Fn` bound's associated type. Checked by compiling a reduction, because the rule that governs it
+(an impl parameter must be constrained by the self type, the trait ref *or a predicate*) is exactly
+the kind that reads as if it might not apply. `Server` lost a parameter instead of gaining a marker
+field.
 
-### E2. `Router`'s handlers must stay erased — and this is the case that proves the rule
+### E2. `Router`'s handlers stay erased -- and this is the case that proves the rule
 
 Making them parameters gives `Router<S, T, E>`. Unlike `Server`, `Router` is named constantly: it
 lives in an `Arc` for the life of the process, it is a field in an application struct, and it is the
-return type of a factory function. The demo's is:
-
-```rust
-pub fn router() -> std::result::Result<Router<Session>, BuildError>
-```
+return type of a factory function. The demo's is `fn router() -> Result<Router<Session>, BuildError>`.
 
 With the handlers as parameters, and the handlers being closures or `fn` items, that signature has
-nothing to write — a closure type has no name. It becomes
-
-```rust
--> Result<Router<Session, impl TickHandler<Session>, impl ErrorHandler<Session>>, BuildError>
-```
-
+nothing to write -- a closure type has no name. It becomes
+`-> Result<Router<Session, impl TickHandler<Session>, impl ErrorHandler<Session>>, BuildError>`,
 which is legal, and then cannot be stored in a struct field without adding two more parameters to
 *that* struct, which cannot be stored without adding two more to the next one out. The erasure has to
 happen somewhere; the only question is whether it happens once, here, or is pushed into every
 application that uses the crate.
 
-This is the same reason `Box<dyn Error>` exists. It is not laziness — it is the boundary where the
+This is the same reason `Box<dyn Error>` exists. It is not laziness -- it is the boundary where the
 parameter stops being ours. What it costs is two `Arc<dyn>` and one virtual call per tick, a tick
 being a once-per-sixteen-seconds event.
 
-The same argument covers the packet handlers (`:122`) even more strongly: they are heterogeneous by
-construction — one table, many packet types — so there is no parameter to propagate in the first
-place. That erasure is the module's central design decision and its docs already say so.
+The same argument covers the packet handlers even more strongly: they are heterogeneous by
+construction -- one table, many packet types -- so there is no parameter to propagate in the first
+place.
 
 ### E3. `IntoFuture` is boxed because the language has not shipped the alternative
 
 `type IntoFuture = impl Future<Output = ()>` requires TAIT, which is unstable, and the state machine
-of an `async fn` body has no nameable type — so there is nothing else to put in that associated type
-position. `Server::run` is already public and unboxed and the doc already points at it
-(`src/server.rs:211`).
-
-Nothing to do. Recorded so it is not re-litigated: this box is not a design choice.
+of an `async fn` body has no nameable type. `Server::run` is the same future, public and unboxed, for
+anyone who minds. Recorded, at the box itself, so it is not re-litigated: this one is not a design
+choice.
 
 ---
 
 ## F. Smaller things
 
-* **`Server` is not `#[must_use]`.** `serve` is (`:230`), so `serve(..)` without `.await` warns — but
-  a `Server` produced any other way (a builder, per D1) and dropped does nothing, silently.
-* **`ConnectionConfig` could be `Copy`.** It is cloned per connection (`src/server.rs:384`); every
-  field is `Copy` already, so the `Clone` is a memcpy that reads like an allocation.
-* **`MAX_PACKETS` is checked after the fact.** `build()` rejects an over-large registration
-  (`router.rs:243-248`), but `on()` pushes unbounded, so the memory is allocated first and the error
-  arrives second. Theoretical at `u16::MAX` packets.
-* **`RouterBuilder::on` returns early on a *previous* packet's error** (`:191-193`), so later
-  collision diagnostics are computed against an incomplete entry set. Harmless — `build` reports the
-  first error regardless — but the early return reads as though it were about the packet being
-  registered.
-* **`Table::by_phase` is five boxed slices** (`:145`). One flat slice with five offsets is one
+* **`Server` was not `#[must_use]`.** Now it is, on the type, which also covers every setter --
+  `Server::builder()…` dropped without awaiting warns. (The per-method `#[must_use]`s came off;
+  clippy flags them as redundant once the type carries one.)
+* **`ConnectionConfig` is now `Copy`.** Every field already was, so the per-connection `Clone` read
+  like an allocation and was a memcpy.
+* **`MAX_PACKETS` is now checked in `on()`** rather than after the fact in `build()`, so the memory
+  is not allocated first and the error second. Theoretical at `u16::MAX` packets, but it is one
+  comparison.
+* **`RouterBuilder::on` no longer returns early** when a packet's ID table is out of order. It
+  records the error and registers the entry anyway, so the entry set stays complete and a collision
+  between two *other* packets is still found. `build` reports whichever mistake came first either
+  way.
+* **Not done: `Table::by_phase` is five boxed slices.** One flat slice with five offsets would be one
   allocation per breakpoint instead of five. Not worth doing at five phases and a handful of tables
-  unless startup allocation counts start to matter.
-* **`is_peer_error`** (`:487`): the `ConnectionRefused` arm flagged in the previous review is gone.
-  No finding — recorded so it is not reported a third time.
+  unless startup allocation counts start to matter, and it would trade a clear type for arithmetic.
+* **`is_peer_error`:** the `ConnectionRefused` arm flagged in an earlier review is gone. No finding --
+  recorded so it is not reported a third time.
 
 ---
 
-## G. What should not be traded away while fixing the above
+## Where the implementation departs from what this review proposed
 
-Load-bearing, and easy to lose in a refactor:
+Four places, all where writing the code showed the proposal was not quite right:
 
-* **The `Dispatcher` seam.** `conn` depends on the trait, not on `Router`. It is what lets a
-  connection be driven by a test double, and `tests/dispatch.rs` exists to fail if the dependency
-  creeps back.
+1. **C2 keeps the address out of `prepare`'s return.** The proposed signature was
+   `prepare(pending) -> io::Result<(Io, Addr)>`, which leaves a *failed* preamble with no peer to
+   name -- not in a log line, and not in whatever count the listener keeps for itself. So `accept`
+   returns the address and `prepare` takes it by `&mut`, which also reads better: correcting the
+   address is exactly what the PROXY case does, and leaving it alone is one `_`.
+2. **D1 has no separate `ServerBuilder` type and no `.serve()`.** `Server` is the builder; a second
+   type would have been two names for one thing, and `.serve()` a third name for `run()`/`.await`.
+3. **D2 forwards the connection knobs instead of giving `ConnectionConfig` a builder**, even though
+   D3 happened -- see D2 for why.
+4. **D3 keeps three positional arguments** rather than typestating `state`, because `()` is a
+   legitimate `S` and cannot also mean "unset".
+
+---
+
+## G. What was not traded away
+
+Load-bearing, and easy to lose in a refactor this size. All still true:
+
+* **The `Dispatcher` seam.** `conn` depends on the trait, not on `Router`. `tests/dispatch.rs` exists
+  to fail if the dependency creeps back. B3 made the *second* seam match it.
 * **Tables built once, at startup.** An ID collision is a boot failure, not a runtime error on the
-  first client that happens to send the packet. Any change to `build()` has to keep that.
+  first client that happens to send the packet.
 * **`MakeWith`.** It looks like a wrapper that could be replaced with a blanket
   `impl<F: Fn() -> D> MakeDispatcher for F`, and it cannot: that overlaps the `Arc<Router<S>>` impl
-  as far as coherence is concerned. The comment says so; keep it.
-* **The permit is taken before the accept** (`:345-352`). A full server leaves the next connection in
-  the kernel's backlog instead of accepting it in order to drop it — backpressure rather than a
-  refusal the peer cannot distinguish from an outage.
-* **`CancelOnDrop`** (`:475-481`). Dropping the server future — losing a `select!` against a signal —
-  would otherwise orphan every live connection with nothing able to stop them.
-* **Accept errors are never fatal** (`:363-377`). The failure that happens in practice is running out
-  of file descriptors, which is transient; a server that exits on it turns a busy minute into an
-  outage.
+  as far as coherence is concerned.
+* **The permit is taken before the accept.** A full server leaves the next connection in the kernel's
+  backlog instead of accepting it in order to drop it -- backpressure rather than a refusal the peer
+  cannot distinguish from an outage.
+* **`CancelOnDrop`.** Dropping the server future -- losing a `select!` against a signal -- would
+  otherwise orphan every live connection with nothing able to stop them.
+* **Accept errors are never fatal.** The failure that happens in practice is running out of file
+  descriptors, which is transient.

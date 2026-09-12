@@ -12,9 +12,9 @@
 //! * A connection can be driven by something that is not a router: a recorder that replays a
 //!   captured session, a test double that asserts on what it was handed, a proxy that forwards
 //!   everything it does not understand.
-//! * The cost is a virtual call per packet where there used to be a static one -- 0.9 ns against a
-//!   12 ns table lookup, which is why the table stays cached in the dispatcher rather than being
-//!   looked up per frame.
+//! * The cost is a virtual call per packet where there used to be a static one. That is the
+//!   cheapest thing on the path -- a fraction of what decoding the frame costs -- and it buys the
+//!   two properties above.
 
 use crate::conn::{Ctx, Ending};
 use crate::error::Result;
@@ -25,12 +25,13 @@ use crate::version::ProtocolVersion;
 /// Implementors own whatever routing state they need. The connection calls
 /// [`set_version`](Dispatcher::set_version) when the handshake pins a version and then only ever
 /// hands over frames, so an implementation is free to resolve IDs once and cache the result -- see
-/// [`RouterDispatcher`](crate::router::RouterDispatcher), which caches the table for the bound
-/// version and holds the router behind an `Arc`.
+/// [`RouterDispatcher`](crate::router::RouterDispatcher), which resolves the table for the bound
+/// version once and holds the router behind an `Arc`.
 pub trait Dispatcher<S> {
     /// Binds dispatch to a protocol version, for every frame after it.
     ///
-    /// Called once by [`Connection::new`](super::Connection::new) with the initial version, and
+    /// Called once by [`Connection::builder`](super::Connection::builder) with the initial version,
+    /// and
     /// again for every [`Op::SetVersion`](super::Op::SetVersion). Cheap enough to call more often
     /// than that.
     fn set_version(&mut self, version: ProtocolVersion);

@@ -1,6 +1,6 @@
 //! Typed packet registration with erased dispatch.
 //!
-//! Registration is generic (`.on::<LoginStart, _>(on_login_start)`), so the handler receives a
+//! Registration is generic (`.on::<LoginStart>(on_login_start)`), so the handler receives a
 //! decoded packet and a wrong pairing does not compile. Storage is erased, so dispatch is a table
 //! lookup and one virtual call -- and, crucially, adding a packet does not change any trait, which
 //! means it does not break everything that already exists.
@@ -11,8 +11,8 @@
 //!
 //! [`RouterBuilder::build`] resolves every registered packet's ID and produces the dispatch tables
 //! up front. So an ID collision is a startup failure rather than a runtime error on the first
-//! client that happens to send the packet, and a connection allocates nothing: it borrows an
-//! [`Arc`] of the table for its version.
+//! client that happens to send the packet, and a connection allocates nothing: it holds an [`Arc`]
+//! of the router and the index of the table for its version.
 //!
 //! Which versions get a table is not something the caller has to know. Every packet declares its
 //! IDs as data ([`Packet::IDS`]), so the router can read the *thresholds* out of them -- the
@@ -30,13 +30,14 @@
 //!
 //! Not directly. A [`Connection`](crate::conn::Connection) depends on the
 //! [`Dispatcher`] trait, and [`RouterDispatcher`] is the implementation that dispatches to a
-//! router: one per connection, holding an [`Arc`] of the shared router plus the table for the
-//! version that connection negotiated. That is where the version-to-table binding lives, and it is
-//! why the table type never leaves this module.
+//! router: one per connection, holding an [`Arc`] of the shared router plus the index of the table
+//! for the version that connection negotiated. That is where the version-to-table binding lives,
+//! and it is why the table type never leaves this module.
 
 use crate::conn::{Ctx, Dispatcher, Ending};
 use crate::error::{BuildError, ProtocolError, Result};
 use crate::packet::{Packet, Phase};
+use crate::server::MakeDispatcher;
 use crate::version::ProtocolVersion;
 use crate::wire::Reader;
 use std::sync::Arc;
@@ -66,60 +67,27 @@ pub enum UnknownPolicy {
     Ignore,
 }
 
-/// A handler for one packet type.
+/// A decoder and handler pair with the packet type erased.
 ///
-/// Blanket-implemented for every `fn(Ctx<'_, S>, P) -> Result<()>`, including closures. A handler
-/// is synchronous by construction: everything it wants to happen it queues as an
+/// A handler is synchronous by construction: everything it wants to happen it queues as an
 /// [`Op`](crate::conn::Op), and anything it has to wait for it hands to
 /// [`Ctx::spawn`](crate::conn::Ctx::spawn) or [`Ctx::exclusive`](crate::conn::Ctx::exclusive).
-pub trait Handler<S, P>: Send + Sync + 'static {
-    /// Handles one decoded packet.
-    fn call(&self, ctx: Ctx<'_, S>, packet: P) -> Result<()>;
-}
+///
+/// These three aliases used to be three public traits, each with a single `call` method and a
+/// blanket impl over the corresponding `Fn` -- the same construction written out three times, for a
+/// capability nothing used: a handler is a closure or an `fn` item. Written as the function types
+/// they always were, the erasure is visible where it happens and `.on::<P, _>(f)` loses the `_` that
+/// only ever stood for the handler's own type.
+type ErasedHandler<S> = Box<dyn for<'c> Fn(Ctx<'c, S>, &[u8]) -> Result<()> + Send + Sync>;
 
-impl<S, P, F> Handler<S, P> for F
-where
-    F: Fn(Ctx<'_, S>, P) -> Result<()> + Send + Sync + 'static,
-{
-    fn call(&self, ctx: Ctx<'_, S>, packet: P) -> Result<()> {
-        self(ctx, packet)
-    }
-}
+/// The handler that runs on every tick instead of on a packet. Shared, so a dispatcher can hold the
+/// router rather than a copy of it.
+type TickHandler<S> = Arc<dyn for<'c> Fn(Ctx<'c, S>) -> Result<()> + Send + Sync>;
 
-/// A handler that runs on every tick instead of on a packet.
-pub trait TickHandler<S>: Send + Sync + 'static {
-    /// Handles one tick.
-    fn call(&self, ctx: Ctx<'_, S>) -> Result<()>;
-}
-
-impl<S, F> TickHandler<S> for F
-where
-    F: Fn(Ctx<'_, S>) -> Result<()> + Send + Sync + 'static,
-{
-    fn call(&self, ctx: Ctx<'_, S>) -> Result<()> {
-        self(ctx)
-    }
-}
-
-/// A handler that runs when a connection ends for a reason nobody asked for.
+/// The handler that runs when a connection ends for a reason nobody asked for.
 ///
 /// See [`Dispatcher::on_error`] for what it may do and what it is called for.
-pub trait ErrorHandler<S>: Send + Sync + 'static {
-    /// Handles one ending.
-    fn call(&self, ctx: Ctx<'_, S>, ending: &Ending) -> Result<()>;
-}
-
-impl<S, F> ErrorHandler<S> for F
-where
-    F: Fn(Ctx<'_, S>, &Ending) -> Result<()> + Send + Sync + 'static,
-{
-    fn call(&self, ctx: Ctx<'_, S>, ending: &Ending) -> Result<()> {
-        self(ctx, ending)
-    }
-}
-
-/// A decoder and handler pair with the packet type erased.
-type ErasedHandler<S> = Box<dyn for<'c> Fn(Ctx<'c, S>, &[u8]) -> Result<()> + Send + Sync>;
+type ErrorHandler<S> = Arc<dyn for<'c> Fn(Ctx<'c, S>, &Ending) -> Result<()> + Send + Sync>;
 
 struct Entry<S> {
     name: &'static str,
@@ -128,12 +96,6 @@ struct Entry<S> {
     /// versions at which dispatch changes.
     ids: &'static [(ProtocolVersion, i32)],
     dispatch: ErasedHandler<S>,
-}
-
-impl<S> Entry<S> {
-    fn id(&self, version: ProtocolVersion) -> Option<i32> {
-        crate::packet::ids(version, self.ids)
-    }
 }
 
 /// The dispatch table for one interval of protocol versions: `phase -> id -> index into the
@@ -164,8 +126,8 @@ impl Table {
 pub struct RouterBuilder<S> {
     unknown: UnknownPolicy,
     entries: Vec<Entry<S>>,
-    tick: Option<Arc<dyn TickHandler<S>>>,
-    on_error: Option<Arc<dyn ErrorHandler<S>>>,
+    tick: Option<TickHandler<S>>,
+    on_error: Option<ErrorHandler<S>>,
     /// The first registration mistake, reported by [`RouterBuilder::build`].
     ///
     /// Deferred rather than panicked so that assembling a router is fallible in one place instead
@@ -182,15 +144,25 @@ impl<S: 'static> RouterBuilder<S> {
     }
 
     /// Registers a handler for one packet type.
+    ///
+    /// The packet is the only thing worth naming -- `.on::<LoginStart>(on_login_start)` -- and
+    /// pairing it with a handler that takes something else does not compile.
     #[must_use]
-    pub fn on<P, H>(mut self, handler: H) -> Self
-    where
-        P: Packet,
-        H: Handler<S, P>,
-    {
+    pub fn on<P: Packet>(
+        mut self,
+        handler: impl Fn(Ctx<'_, S>, P) -> Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        // Recorded rather than returned on, so the entry set stays complete: a collision between
+        // two *other* packets is still found, and `build` reports whichever mistake came first.
+        if self.entries.len() >= MAX_PACKETS {
+            self.invalid.get_or_insert(BuildError::TooManyPackets {
+                count: self.entries.len() + 1,
+                limit: MAX_PACKETS,
+            });
+            return self;
+        }
         if let Some(err) = unordered(P::NAME, P::IDS) {
             self.invalid.get_or_insert(err);
-            return self;
         }
 
         // The trailing-bytes check lives here, so it runs for every packet and no hand-written
@@ -200,7 +172,7 @@ impl<S: 'static> RouterBuilder<S> {
             let mut reader = Reader::new(payload, ctx.limits());
             let packet = P::decode(&mut reader, version)?;
             reader.finish(P::NAME)?;
-            handler.call(ctx, packet)
+            handler(ctx, packet)
         });
 
         self.entries.push(Entry {
@@ -214,7 +186,10 @@ impl<S: 'static> RouterBuilder<S> {
 
     /// Registers the tick handler, used for keep-alives and deadlines.
     #[must_use]
-    pub fn on_tick<H: TickHandler<S>>(mut self, handler: H) -> Self {
+    pub fn on_tick(
+        mut self,
+        handler: impl Fn(Ctx<'_, S>) -> Result<()> + Send + Sync + 'static,
+    ) -> Self {
         self.tick = Some(Arc::new(handler));
         self
     }
@@ -223,7 +198,10 @@ impl<S: 'static> RouterBuilder<S> {
     ///
     /// This is where a disconnect message comes from -- see [`Dispatcher::on_error`].
     #[must_use]
-    pub fn on_error<H: ErrorHandler<S>>(mut self, handler: H) -> Self {
+    pub fn on_error(
+        mut self,
+        handler: impl Fn(Ctx<'_, S>, &Ending) -> Result<()> + Send + Sync + 'static,
+    ) -> Self {
         self.on_error = Some(Arc::new(handler));
         self
     }
@@ -240,17 +218,12 @@ impl<S: 'static> RouterBuilder<S> {
         if let Some(err) = self.invalid {
             return Err(err);
         }
-        if self.entries.len() > MAX_PACKETS {
-            return Err(BuildError::TooManyPackets {
-                count: self.entries.len(),
-                limit: MAX_PACKETS,
-            });
-        }
 
         let entries = self.entries.into_boxed_slice();
-        let mut tables = Vec::with_capacity(breakpoints(&entries).len());
-        for version in breakpoints(&entries) {
-            tables.push((version, Arc::new(build_table(&entries, version)?)));
+        let breakpoints = breakpoints(&entries);
+        let mut tables = Vec::with_capacity(breakpoints.len());
+        for version in breakpoints {
+            tables.push((version, build_table(&entries, version)?));
         }
 
         Ok(Router {
@@ -299,7 +272,7 @@ fn build_table<S>(
     let mut by_phase: [Vec<Option<u16>>; Phase::COUNT] = Default::default();
 
     for (index, entry) in entries.iter().enumerate() {
-        let Some(id) = entry.id(version) else {
+        let Some(id) = crate::packet::ids(version, entry.ids) else {
             continue;
         };
         if !(0..=MAX_PACKET_ID).contains(&id) {
@@ -341,9 +314,9 @@ pub struct Router<S> {
     entries: Box<[Entry<S>]>,
     /// One table per version at which dispatch changes, ascending. Never empty: the floor is
     /// always present.
-    tables: Box<[(ProtocolVersion, Arc<Table>)]>,
-    tick: Option<Arc<dyn TickHandler<S>>>,
-    on_error: Option<Arc<dyn ErrorHandler<S>>>,
+    tables: Box<[(ProtocolVersion, Table)]>,
+    tick: Option<TickHandler<S>>,
+    on_error: Option<ErrorHandler<S>>,
 }
 
 // Derived `Debug` would demand `S: Debug` and would try to format the handlers, neither of which
@@ -385,42 +358,46 @@ impl<S: 'static> Router<S> {
         self.tick.is_some()
     }
 
-    /// The table covering `version`.
+    /// Where the table covering `version` sits in [`tables`](Router::tables).
     ///
-    /// The table of the highest breakpoint at or below it. A version that cannot be ordered against
-    /// the thresholds at all -- a snapshot, a negative number -- is [`placed`](ProtocolVersion::placed)
+    /// The highest breakpoint at or below it. A version that cannot be ordered against the
+    /// thresholds at all -- a snapshot, a negative number -- is [`placed`](ProtocolVersion::placed)
     /// on the floor first, which is the same rule [`ids`](crate::packet::ids) applies on the way
     /// out, so what a connection accepts and what it sends stay the same set.
-    fn table(&self, version: ProtocolVersion) -> Arc<Table> {
+    ///
+    /// An index rather than the table: a [`RouterDispatcher`] already holds the router the table
+    /// lives in, so nothing it could point at can outlive it and there is no lifetime to prove with
+    /// a reference count.
+    fn table(&self, version: ProtocolVersion) -> usize {
         let version = version.placed();
-        let index = self
-            .tables
+        self.tables
             .partition_point(|(since, _)| version.at_least(*since))
-            .saturating_sub(1);
-        // The floor is always present, so index 0 always exists.
-        Arc::clone(&self.tables[index].1)
+            // The floor is always present, so index 0 always exists.
+            .saturating_sub(1)
     }
 }
 
 /// A [`Router`] bound to one connection's protocol version: the [`Dispatcher`] a connection runs
 /// on by default.
 ///
-/// It holds two `Arc`s -- the router, which is shared by every connection, and the dispatch table
-/// for the version this connection negotiated. Keeping the table here rather than looking it up per
-/// frame is what makes dispatch two loads instead of a hash lookup and a pair of atomics: measured,
-/// 1.8 ns against 14 ns. That is nothing at Passage's packet counts, but it is also free, and it is
-/// the reason the connection needs to know nothing about tables.
+/// One `Arc` -- the router, shared by every connection -- plus the index of the table for the
+/// version this connection negotiated. Resolving that index once per version change rather than
+/// once per frame is the point: it turns dispatch into a pair of indexed loads, where looking the
+/// version up per frame would repeat a binary search over the breakpoints for every packet. At
+/// Passage's packet counts the difference does not matter; what it buys is that the connection
+/// needs to know nothing about tables.
 pub struct RouterDispatcher<S> {
     router: Arc<Router<S>>,
-    table: Arc<Table>,
+    /// Index into `router.tables`, rebound by [`set_version`](Dispatcher::set_version).
+    table: usize,
 }
 
-// Derived `Clone` would demand `S: Clone`; both fields are `Arc`s and clone regardless.
+// Derived `Clone` would demand `S: Clone`; an `Arc` and an index clone regardless.
 impl<S> Clone for RouterDispatcher<S> {
     fn clone(&self) -> Self {
         Self {
             router: Arc::clone(&self.router),
-            table: Arc::clone(&self.table),
+            table: self.table,
         }
     }
 }
@@ -440,7 +417,7 @@ impl<S: 'static> RouterDispatcher<S> {
     /// connection, which is what [`serve`](crate::server::serve) does.
     ///
     /// It starts on the version-independent table, and
-    /// [`Connection::new`](crate::conn::Connection::new) immediately rebinds it to the version its
+    /// [`Connection::builder`](crate::conn::Connection::builder) immediately rebinds it to the version its
     /// configuration starts on.
     #[must_use]
     pub fn new(router: impl Into<Arc<Router<S>>>) -> Self {
@@ -448,11 +425,18 @@ impl<S: 'static> RouterDispatcher<S> {
         let table = router.table(ProtocolVersion::UNKNOWN);
         Self { router, table }
     }
+}
 
-    /// The router this dispatches to.
-    #[must_use]
-    pub fn router(&self) -> &Arc<Router<S>> {
-        &self.router
+/// The ordinary case: every connection gets a [`RouterDispatcher`] over the same shared router.
+///
+/// Implemented here rather than in [`server`](crate::server), which declares the trait, because
+/// that is the direction every other seam in the crate runs: the consumer declares, the provider
+/// implements for its own type. It is also why nothing in `server` names a [`Router`].
+impl<S: 'static> MakeDispatcher<S> for Arc<Router<S>> {
+    type Dispatcher = RouterDispatcher<S>;
+
+    fn make(&self) -> RouterDispatcher<S> {
+        RouterDispatcher::new(Arc::clone(self))
     }
 }
 
@@ -463,16 +447,17 @@ impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
 
     fn dispatch(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
         let router = &*self.router;
+        let table = &router.tables[self.table].1;
         let phase = ctx.phase();
 
-        let Some(index) = self.table.lookup(phase, id) else {
+        let Some(index) = table.lookup(phase, id) else {
             if router.unknown == UnknownPolicy::Ignore {
                 trace!(id, ?phase, "ignoring unhandled packet");
                 return Ok(());
             }
             // The ID may well be a packet we know, just not one that belongs here. Saying so beats
             // reporting it as unknown, which sends whoever reads the log looking for the wrong bug.
-            if let Some(other) = self.table.lookup_elsewhere(phase, id) {
+            if let Some(other) = table.lookup_elsewhere(phase, id) {
                 let entry = &router.entries[other as usize];
                 return Err(ProtocolError::UnexpectedPacket {
                     packet: entry.name,
@@ -498,7 +483,7 @@ impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
 
     fn tick(&self, ctx: Ctx<'_, S>) -> Result<()> {
         match &self.router.tick {
-            Some(handler) => handler.call(ctx),
+            Some(handler) => handler(ctx),
             None => Ok(()),
         }
     }
@@ -509,7 +494,7 @@ impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
 
     fn on_error(&self, ctx: Ctx<'_, S>, ending: &Ending) -> Result<()> {
         match &self.router.on_error {
-            Some(handler) => handler.call(ctx, ending),
+            Some(handler) => handler(ctx, ending),
             None => Ok(()),
         }
     }

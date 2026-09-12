@@ -27,13 +27,10 @@ use uuid::Uuid;
 fn connect(config: ConnectionConfig) -> (TestClient, JoinHandle<Outcome<Session>>) {
     let (server_io, client_io) = tokio::io::duplex(4096);
     let router = Arc::new(router().expect("the demo router is well-formed"));
-    let (connection, _handle) = Connection::new(
-        server_io,
-        RouterDispatcher::new(router),
-        Session::default(),
-        config,
-        CancellationToken::new(),
-    );
+    let (connection, _handle) =
+        Connection::builder(server_io, RouterDispatcher::new(router), Session::default())
+            .config(config)
+            .build();
     (TestClient::new(client_io), tokio::spawn(connection.run()))
 }
 
@@ -396,13 +393,13 @@ async fn a_peer_hangup_is_an_ending_but_not_a_failure() {
 async fn cancellation_ends_the_connection_cleanly() {
     let (server_io, client_io) = tokio::io::duplex(4096);
     let shutdown = CancellationToken::new();
-    let (connection, handle) = Connection::new(
+    let (connection, handle) = Connection::builder(
         server_io,
         RouterDispatcher::new(router().expect("builds")),
         Session::default(),
-        ConnectionConfig::default(),
-        shutdown.clone(),
-    );
+    )
+    .shutdown(shutdown.clone())
+    .build();
     let server = tokio::spawn(connection.run());
     let _client = TestClient::new(client_io);
 
@@ -426,7 +423,7 @@ async fn a_peer_that_stops_reading_does_not_outlast_its_deadline() {
         max_lifetime: Some(Duration::from_secs(5)),
         ..ConnectionConfig::default()
     };
-    let (connection, _handle) = Connection::new(
+    let (connection, _handle) = Connection::builder(
         server_io,
         RouterDispatcher::new(status_router(
             |ctx: Ctx<'_, Session>, _packet: StatusRequest| {
@@ -436,9 +433,9 @@ async fn a_peer_that_stops_reading_does_not_outlast_its_deadline() {
             },
         )),
         Session::default(),
-        config,
-        CancellationToken::new(),
-    );
+    )
+    .config(config)
+    .build();
     let server = tokio::spawn(connection.run());
 
     let mut client = TestClient::new(client_io);
@@ -492,24 +489,19 @@ where
     H: Fn(Ctx<'_, Session>, StatusRequest) -> Result<()> + Send + Sync + 'static,
 {
     Router::builder()
-        .on::<Intention, _>(|ctx: Ctx<'_, Session>, packet: Intention| {
+        .on::<Intention>(|ctx: Ctx<'_, Session>, packet: Intention| {
             ctx.set_version(packet.protocol_version)?;
             ctx.set_phase(Phase::Status)
         })
-        .on::<StatusRequest, _>(on_status)
+        .on::<StatusRequest>(on_status)
         .build()
         .expect("builds")
 }
 
 fn connect_to(router: Router<Session>) -> (TestClient, JoinHandle<Outcome<Session>>) {
     let (server_io, client_io) = tokio::io::duplex(4096);
-    let (connection, _handle) = Connection::new(
-        server_io,
-        RouterDispatcher::new(router),
-        Session::default(),
-        ConnectionConfig::default(),
-        CancellationToken::new(),
-    );
+    let (connection, _handle) =
+        Connection::builder(server_io, RouterDispatcher::new(router), Session::default()).build();
     (TestClient::new(client_io), tokio::spawn(connection.run()))
 }
 
@@ -613,8 +605,8 @@ async fn the_router_rejects_conflicting_ids_at_build_time() {
     // Closures need their argument types spelled out so they implement `Fn` for *any* lifetime;
     // named handler functions (as in `demo::server`) do not have that wrinkle.
     let err = Router::builder()
-        .on::<StatusRequest, _>(|_ctx: Ctx<'_, Session>, _packet: StatusRequest| Ok(()))
-        .on::<StatusRequest, _>(|_ctx: Ctx<'_, Session>, _packet: StatusRequest| Ok(()))
+        .on::<StatusRequest>(|_ctx: Ctx<'_, Session>, _packet: StatusRequest| Ok(()))
+        .on::<StatusRequest>(|_ctx: Ctx<'_, Session>, _packet: StatusRequest| Ok(()))
         .build()
         .expect_err("must reject");
 
@@ -637,16 +629,16 @@ async fn a_router_is_not_bound_to_one_direction() {
     // and id, so building one is the same job either way -- what used to be a `WrongDirection`
     // build error was the driver deciding which half of the protocol you were allowed to be.
     let router = Router::<Session>::builder()
-        .on::<StatusResponse, _>(|_ctx: Ctx<'_, Session>, _packet: StatusResponse| Ok(()))
-        .on::<PongResponse, _>(|_ctx: Ctx<'_, Session>, _packet: PongResponse| Ok(()))
+        .on::<StatusResponse>(|_ctx: Ctx<'_, Session>, _packet: StatusResponse| Ok(()))
+        .on::<PongResponse>(|_ctx: Ctx<'_, Session>, _packet: PongResponse| Ok(()))
         .build()
         .expect("a clientbound router is a router");
 
     // Both directions of one phase still collide on the ids they share, which is the honest signal
     // that this case wants a direction-keyed table rather than a silent preference.
     let err = Router::<Session>::builder()
-        .on::<StatusRequest, _>(|_ctx: Ctx<'_, Session>, _packet: StatusRequest| Ok(()))
-        .on::<StatusResponse, _>(|_ctx: Ctx<'_, Session>, _packet: StatusResponse| Ok(()))
+        .on::<StatusRequest>(|_ctx: Ctx<'_, Session>, _packet: StatusRequest| Ok(()))
+        .on::<StatusResponse>(|_ctx: Ctx<'_, Session>, _packet: StatusResponse| Ok(()))
         .build()
         .expect_err("0x00 in the status phase, twice");
     assert!(
@@ -680,7 +672,7 @@ async fn the_router_rejects_an_id_table_written_the_wrong_way_round() {
     }
 
     let err = Router::<Session>::builder()
-        .on::<Backwards, _>(|_ctx: Ctx<'_, Session>, _packet: Backwards| Ok(()))
+        .on::<Backwards>(|_ctx: Ctx<'_, Session>, _packet: Backwards| Ok(()))
         .build()
         .expect_err("must reject");
     assert!(

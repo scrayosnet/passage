@@ -29,8 +29,10 @@ fn connect_to<D: Dispatcher<Session> + Send + 'static>(
     shutdown: CancellationToken,
 ) -> (TestClient, JoinHandle<Outcome<Session>>) {
     let (server_io, client_io) = tokio::io::duplex(4096);
-    let (connection, _handle) =
-        Connection::new(server_io, dispatcher, Session::default(), config, shutdown);
+    let (connection, _handle) = Connection::builder(server_io, dispatcher, Session::default())
+        .config(config)
+        .shutdown(shutdown)
+        .build();
     (TestClient::new(client_io), tokio::spawn(connection.run()))
 }
 
@@ -117,11 +119,11 @@ async fn what_a_handler_queued_before_it_failed_is_still_written() {
     // The A4 case in its own right: no `on_error` involved, just a handler that says something and
     // then gives up. Both halves have to happen, in that order.
     let router = Router::<Session>::builder()
-        .on::<Intention, _>(|ctx: Ctx<'_, Session>, packet: Intention| {
+        .on::<Intention>(|ctx: Ctx<'_, Session>, packet: Intention| {
             ctx.set_version(packet.protocol_version)?;
             ctx.set_phase(Phase::Login)
         })
-        .on::<LoginStart, _>(|ctx: Ctx<'_, Session>, _packet: LoginStart| {
+        .on::<LoginStart>(|ctx: Ctx<'_, Session>, _packet: LoginStart| {
             ctx.send(LoginDisconnect::text("go away"))?;
             Err(Error::peer("refused", "not today"))
         })
@@ -162,11 +164,11 @@ async fn a_batch_reaches_the_connection_with_nothing_in_between() {
     // The disconnect handler depends on this: a keep-alive landing between the message and the
     // close would be written after the peer had already been told to go.
     let router = Router::<Session>::builder()
-        .on::<Intention, _>(|ctx: Ctx<'_, Session>, packet: Intention| {
+        .on::<Intention>(|ctx: Ctx<'_, Session>, packet: Intention| {
             ctx.set_version(packet.protocol_version)?;
             ctx.set_phase(Phase::Login)
         })
-        .on::<LoginStart, _>(|ctx: Ctx<'_, Session>, _packet: LoginStart| {
+        .on::<LoginStart>(|ctx: Ctx<'_, Session>, _packet: LoginStart| {
             ctx.batch(|batch| {
                 batch.send(LoginDisconnect::text("first"))?;
                 batch.send(LoginDisconnect::text("second"))?;
@@ -207,7 +209,7 @@ async fn a_batch_that_cannot_be_built_queues_nothing() {
     // nothing means the packet queued before it does not go out either -- which is what lets
     // `on_error` try to speak without risking a half-sent answer.
     let router = Router::<Session>::builder()
-        .on::<StatusRequest, _>(|ctx: Ctx<'_, Session>, _packet: StatusRequest| {
+        .on::<StatusRequest>(|ctx: Ctx<'_, Session>, _packet: StatusRequest| {
             let attempted = ctx.batch(|batch| {
                 batch.send(StatusRequest)?;
                 batch.send(passage_driver::demo::packets::Transfer {
@@ -245,11 +247,11 @@ async fn a_handler_decides_for_itself_what_is_survivable() {
     let router = Router::<Session>::builder()
         // The router-wide half of the same idea: a packet nobody routes is not automatically fatal.
         .unknown(UnknownPolicy::Ignore)
-        .on::<Intention, _>(|ctx: Ctx<'_, Session>, packet: Intention| {
+        .on::<Intention>(|ctx: Ctx<'_, Session>, packet: Intention| {
             ctx.set_version(packet.protocol_version)?;
             ctx.set_phase(Phase::Login)
         })
-        .on::<LoginStart, _>(|ctx: Ctx<'_, Session>, packet: LoginStart| {
+        .on::<LoginStart>(|ctx: Ctx<'_, Session>, packet: LoginStart| {
             // A name we do not like. Refusing would be reasonable; carrying on is the handler's
             // call to make, and it is the only place with enough context to make it.
             if packet.user_name.is_empty() {

@@ -74,12 +74,12 @@ pub struct Session {
 pub fn router() -> std::result::Result<Router<Session>, BuildError> {
     Router::builder()
         .unknown(UnknownPolicy::Reject)
-        .on::<Intention, _>(on_intention)
-        .on::<StatusRequest, _>(on_status_request)
-        .on::<PingRequest, _>(on_ping_request)
-        .on::<LoginStart, _>(on_login_start)
-        .on::<LoginAcknowledged, _>(on_login_acknowledged)
-        .on::<KeepAliveResponse, _>(on_keep_alive_response)
+        .on::<Intention>(on_intention)
+        .on::<StatusRequest>(on_status_request)
+        .on::<PingRequest>(on_ping_request)
+        .on::<LoginStart>(on_login_start)
+        .on::<LoginAcknowledged>(on_login_acknowledged)
+        .on::<KeepAliveResponse>(on_keep_alive_response)
         .on_tick(on_tick)
         .on_error(on_error)
         .build()
@@ -200,7 +200,7 @@ fn on_login_acknowledged(ctx: Ctx<'_, Session>, _packet: LoginAcknowledged) -> R
     ctx.spawn(async move {
         let (host, port) = select_backend().await?;
         // One batch, because a handle can be held anywhere: this one is on the connection's own
-        // task, but the copy `Connection::new` hands back is not, and anything queued from there
+        // task, but the copy the connection builder hands back is not, and anything queued from there
         // could otherwise land between the transfer and the close.
         conn.batch(|batch| {
             batch.send(Transfer { host, port })?;
@@ -325,9 +325,9 @@ async fn select_backend() -> Result<(String, i32)> {
 ///
 /// This lives with the server rather than in the driver: what to log, and how loudly, is the
 /// caller's policy. What the driver provides is enough information to decide -- the peer, the
-/// duration, the state the connection was left in, and either a
-/// [`Ending`] it did not choose, and the [`Class`] of anything that went wrong. Everything the old
-/// implementation's metrics needed is in here, which was the point.
+/// duration, the state the connection was left in, and an [`Ending`] it did not choose with the
+/// [`Class`] of anything that went wrong. Everything the old implementation's metrics needed is in
+/// here, which was the point.
 ///
 /// This is also the piece the previous implementation could not express: `Err(ConnectionClosed)`
 /// meant both "done" and "broken", so every call site had to special-case it and any new error
@@ -337,7 +337,8 @@ pub fn log_completion(finished: &Finished<'_, Session, SocketAddr>) {
     let host = finished.state().map_or("", |session| session.host.as_str());
     let elapsed = finished.elapsed;
 
-    // A refusal ends as an ordinary completion, so this is what tells the two apart.
+    // A refusal ends as an ordinary completion, so this is what tells the two apart -- and it comes
+    // out of the session, because the handler that refused is the one that knew why.
     if let Some(refused) = finished.state().and_then(|session| session.refused) {
         debug!(?peer, host, ?elapsed, reason = refused, "peer refused");
         return;

@@ -15,10 +15,11 @@ use passage_driver::demo::server::{Session, router};
 use passage_driver::error::{Class, Result};
 use passage_driver::packet::Phase;
 use passage_driver::router::Router;
-use passage_driver::server::{Finished, Listener, make_with, serve};
+use passage_driver::server::{Admit, Finished, Listener, Server, make_with, serve};
 use passage_driver::version::versions;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::DuplexStream;
@@ -43,6 +44,7 @@ struct TestListener {
 impl Listener for TestListener {
     type Io = DuplexStream;
     type Addr = SocketAddr;
+    type Pending = DuplexStream;
 
     async fn accept(&mut self) -> Accepted {
         match self.incoming.recv().await {
@@ -51,6 +53,46 @@ impl Listener for TestListener {
             // loop, and the accept loop must not treat "quiet" as anything at all.
             None => std::future::pending().await,
         }
+    }
+
+    async fn prepare(pending: DuplexStream, _addr: &mut SocketAddr) -> io::Result<DuplexStream> {
+        Ok(pending)
+    }
+}
+
+/// A listener whose preamble refuses one peer, and corrects the address of the rest.
+///
+/// It is also the shape [`Listener::Pending`] exists for: the rule comes from the listener's own
+/// configuration, and reaches `prepare` -- which never sees `&self` -- only because `accept` put it
+/// in the pending value.
+struct PreambleListener {
+    incoming: mpsc::UnboundedReceiver<Accepted>,
+    refuse_port: u16,
+}
+
+impl Listener for PreambleListener {
+    type Io = DuplexStream;
+    type Addr = SocketAddr;
+    type Pending = (DuplexStream, u16);
+
+    async fn accept(&mut self) -> io::Result<((DuplexStream, u16), SocketAddr)> {
+        let (io, addr) = match self.incoming.recv().await {
+            Some(accepted) => accepted?,
+            None => std::future::pending().await,
+        };
+        Ok(((io, self.refuse_port), addr))
+    }
+
+    async fn prepare(
+        (io, refuse_port): (DuplexStream, u16),
+        addr: &mut SocketAddr,
+    ) -> io::Result<DuplexStream> {
+        if addr.port() == refuse_port {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "bad preamble"));
+        }
+        // As a PROXY header would: what the rest of the server sees is what this leaves behind.
+        addr.set_port(addr.port() + 1_000);
+        Ok(io)
     }
 }
 
@@ -107,6 +149,17 @@ impl Harness {
     }
 }
 
+/// Flattens a report into something a test can compare.
+fn ended<S>(finished: &Finished<'_, S, SocketAddr>) -> Ended {
+    match finished.result {
+        Ok(()) => Ok(()),
+        Err(ending) => Err((
+            ending.error().map(passage_driver::error::Error::class),
+            ending.label(),
+        )),
+    }
+}
+
 /// Starts a server on a channel-backed listener.
 fn start(router: Router<Session>, drain: Option<Duration>) -> Harness {
     let (tx, rx) = mpsc::unbounded_channel();
@@ -118,22 +171,17 @@ fn start(router: Router<Session>, drain: Option<Duration>) -> Harness {
         TestListener { incoming: rx },
         Arc::new(router),
         // The point of a factory rather than a value: the address is only known per connection.
-        |addr: &SocketAddr| Session {
+        |addr| Session {
             peer: Some(*addr),
             ..Session::default()
         },
     )
     .config(ConnectionConfig::default())
-    .with_graceful_shutdown(shutdown.clone())
+    .graceful_shutdown(shutdown.clone())
+    // Annotated because the bound is `Report`, not `Fn`: a closure's parameter can only be
+    // inferred from a bound that names `Fn` directly. `on_finish(log_completion)` needs nothing.
     .on_finish(move |finished: &Finished<'_, Session, SocketAddr>| {
-        let ended = match finished.result {
-            Ok(()) => Ok(()),
-            Err(ending) => Err((
-                ending.error().map(passage_driver::error::Error::class),
-                ending.label(),
-            )),
-        };
-        recorder.lock().expect("not poisoned").push(ended);
+        recorder.lock().expect("not poisoned").push(ended(finished));
     });
 
     if let Some(after) = drain {
@@ -209,24 +257,27 @@ async fn every_connection_gets_its_own_state() {
     assert!(second_body.contains("second.example"), "{second_body}");
 }
 
-#[tokio::test]
-async fn the_state_factory_sees_the_address_the_listener_reported() {
-    // Two handlers, so the assertion is on the state and nothing else.
-    let peer_router = Router::builder()
-        .on::<Intention, _>(|ctx: Ctx<'_, Session>, packet: Intention| {
+/// A router whose status response is the peer address the state factory was given, and nothing
+/// else -- so an assertion about the address is an assertion about the state alone.
+fn peer_echo_router() -> Router<Session> {
+    Router::builder()
+        .on::<Intention>(|ctx: Ctx<'_, Session>, packet: Intention| {
             ctx.set_version(packet.protocol_version)?;
             ctx.set_phase(Phase::Status)
         })
-        .on::<StatusRequest, _>(|ctx: Ctx<'_, Session>, _: StatusRequest| {
+        .on::<StatusRequest>(|ctx: Ctx<'_, Session>, _: StatusRequest| {
             ctx.send(StatusResponse {
                 body: format!("{:?}", ctx.state.peer),
             })?;
             ctx.close()
         })
         .build()
-        .expect("builds");
+        .expect("builds")
+}
 
-    let harness = start(peer_router, None);
+#[tokio::test]
+async fn the_state_factory_sees_the_address_the_listener_reported() {
+    let harness = start(peer_echo_router(), None);
     let mut client = harness.incoming.connect(25_565);
 
     client.version = versions::V1_21;
@@ -237,6 +288,35 @@ async fn the_state_factory_sees_the_address_the_listener_reported() {
 
     let body = client.expect::<StatusResponse>().await.body;
     assert!(body.contains("127.0.0.1:25565"), "{body}");
+}
+
+#[tokio::test]
+async fn a_server_can_be_assembled_by_name() {
+    // The builder path, with the connection knobs forwarded onto it rather than reached through a
+    // `ConnectionConfig` literal. `.run()` exists here only because a listener, something to
+    // dispatch to and a state factory have all been set -- each one is a type parameter that starts
+    // unset, so forgetting one is a missing method rather than a server that does nothing.
+    let (tx, rx) = mpsc::unbounded_channel();
+    let server = tokio::spawn(
+        Server::builder()
+            .listener(TestListener { incoming: rx })
+            .dispatch(Arc::new(router().expect("builds")))
+            .state(|addr| Session {
+                peer: Some(*addr),
+                ..Session::default()
+            })
+            .tick_interval(Duration::from_secs(16))
+            .max_lifetime(Some(Duration::from_secs(30)))
+            .max_connections(4)
+            .run(),
+    );
+
+    let incoming = Incoming(tx);
+    let mut client = incoming.connect(1);
+    let response = ping(&mut client, "mc.justchunks.net").await;
+    assert!(response.body.contains("mc.justchunks.net"), "{response:?}");
+
+    server.abort();
 }
 
 #[tokio::test]
@@ -280,11 +360,7 @@ async fn a_panicking_connection_is_reported_rather_than_vanishing() {
             |_: &SocketAddr| (),
         )
         .on_finish(move |finished: &Finished<'_, (), SocketAddr>| {
-            let ending = finished.result.as_ref().expect_err("a panic is a failure");
-            recorder.lock().expect("not poisoned").push(Err((
-                ending.error().map(passage_driver::error::Error::class),
-                ending.label(),
-            )));
+            recorder.lock().expect("not poisoned").push(ended(finished));
         })
         .run(),
     );
@@ -327,21 +403,62 @@ impl passage_driver::conn::Dispatcher<()> for PanickingDispatcher {
     }
 }
 
+/// What a limiter publishes, which is the only thing anyone else needs from it.
+#[derive(Default)]
+struct Counts {
+    admitted: AtomicUsize,
+    refused: AtomicUsize,
+}
+
+/// A rate limiter that keeps its own books, which is the whole shape being tested: it is the only
+/// thing that knows it refused someone and why, so it is the thing that counts it. Nothing
+/// downstream is told, and nothing downstream has to grow a vocabulary for it.
+struct RateLimiter {
+    blocked_port: u16,
+    counts: Arc<Counts>,
+}
+
+impl Admit<SocketAddr> for RateLimiter {
+    fn admit(&self, addr: &SocketAddr) -> bool {
+        let allowed = addr.port() != self.blocked_port;
+        // Counted here, at the decision, where the reason is still in hand.
+        let counter = if allowed {
+            &self.counts.admitted
+        } else {
+            &self.counts.refused
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
+        allowed
+    }
+}
+
 #[tokio::test]
-async fn a_refused_peer_never_reaches_the_protocol() {
+async fn a_refused_peer_never_reaches_the_protocol_and_the_limiter_counts_its_own() {
     // Rate limiting, in the only place it can see the address a PROXY header reported and still not
-    // hold up the accept loop.
+    // hold up the accept loop. `&self` is what lets it be a named type with state, so "how many did
+    // we turn away" needs no reporting hook at all.
     let (tx, rx) = mpsc::unbounded_channel();
+    let counts = Arc::new(Counts::default());
+    let limiter = RateLimiter {
+        blocked_port: 2,
+        counts: Arc::clone(&counts),
+    };
+    let finished: Arc<Mutex<Vec<Ended>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&finished);
+
     let server = tokio::spawn(
         serve(
             TestListener { incoming: rx },
             Arc::new(router().expect("builds")),
-            |addr: &SocketAddr| Session {
+            |addr| Session {
                 peer: Some(*addr),
                 ..Session::default()
             },
         )
-        .on_accept(|addr: &SocketAddr| addr.port() != 2)
+        .on_accept(limiter)
+        .on_finish(move |finished: &Finished<'_, Session, SocketAddr>| {
+            recorder.lock().expect("not poisoned").push(ended(finished));
+        })
         .run(),
     );
 
@@ -356,6 +473,79 @@ async fn a_refused_peer_never_reaches_the_protocol() {
             .body
             .contains("mc.justchunks.net")
     );
+
+    // Only the connection that ran is reported. The refusal is not a connection that ended, and the
+    // report has no arm for it.
+    assert_eq!(finished.lock().expect("not poisoned").clone(), vec![Ok(())]);
+    assert_eq!(counts.refused.load(Ordering::Relaxed), 1);
+    assert_eq!(counts.admitted.load(Ordering::Relaxed), 1);
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_failed_preamble_closes_the_socket_and_the_server_carries_on() {
+    // `prepare` failing is the listener's business: it holds the TLS error or the malformed header
+    // and can count it where that is still true. What the server owes is that one peer's bad
+    // preamble costs the next peer nothing.
+    let (tx, rx) = mpsc::unbounded_channel();
+    let server = tokio::spawn(
+        serve(
+            PreambleListener {
+                incoming: rx,
+                refuse_port: 2,
+            },
+            Arc::new(router().expect("builds")),
+            |addr| Session {
+                peer: Some(*addr),
+                ..Session::default()
+            },
+        )
+        .run(),
+    );
+
+    let incoming = Incoming(tx);
+    let mut refused = incoming.connect(2);
+    refused.expect_eof().await;
+
+    let mut allowed = incoming.connect(1);
+    let response = ping(&mut allowed, "mc.justchunks.net").await;
+    assert!(response.body.contains("mc.justchunks.net"), "{response:?}");
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_preamble_can_correct_the_address_everything_downstream_sees() {
+    // What `Listener::prepare` exists for, and why it takes the address by `&mut`: a PROXY header
+    // reports the real client, and the state factory and admission check must see that one.
+    let (tx, rx) = mpsc::unbounded_channel();
+    let server = tokio::spawn(
+        serve(
+            PreambleListener {
+                incoming: rx,
+                refuse_port: 0,
+            },
+            Arc::new(peer_echo_router()),
+            |addr| Session {
+                peer: Some(*addr),
+                ..Session::default()
+            },
+        )
+        .run(),
+    );
+
+    let incoming = Incoming(tx);
+    let mut client = incoming.connect(25_565);
+    client.version = versions::V1_21;
+    client
+        .send(&intention(versions::V1_21, Intent::Status))
+        .await;
+    client.send(&StatusRequest).await;
+
+    // The port the preamble left behind, not the one the accept reported.
+    let body = client.expect::<StatusResponse>().await.body;
+    assert!(body.contains("127.0.0.1:26565"), "{body}");
 
     server.abort();
 }

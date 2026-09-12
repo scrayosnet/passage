@@ -134,7 +134,10 @@ pub struct Outcome<S> {
 }
 
 /// Static configuration of a connection.
-#[derive(Clone, Debug)]
+///
+/// Plain data, and `Copy`: every field is, and a connection takes its own copy rather than sharing
+/// the server's.
+#[derive(Copy, Clone, Debug)]
 pub struct ConnectionConfig {
     /// The decoding limits.
     pub limits: Limits,
@@ -194,6 +197,53 @@ impl Default for ConnectionConfig {
 /// A handler task, paired with whether the peer has to stay quiet until it resolves.
 type Task = BoxFuture<'static, (bool, Result<()>)>;
 
+/// Collects what a [`Connection`] is created with. See [`Connection::builder`].
+pub struct ConnectionBuilder<S, T, D> {
+    io: T,
+    dispatcher: D,
+    state: S,
+    config: ConnectionConfig,
+    shutdown: Option<CancellationToken>,
+}
+
+impl<S, T, D> ConnectionBuilder<S, T, D>
+where
+    S: Send + 'static,
+    T: AsyncRead + AsyncWrite + Unpin,
+    D: Dispatcher<S>,
+{
+    /// Sets the configuration. Defaults to [`ConnectionConfig::default`].
+    #[must_use]
+    pub fn config(mut self, config: ConnectionConfig) -> Self {
+        self.config = config;
+        self
+    }
+
+    /// Cancels the connection when `shutdown` is cancelled.
+    ///
+    /// Defaults to a token of the connection's own, which it cancels when it ends -- so leaving
+    /// this unset means "nothing outside can stop it early", not "it can never be stopped".
+    #[must_use]
+    pub fn shutdown(mut self, shutdown: CancellationToken) -> Self {
+        self.shutdown = Some(shutdown);
+        self
+    }
+
+    /// Creates the connection, together with the handle for talking to it from outside.
+    ///
+    /// This cannot fail. Everything that could be misconfigured about dispatch was resolved when the
+    /// dispatcher was built.
+    pub fn build(self) -> (Connection<S, T, D>, ConnectionHandle<S>) {
+        Connection::new(
+            self.io,
+            self.dispatcher,
+            self.state,
+            self.config,
+            self.shutdown.unwrap_or_default(),
+        )
+    }
+}
+
 /// Drives one connection.
 pub struct Connection<S, T, D> {
     framed: Framed<T, FrameCodec>,
@@ -233,7 +283,24 @@ where
     T: AsyncRead + AsyncWrite + Unpin,
     D: Dispatcher<S>,
 {
-    /// Creates a connection over `io`, together with the handle for its connection.
+    /// Starts building a connection over `io`.
+    ///
+    /// The three arguments are the ones a connection cannot be created without, and they are of
+    /// three unmistakably different kinds. Everything else -- the configuration, the shutdown token
+    /// -- has a default and is set by name, which is what the five positional arguments this
+    /// replaces could not offer: `dispatcher`, `state` and `config` all looked like "some
+    /// `S`-shaped thing" at the call site.
+    pub fn builder(io: T, dispatcher: D, state: S) -> ConnectionBuilder<S, T, D> {
+        ConnectionBuilder {
+            io,
+            dispatcher,
+            state,
+            config: ConnectionConfig::default(),
+            shutdown: None,
+        }
+    }
+
+    /// Creates the connection, together with the handle for it.
     ///
     /// This cannot fail. Everything that could be misconfigured about dispatch was resolved when
     /// the dispatcher was built -- for the built-in one, by
@@ -241,7 +308,7 @@ where
     ///
     /// The handle is returned so the caller can talk to the connection from the outside -- close
     /// it, or hand it to something that will. Handlers get their own copy through [`Ctx`].
-    pub fn new(
+    fn new(
         io: T,
         mut dispatcher: D,
         state: S,

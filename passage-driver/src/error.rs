@@ -285,7 +285,7 @@ pub enum Error {
     ///
     /// Only code outside the connection's own task: a [`detach`](crate::conn::ConnectionHandle::detach)ed
     /// task, or a handle someone kept from
-    /// [`Connection::new`](crate::conn::Connection::new). A handler, and anything
+    /// [`ConnectionBuilder::build`](crate::conn::ConnectionBuilder::build). A handler, and anything
     /// [`spawn`](crate::conn::ConnectionHandle::spawn)ed or
     /// [`exclusive`](crate::conn::ConnectionHandle::exclusive), is polled *by* the loop that owns
     /// the receiving end of the queue -- so for them the queue cannot be closed, and `?`-ing a
@@ -378,7 +378,7 @@ impl Error {
 /// on any input, it is the same on every run, and it is discovered once --
 /// [`RouterBuilder::build`](crate::router::RouterBuilder::build) either produces a router that
 /// works for every supported version or it fails at startup. Keeping them out of [`Error`] is why
-/// [`Connection::new`](crate::conn::Connection::new) cannot fail.
+/// [`ConnectionBuilder::build`](crate::conn::ConnectionBuilder::build) cannot fail.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum BuildError {
     /// A packet's ID table is not ordered newest to oldest.

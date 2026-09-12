@@ -17,7 +17,6 @@ use passage_driver::version::{ProtocolVersion, versions};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 
 /// What a dispatcher was asked to do, in order.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -79,8 +78,9 @@ fn connect<D: Dispatcher<()> + Send + 'static>(
     config: ConnectionConfig,
 ) -> (TestClient, ConnectionHandle<()>, JoinHandle<Outcome<()>>) {
     let (server_io, client_io) = tokio::io::duplex(4096);
-    let (connection, handle) =
-        Connection::new(server_io, dispatcher, (), config, CancellationToken::new());
+    let (connection, handle) = Connection::builder(server_io, dispatcher, ())
+        .config(config)
+        .build();
     (
         TestClient::new(client_io),
         handle,

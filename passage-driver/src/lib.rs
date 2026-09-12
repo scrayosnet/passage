@@ -21,8 +21,8 @@
 //!   rather than generated, which is what lets a field name its own length limit and a decoder
 //!   produce a domain type instead of a raw `VarInt`.
 //! * **Handlers are registered, not implemented.** [`RouterBuilder::on`](router::RouterBuilder::on)
-//!   takes a typed handler per packet. Adding a packet does not widen a trait, so it does not break
-//!   anything that already exists. Tables are built once at startup, so an ID collision is a boot
+//!   takes a typed handler per packet -- `.on::<LoginStart>(on_login_start)`. Adding a packet does
+//!   not widen a trait, so it does not break anything that already exists. Tables are built once at startup, so an ID collision is a boot
 //!   failure and a connection allocates nothing.
 //! * **Handlers are synchronous, and everything they do is an operation.** A handler reads
 //!   [`Ctx::state`](conn::Ctx::state) and queues [`Op`](conn::Op)s -- a packet, a state change, a
@@ -64,15 +64,14 @@
 //!
 //! The left column is immutable and shared behind an [`Arc`](std::sync::Arc); nothing in the right
 //! column is shared with anything, which is why none of it needs a lock.
-//! [`serve`](server::serve) is the bridge: it accepts sockets and builds the right column for each
-//! one.
+//! [`Server`](server::Server) is the bridge: it accepts sockets and builds the right column for
+//! each one.
 //!
 //! # Example
 //!
 //! ```no_run
-//! use passage_driver::conn::ConnectionConfig;
 //! use passage_driver::demo::server::{Session, log_completion, router};
-//! use passage_driver::server::serve;
+//! use passage_driver::server::Server;
 //! use std::sync::Arc;
 //! use std::time::Duration;
 //! use tokio::net::TcpListener;
@@ -81,33 +80,35 @@
 //! # async fn run(shutdown: CancellationToken) -> Result<(), Box<dyn std::error::Error>> {
 //! let listener = TcpListener::bind("0.0.0.0:25565").await?;
 //!
-//! // Built once at startup and shared by every connection. It names no protocol versions: the
-//! // packets carry their own, and the dispatch tables follow.
-//! let router = Arc::new(router()?);
-//!
-//! let config = ConnectionConfig {
-//!     tick_interval: Some(Duration::from_secs(16)),
-//!     max_lifetime: Some(Duration::from_secs(60)),
-//!     ..ConnectionConfig::default()
-//! };
-//!
-//! // Built once per accepted socket.
-//! serve(listener, router, |addr| Session {
-//!     peer: Some(*addr),
-//!     ..Session::default()
-//! })
-//! .config(config)
-//! .max_connections(10_000)
-//! .with_graceful_shutdown(shutdown)
-//! .on_finish(log_completion)
-//! .await;
+//! Server::builder()
+//!     .listener(listener)
+//!     // Built once at startup and shared by every connection. It names no protocol versions: the
+//!     // packets carry their own, and the dispatch tables follow.
+//!     .dispatch(Arc::new(router()?))
+//!     // Called once per accepted socket, because the state is that connection's alone.
+//!     .state(|addr| Session {
+//!         peer: Some(*addr),
+//!         ..Session::default()
+//!     })
+//!     .tick_interval(Duration::from_secs(16))
+//!     .max_lifetime(Some(Duration::from_secs(60)))
+//!     .max_connections(10_000)
+//!     .graceful_shutdown(shutdown)
+//!     .on_finish(log_completion)
+//!     .await;
 //! # Ok(())
 //! # }
 //! ```
 //!
+//! Everything is built the same way: [`Router::builder`](router::Router::builder),
+//! [`Server::builder`](server::Server::builder),
+//! [`Connection::builder`](conn::Connection::builder). The three the server cannot do without --
+//! a listener, something to dispatch to, a state factory -- are typestate, so `.await` does not
+//! exist until all three are set.
+//!
 //! One connection at a time, without the accept loop, is
-//! [`Connection::new`](conn::Connection::new) -- what `serve` calls per socket, and what the tests
-//! drive over a socket pair.
+//! [`Connection::builder`](conn::Connection::builder) -- what the server uses per socket, and what
+//! the tests drive over a socket pair.
 
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
