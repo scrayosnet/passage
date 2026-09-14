@@ -414,7 +414,7 @@ from where any of it happened.
 
 What the driver could honestly report was never the application's facts -- it was its own. So it
 reports those itself, and nothing else: an `info` span per connection carrying the peer, and one
-event when a connection ends with the duration, the [`Ending`]'s label, and the version and phase it
+event when a connection ends with the duration, the [`Reason`]'s label, and the version and phase it
 reached -- at `warn` when the cause was ours, `debug` otherwise.
 
 Everything a handler logs lands inside that span, which is what a central reporter was really

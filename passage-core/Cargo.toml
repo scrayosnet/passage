@@ -1,0 +1,17 @@
+[package]
+name = "passage-core"
+version.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bytes = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time", "macros"] }
+tokio-util = { workspace = true, features = ["codec"] }
+tracing = { workspace = true, features = ["default"] }

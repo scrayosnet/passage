@@ -142,7 +142,7 @@ Four things can turn a peer away, and none of them tells the others:
 |----------------|-------------------------------|------------------------------------------|
 | a `Layer`      | not this peer, not like this  | the TLS error, the bucket, the ban list  |
 | a handler      | this *session* is refused     | the packet, the phase, the session state |
-| the connection | it ended, and how             | the `Ending`, the state, the version     |
+| the connection | it ended, and how             | the `Reason`, the state, the version     |
 | the driver     | what to record about all that | nothing else -- and it records only its own |
 
 Each one holds, at the moment it decides, everything a log line or a metric about that decision
@@ -151,7 +151,7 @@ could want -- so each one records its own. A `Layer` that refuses returns `None`
 the player and the reason, which it is holding and nobody else is.
 
 The driver's share is deliberately small: a `connection` span, and one event when a connection ends
-saying how long it took, which `Ending` it had and which version and phase it reached -- at `warn`
+saying how long it took, which `Reason` it had and which version and phase it reached -- at `warn`
 if the cause was ours, `debug` otherwise. Everything a handler logs lands inside that span, so the
 correlation a central reporter used to provide comes from the span instead.
 
