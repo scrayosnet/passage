@@ -266,7 +266,7 @@ started. The five knobs -- `limits`, `tick_interval`, `max_lifetime`, `close_tim
 `initial_phase`, and `initial_version` for completeness -- are now setters on the server, with
 `.config()` kept for the wholesale case.
 
-Forwarding was chosen over a `ConnectionConfig::builder()`: `ConnectionConfig` is plain data with
+Forwarding was chosen over a `ConnectionConfig::builder()`: `Options` is plain data with
 public fields and a `Default`, and a builder for it would have been a fourth idiom for a struct
 literal. It is now also `Copy` (see §F).
 
@@ -438,7 +438,7 @@ since the log line is now the feature. `tests/common` grows a ~40-line recorder 
 * **`Server` was not `#[must_use]`.** Now it is, on the type, which also covers every setter --
   `Server::builder()…` dropped without awaiting warns. (The per-method `#[must_use]`s came off;
   clippy flags them as redundant once the type carries one.)
-* **`ConnectionConfig` is now `Copy`.** Every field already was, so the per-connection `Clone` read
+* **`Options` is now `Copy`.** Every field already was, so the per-connection `Clone` read
   like an allocation and was a memcpy.
 * **`MAX_PACKETS` is now checked in `on()`** rather than after the fact in `build()`, so the memory
   is not allocated first and the error second. Theoretical at `u16::MAX` packets, but it is one
@@ -469,7 +469,7 @@ Five places, all where writing the code showed the proposal was not quite right:
    the listener's, so adding a layer later would silently change what the factory receives.
 3. **D1 has no separate `ServerBuilder` type and no `.serve()`.** `Server` is the builder; a second
    type would have been two names for one thing, and `.serve()` a third name for `run()`/`.await`.
-4. **D2 forwards the connection knobs instead of giving `ConnectionConfig` a builder**, even though
+4. **D2 forwards the connection knobs instead of giving `Options` a builder**, even though
    D3 happened -- see D2 for why.
 5. **D3 keeps three positional arguments** rather than typestating `state`, because `()` is a
    legitimate `S` and cannot also mean "unset".

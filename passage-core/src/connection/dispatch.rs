@@ -25,6 +25,8 @@ pub trait Dispatcher<S> {
     }
 }
 
+impl<S> Dispatcher<S> for () {}
+
 impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
     fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
         (**self).on_frame(ctx, id, payload)
@@ -36,5 +38,28 @@ impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
 
     fn on_error(&self, ctx: Ctx<'_, S>, error: &mut ConnectionError) -> Result<()> {
         (**self).on_error(ctx, error)
+    }
+}
+
+impl <S, D: Dispatcher<S>> Dispatcher<S> for Option<D> {
+    fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
+        let Some(this) = self else {
+            return Ok(());
+        };
+        this.on_frame(ctx, id, payload)
+    }
+
+    fn on_tick(&self, ctx: Ctx<'_, S>) -> Result<()> {
+        let Some(this) = self else {
+            return Ok(());
+        };
+        this.on_tick(ctx)
+    }
+
+    fn on_error(&self, ctx: Ctx<'_, S>, error: &mut ConnectionError) -> Result<()> {
+        let Some(this) = self else {
+            return Ok(());
+        };
+        this.on_error(ctx, error)
     }
 }

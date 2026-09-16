@@ -42,7 +42,7 @@ a `Connection` is created for each accepted socket and owns everything mutable.
 | Static, built once  | One per accepted socket                          |
 |---------------------|--------------------------------------------------|
 | `Router`            | `Connection`                                     |
-| `ConnectionConfig`  | `ConnectionHandle`                               |
+| `Options`  | `ConnectionHandle`                               |
 | the handlers        | the state `S`, and a `Ctx` per handler call      |
 | the dispatch tables | a `RouterDispatcher`, bound to the table for the negotiated version |
 
