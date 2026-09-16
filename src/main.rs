@@ -133,12 +133,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // initialize logging
         let subscriber = tracing_subscriber::registry()
             .with(
-                tracing_subscriber::fmt::layer().compact().with_filter(
-                    EnvFilter::builder()
-                        .with_default_directive(LevelFilter::INFO.into())
-                        .from_env_lossy(),
-                ),
+                EnvFilter::builder()
+                    .with_default_directive(LevelFilter::INFO.into())
+                    .from_env_lossy(),
             )
+            // add mandatory logging layer
+            .with(tracing_subscriber::fmt::layer().compact())
             // add optional layers
             .with(
                 meter_provider
