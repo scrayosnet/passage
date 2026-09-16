@@ -183,7 +183,7 @@ where
         // Wait for the next packet to arrive. Stop if the connection is shutdown.
         let shutdown = self.shutdown.clone();
         let frame = tokio::select! {
-            frame = self.stream.next().instrument(tracing::info_span!("read_packet", otel.kind = "server")) => frame,
+            frame = self.stream.next().instrument(tracing::info_span!("read_packet")) => frame,
             // TODO could send a disconnect packet in the login and configuration phase.
             _ = shutdown.cancelled() => return Err(Error::ConnectionClosed),
         };
@@ -202,7 +202,7 @@ where
     ) -> Result<(), Error> {
         self.stream
             .send(packet)
-            .instrument(tracing::info_span!("write_packet", otel.kind = "server"))
+            .instrument(tracing::info_span!("write_packet"))
             .await?;
         Ok(())
     }
@@ -545,14 +545,17 @@ where
         let _client = client.clone();
         let _player = player.clone();
         let shutdown = self.shutdown.clone();
-        let mut target_join = tokio::spawn(async move {
-            tokio::select! {
-                _ = shutdown.cancelled() => Err(reject_reason("adapters", "disconnect_timeout")),
-                maybe_target = _adapters.select(&_client, &_player) => {
-                    maybe_target
+        let mut target_join = tokio::spawn(
+            async move {
+                tokio::select! {
+                    _ = shutdown.cancelled() => Err(reject_reason("adapters", "disconnect_timeout")),
+                    maybe_target = _adapters.select(&_client, &_player) => {
+                        maybe_target
+                    }
                 }
             }
-        });
+            .in_current_span(),
+        );
 
         // Next, the login phase completes by receiving the login acknowledged packet. Starting with
         // the configuration phase, the protocol becomes less strict. We primarily wait for the target

@@ -17,7 +17,7 @@ use tokio::select;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tracing::{debug, info, instrument, warn};
+use tracing::{Instrument, debug, info, instrument, warn};
 
 /// TCP listener that accepts Minecraft connections and spawns a [`Connection`] for each one.
 ///
@@ -51,7 +51,6 @@ where
         }
     }
 
-    #[instrument(skip_all)]
     pub async fn listen<A: ToSocketAddrs>(
         &mut self,
         address: A,
@@ -82,7 +81,7 @@ where
         Ok(())
     }
 
-    #[instrument(skip(self, stream))]
+    #[instrument(name = "connection", skip(self, stream, stop), fields(otel.kind = "server"))]
     async fn handle(&mut self, stream: TcpStream, addr: SocketAddr, stop: CancellationToken) {
         let connection_start = Instant::now();
 
@@ -150,36 +149,39 @@ where
         });
 
         // Create a new connection and run protocol
-        self.tracker.spawn(async move {
-            metrics::open_connections::inc();
+        self.tracker.spawn(
+            async move {
+                metrics::open_connections::inc();
 
-            // Create the connection and wait for its completion.
-            let mut connection = Connection::new(
-                &mut stream,
-                routes,
-                connection_config,
-                client_addr,
-                shutdown.clone(),
-            );
-            match connection.listen().await {
-                Ok(()) | Err(Error::ConnectionClosed) => {
-                    debug!("connection completed");
+                // Create the connection and wait for its completion.
+                let mut connection = Connection::new(
+                    &mut stream,
+                    routes,
+                    connection_config,
+                    client_addr,
+                    shutdown.clone(),
+                );
+                match connection.listen().await {
+                    Ok(()) | Err(Error::ConnectionClosed) => {
+                        debug!("connection completed");
+                    }
+                    Err(err) => {
+                        warn!(cause = err.to_string(), "failed to handle connection");
+                    }
                 }
-                Err(err) => {
-                    warn!(cause = err.to_string(), "failed to handle connection");
+
+                // flush connection and shutdown
+                if let Err(err) = stream.shutdown().await {
+                    warn!(cause = err.to_string(), "failed to shutdown connection");
                 }
-            }
+                shutdown.cancel();
+                info!("closed connection");
 
-            // flush connection and shutdown
-            if let Err(err) = stream.shutdown().await {
-                warn!(cause = err.to_string(), "failed to shutdown connection");
+                // update metrics
+                metrics::connection_duration::record(connection_start);
+                metrics::open_connections::dec();
             }
-            shutdown.cancel();
-            info!("closed connection");
-
-            // update metrics
-            metrics::connection_duration::record(connection_start);
-            metrics::open_connections::dec();
-        });
+            .in_current_span(),
+        );
     }
 }
