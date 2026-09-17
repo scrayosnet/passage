@@ -304,12 +304,12 @@ where
 
                 // 3. Cancellation.
                 () = self.shutdown.cancelled() => {
-                    return Err(ConnectionError::Cancelled);
+                    return Err(ConnectionError::shutdown());
                 },
 
                 // 4. The deadline.
                 () = expire(&mut self.lifetime), if self.lifetime.is_some() => {
-                    return Err(ConnectionError::TimedOut);
+                    return Err(ConnectionError::timeout());
                 },
 
                 // 5. Ticks -- but never while the peer must stay quiet. A keep-alive sent into a
@@ -321,11 +321,11 @@ where
                 // 6. Input. Polled even while gated: see the module docs.
                 frame = self.framed.next() => {
                     let Some(frame) = frame else {
-                        return Err(ConnectionError::PeerClosed);
+                        return Err(ConnectionError::peer());
                     };
                     self.handle_frame(handle, frame?)?;
                 },
-            };
+            }
         }
     }
 
@@ -336,7 +336,7 @@ where
         match op {
             Op::Send { encoded, version } => {
                 // The bytes were encoded against a snapshot of the version. Refuse them if the
-                // connection has moved on since, rather than writing an ID the peer resolves in
+                // connection has moved on since, rather than writing an id the peer resolves in
                 // another table.
                 if version != self.version {
                     return Err(ConnectionError::StaleEncoding {
@@ -357,6 +357,8 @@ where
             Op::SetVersion(version) => {
                 debug!(%version, "updating version");
                 self.version = version;
+                let ctx = Ctx::new(&self.state, self.phase, self.version, handle);
+                self.dispatcher.on_version(ctx)?;
             }
             Op::SetPhase(phase) => {
                 trace!(?phase, "entering phase");
@@ -394,7 +396,7 @@ where
 
     /// Handles a tick.
     fn handle_tick(&mut self, handle: &ConnectionHandle<S>) -> Result<()> {
-        self.dispatcher.on_tick(Ctx::new(&self.state, self.phase, self.version, &handle))
+        Ok(self.dispatcher.on_tick(Ctx::new(&self.state, self.phase, self.version, &handle))?)
     }
 
     /// Handles a frame (i.e., incoming packet). It checks whether the exclusive guard is violated.
@@ -407,7 +409,7 @@ where
         }
 
         let ctx = Ctx::new(&self.state, self.phase, self.version, handle);
-        self.dispatcher.on_frame(ctx, frame.id, &frame.payload)
+        Ok(self.dispatcher.on_frame(ctx, frame.id, &frame.payload)?)
     }
 
     /// Writes a packet to the socket, guarded by the connection lifetime.
@@ -436,8 +438,8 @@ async fn guarded<T>(
         biased;
 
         result = future => Ok(result?),
-        () = shutdown.cancelled() => Err(ConnectionError::Cancelled),
-        () = expire(lifetime), if lifetime.is_some() => Err(ConnectionError::TimedOut),
+        () = shutdown.cancelled() => Err(ConnectionError::shutdown()),
+        () = expire(lifetime), if lifetime.is_some() => Err(ConnectionError::timeout()),
     }
 }
 

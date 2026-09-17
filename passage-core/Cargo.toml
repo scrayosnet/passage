@@ -11,6 +11,7 @@ rust-version.workspace = true
 bytes = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
+anyhow = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true, features = ["rt", "time", "macros"] }
 tokio-util = { workspace = true, features = ["codec"] }

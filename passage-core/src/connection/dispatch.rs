@@ -1,24 +1,39 @@
-use crate::connection::{ConnectionError, Ctx, Result};
+use crate::connection::{ConnectionError, Ctx};
 
-/// The dispatcher is used by the connection to handle incoming packets.
+/// The [`Dispatcher`] is a thin wrapper around custom handler functions. These return custom errors
+/// that cannot be predicted at this point. As such, it refers to [`anyhow::Error`] instead.
+pub type DispatchError = anyhow::Error;
+
+/// The [`Dispatcher`] is a thin wrapper around custom handler functions. These return custom errors
+/// that cannot be predicted at this point. As such, it refers to [`anyhow::Error`] instead.
+type Result<T, E = DispatchError> = std::result::Result<T, E>;
+
+/// A [`Dispatcher`] is used by the connection to handle incoming packets. It is implemented for [`Box`]
+/// and [`Option`].
+///
+/// The [`Dispatcher`] is a thin wrapper around custom handler functions returning [`DispatchError`].
 pub trait Dispatcher<S> {
+    /// Called when the connection changes the protocol version. This can be used to update internal
+    /// dispatch tables.
+    fn on_version(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
+        let _ = ctx;
+        Ok(())
+    }
+
     /// Handles an incoming packet.
     fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
         let _ = (ctx, id, payload);
         Ok(())
     }
 
-    /// Handles a tick event. This is called independent of the current connection phase and may be
-    /// disabled using the [`Dispatcher::ticks`] getter.
+    /// Handles a tick event.
     fn on_tick(&self, ctx: Ctx<'_, S>) -> Result<()> {
         let _ = ctx;
         Ok(())
     }
 
-    /// Handles a connection error before the connection is closed. After the handler completes, the
-    /// connection is dropped. This should be used to send a disconnect packet to the peer (if possible).
-    ///
-    /// It collects errors from both the connection implementation and custom handlers.
+    /// Handles a connection error. It is called before the connection is closed and should be used
+    /// to send custom disconnect packets to the peer.
     fn on_error(&self, ctx: Ctx<'_, S>, error: &mut ConnectionError) -> Result<()> {
         let _ = (ctx, error);
         Ok(())
@@ -62,4 +77,14 @@ impl <S, D: Dispatcher<S>> Dispatcher<S> for Option<D> {
         };
         this.on_error(ctx, error)
     }
+}
+
+/// [`MakeDispatcher`] is a builder for [`Dispatcher`]s. In general, a connection [`Dispatcher`] is
+/// stateful. This builder allows the driver to create a new dispatcher for each request.
+pub trait MakeDispatcher<S>: Send + 'static {
+    /// The dispatcher this produces.
+    type Dispatcher: Dispatcher<S> + Send + 'static;
+
+    /// Makes one, for one connection.
+    fn make(&self) -> Self::Dispatcher;
 }

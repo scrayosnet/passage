@@ -3062,6 +3062,7 @@ dependencies = [
 name = "passage-core"
 version = "1.0.0"
 dependencies = [
+ "anyhow",
  "bytes",
  "futures",
  "thiserror",

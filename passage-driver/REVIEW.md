@@ -1,4 +1,4 @@
-# Review: `router.rs` and `server.rs`
+# Review: `router.rs` and `driver`
 
 A close read of the two modules that assemble everything else, looking for code that was duplicated,
 dead, or more complicated than the job needed. Two directions were folded in as sections of their
@@ -137,7 +137,7 @@ The crate has a stated pattern for seams, and `conn/dispatch.rs` states it: *the
 the trait, the provider implements it for its own type.* `conn` declares `Dispatcher`; `router`
 implements it for `RouterDispatcher`; no type in `conn` names the router. `MakeDispatcher` did it the
 other way round -- `server` declared it **and** implemented it for the router's type -- which was the
-only reason `server.rs` imported `Router` at all.
+only reason `driver` imported `Router` at all.
 
 **Resolved.** The impl moved to `router.rs:435-441`. `server` no longer names a router anywhere, and
 the two seams read the same way.
@@ -181,7 +181,7 @@ already rejects one level down. From the README, written before any of this:
 The admission check is that same argument one layer up. What the widening actually bought was: two
 public enums, a `Finished` whose every accessor became an `Option` for two unrelated reasons, a
 reporting hook that had to grow an arm for each layer upstream of it, and -- the real cost -- a rule
-that each layer must flatten what it knows into a vocabulary `server.rs` invents for it.
+that each layer must flatten what it knows into a vocabulary `driver` invents for it.
 `Refusal::Preamble(io::Error)` is a fair summary of nothing: the listener that produced it knew
 whether it was a truncated PROXY header or a rejected certificate, and threw that away to fit.
 
@@ -393,7 +393,7 @@ pub trait Layer<Io, Addr>: Send + Sync + 'static {
 
 `Option`, not `Result`: **`None` carries no reason because the layer that refused is the one holding
 it** -- the expired bucket, the untrusted source, the certificate that failed to verify. A `Result`
-would only let a layer summarise what it already knows into a vocabulary `server.rs` had to invent,
+would only let a layer summarise what it already knows into a vocabulary `driver` had to invent,
 and hand it somewhere further away. This is C1's conclusion, now enforced by the signature.
 
 Three stock impls carry everything: `()` (no layers, the identity), any `Fn(&Addr) -> bool` (the

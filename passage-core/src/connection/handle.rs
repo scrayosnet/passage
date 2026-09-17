@@ -174,7 +174,7 @@ impl<S> ConnectionHandle<S> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub fn send<P: Packet>(&self, version: ProtocolVersion, packet: P) -> Result<()> {
         let encoded = Frame::of(&packet, version, self.options)?;
         self.queue(Op::Send { encoded, version })
@@ -184,7 +184,7 @@ impl<S> ConnectionHandle<S> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub fn encrypt(&self, cipher: Box<dyn Cipher>) -> Result<()> {
         self.queue(Op::Encrypt(cipher))
     }
@@ -193,7 +193,7 @@ impl<S> ConnectionHandle<S> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub fn set_version(&self, version: ProtocolVersion) -> Result<()> {
         self.queue(Op::SetVersion(version))
     }
@@ -202,7 +202,7 @@ impl<S> ConnectionHandle<S> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub fn set_phase(&self, phase: Phase) -> Result<()> {
         self.queue(Op::SetPhase(phase))
     }
@@ -211,7 +211,7 @@ impl<S> ConnectionHandle<S> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub fn update(&self, change: impl FnOnce(&mut S) + Send + 'static) -> Result<()> {
         self.queue(Op::With(Box::new(change)))
     }
@@ -220,7 +220,7 @@ impl<S> ConnectionHandle<S> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub async fn with<R: Send + 'static>(
         &self,
         f: impl FnOnce(&mut S) -> R + Send + 'static,
@@ -230,7 +230,7 @@ impl<S> ConnectionHandle<S> {
             // The receiver having gone away only means nobody is listening anymore.
             let _ = tx.send(f(state));
         })))?;
-        rx.await.map_err(|_| ConnectionError::OpsClosed)
+        rx.await.map_err(|_| ConnectionError::shutdown())
     }
 
     /// Queues a [`Op::Batch`] to the connection.
@@ -245,7 +245,7 @@ impl<S> ConnectionHandle<S> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub fn batch(&self, build: impl FnOnce(&mut Batch<S>) -> Result<()>) -> Result<()> {
         let mut batch = Batch {
             ops: Vec::new(),
@@ -259,7 +259,7 @@ impl<S> ConnectionHandle<S> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub fn spawn(&self, future: impl Future<Output = Result<()>> + Send + 'static) -> Result<()> {
         self.queue(Op::Spawn {
             future: Box::pin(future),
@@ -271,7 +271,7 @@ impl<S> ConnectionHandle<S> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub fn exclusive(
         &self,
         future: impl Future<Output = Result<()>> + Send + 'static,
@@ -286,7 +286,7 @@ impl<S> ConnectionHandle<S> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub fn detach(&self, future: impl Future<Output = Result<()>> + Send + 'static)
     where
         S: Send + 'static,
@@ -303,18 +303,18 @@ impl<S> ConnectionHandle<S> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub async fn flush(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.queue(Op::Flush(tx))?;
-        rx.await.map_err(|_| ConnectionError::OpsClosed)
+        rx.await.map_err(|_|ConnectionError::shutdown())
     }
 
     /// Queues a [`Op::Fail`] to the connection.
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub fn fail(&self, error: ConnectionError) -> Result<()> {
         self.queue(Op::Fail(error))
     }
@@ -323,7 +323,7 @@ impl<S> ConnectionHandle<S> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub fn close(&self) -> Result<()> {
         self.queue(Op::Close)
     }
@@ -339,9 +339,9 @@ impl<S> ConnectionHandle<S> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::OpsClosed`] in case the connection was already closed.
+    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub fn queue(&self, op: Op<S>) -> Result<()> {
-        self.ops.send(op).map_err(|_| ConnectionError::OpsClosed)
+        self.ops.send(op).map_err(|_| ConnectionError::shutdown())
     }
 }
 

@@ -1,51 +1,49 @@
 use thiserror::Error;
 use crate::codec::CodecError;
+use crate::connection::DispatchError;
 use crate::phase::Phase;
 use crate::version::ProtocolVersion;
 
+/// The connection result type, defaulting to [`ConnectionError`].
 pub type Result<T> = std::result::Result<T, ConnectionError>;
 
+/// The reason for why the connection was closed.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum CloseReason {
+    /// The peer closed the connection.
+    Peer,
+
+    /// The connection timed out.
+    Timeout,
+
+    /// The connection was shut down (or unknown reason). This will only happen after the shutdown
+    /// token has already been canceled for any reason.
+    #[default]
+    Shutdown,
+}
+
+/// The connection module error type. It handles all errors that can occur during the connection.
 #[derive(Debug, Error)]
 pub enum ConnectionError {
     /// The codec (io) raised an error.
     #[error(transparent)]
     Codec(#[from] CodecError),
 
-    /// The connection is closed.
-    #[error("the connection is closed")]
-    OpsClosed, // TODO maybe introduce dispatch error?
+    /// A [`Dispatcher`] (i.e., custom handler) raised an error. Or an error occurred while preparing
+    /// the dispatch (e.g., packet parsing for types handlers).
+    #[error("dispatch failed: {0}")]
+    Dispatch(#[from] DispatchError),
 
-    /// The peer hung up.
-    ///
-    /// Nothing can be sent after this. It is still an ending rather than a completion because the
-    /// peer leaving is not us being finished with it -- a client that disappears while its backend
-    /// is being selected has left a selection running.
-    #[error("the peer hung up")]
-    PeerClosed,
+    /// The connection is closed for some reason.
+    #[error("the connection is closed: {reason:?}")]
+    Closed {
+        /// The reason for why the connection was closed. Defaults to [`CloseReason::Shutdown`]
+        reason: CloseReason,
+    },
 
-    /// The shutdown token was cancelled.
-    #[error("the connection was cancelled")]
-    Cancelled,
-
-    /// A deadline expired.
-    #[error("the connection ran out of time")]
-    TimedOut,
-
-    /// A queued packet was encoded for a protocol version the connection had left by the time the
-    /// operation was drained.
-    ///
-    /// A handler sees a *snapshot* of the version and encodes against it. That is only wrong if the
-    /// same handler also moved the connection first -- a send after `set_version`. Operations drain
-    /// in queue order, so the correct ordering (send, *then* switch) can never trip this; only the
-    /// mistake can.
-    ///
-    /// Without the check those bytes would go out with an ID the peer resolves against a different
-    /// table, which is a desynchronised connection with no diagnostic on either side.
-    ///
-    /// There is no phase counterpart, and deliberately so: a packet belongs to exactly one phase
-    /// ([`Packet::PHASE`](crate::packet::Packet::PHASE)), so "the phase it was encoded for" was
-    /// never a snapshot of anything -- it was the packet's own identity, and checking a constant
-    /// against the connection only ever restated what the type already said.
+    /// A packet was queued for the peer at a different protocol version that the connection is currently
+    /// in. This might occur when an async handler sends a packet while another handler updated the
+    /// version or queued a version update.
     #[error(
         "`{packet}` was encoded for version {encoded_version}, but the connection reached version \
          {version} before it was written"
@@ -53,22 +51,38 @@ pub enum ConnectionError {
     StaleEncoding {
         /// The packet that was queued.
         packet: &'static str,
+
         /// The version it was encoded for.
         encoded_version: ProtocolVersion,
+
         /// The version the connection is in now.
         version: ProtocolVersion,
     },
 
-    /// A packet arrived while the peer was required to stay quiet.
-    ///
-    /// A connection gates reads while an exclusive handler task is in flight (an authentication call,
-    /// a session-server round trip). A well-behaved peer waits for the answer, so a frame arriving
-    /// in that window was sent too early -- which is a protocol break, not backpressure.
+    /// A packet arrived while the peer was required to stay quiet (i.e., exclusive handlers).
     #[error("packet id {id:#04x} arrived in phase {phase:?} while the peer had to wait")]
     EarlyPacket {
         /// The phase the connection was in.
         phase: Phase,
+
         /// The ID of the packet that arrived too early.
         id: i32,
     },
+}
+
+impl ConnectionError {
+    /// Creates a new closed error because the connection was shut down.
+    pub fn shutdown() -> Self {
+        Self::Closed { reason: CloseReason::Shutdown }
+    }
+
+    /// Creates a new closed error because the peer closed the connection.
+    pub fn peer() -> Self {
+        Self::Closed { reason: CloseReason::Peer }
+    }
+
+    /// Creates a new closed error because the connection timed out.
+    pub fn timeout() -> Self {
+        Self::Closed { reason: CloseReason::Timeout }
+    }
 }

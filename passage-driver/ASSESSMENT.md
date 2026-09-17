@@ -263,7 +263,7 @@ message. The crate's own tests already do this -- `tests/common` grows a ~40-lin
 which `REVIEW.md` §F2 calls "arguably the better test". It is a worse test: it asserts on prose.
 
 The review's argument for removing `on_finish` (§C1, §F2) is that a hook told about every fate forces
-each layer to flatten what it knows into a vocabulary `server.rs` invents. **That argument is
+each layer to flatten what it knows into a vocabulary `driver` invents. **That argument is
 correct and does not apply to what was removed.** A hook carrying *only what the driver knows* --
 `(Duration, &Result<(), Ending>, Option<(ProtocolVersion, Phase)>)`, which is precisely
 `log_ending`'s own signature -- imposes no vocabulary on any layer, because no layer reports through
