@@ -70,8 +70,9 @@ pub fn ids(version: ProtocolVersion, table: &[(ProtocolVersion, i32)]) -> Option
 /// Finds the first out-of-order id in the packet ids definition. The packet ids should be ordered
 /// by the protocol version.
 #[must_use]
-pub fn check_ids_unordered(ids: &'static [(ProtocolVersion, i32)]) -> Option<(ProtocolVersion, ProtocolVersion)> {
-    ids.windows(2).find_map(|pair| {
-        (pair[0].0 <= pair[1].0).then_some((pair[0].0, pair[1].0))
-    })
+pub fn check_ids_unordered(
+    ids: &'static [(ProtocolVersion, i32)],
+) -> Option<(ProtocolVersion, ProtocolVersion)> {
+    ids.windows(2)
+        .find_map(|pair| (pair[0].0 <= pair[1].0).then_some((pair[0].0, pair[1].0)))
 }

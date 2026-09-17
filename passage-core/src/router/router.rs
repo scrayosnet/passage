@@ -1,10 +1,10 @@
-use std::sync::Arc;
-use anyhow::Context;
 use crate::connection::{ConnectionError, Ctx, DispatchError};
-use crate::packet::{check_ids_unordered, Packet};
-use crate::router::{Entry, ErrorHandler, TickHandler, ErasedHandler, Table, RouterError};
+use crate::packet::{Packet, check_ids_unordered};
+use crate::router::{Entry, ErasedHandler, ErrorHandler, RouterError, Table, TickHandler};
 use crate::version::ProtocolVersion;
 use crate::wire::Reader;
+use anyhow::Context;
+use std::sync::Arc;
 
 /// The most packets a router can hold, bounded by the table's index width.
 const MAX_PACKETS: usize = u16::MAX as usize;
@@ -63,7 +63,11 @@ impl<S: 'static> RouterBuilder<S> {
         }
 
         if let Some((previous, version)) = check_ids_unordered(P::IDS) {
-            return Err(RouterError::UnorderedIds { packet: P::NAME, previous, version })
+            return Err(RouterError::UnorderedIds {
+                packet: P::NAME,
+                previous,
+                version,
+            });
         }
 
         // Creates the erased handler from the given handler. It tries to decode the packet from the
@@ -72,10 +76,17 @@ impl<S: 'static> RouterBuilder<S> {
         let dispatch: ErasedHandler<S> = Box::new(move |ctx: Ctx<'_, S>, payload: &[u8]| {
             let mut reader = Reader::new(payload).with_options(ctx.handle.options());
             let packet = P::decode(&mut reader, ctx.version).context("packet failed to decode")?;
-            reader.finish(P::NAME).context("packet failed to consume buffer")?;
+            reader
+                .finish(P::NAME)
+                .context("packet failed to consume buffer")?;
             handler(ctx, packet)
         });
-        self.entries.push(Entry { name: P::NAME, phase: P::PHASE, ids: P::IDS, dispatch });
+        self.entries.push(Entry {
+            name: P::NAME,
+            phase: P::PHASE,
+            ids: P::IDS,
+            dispatch,
+        });
         Ok(self)
     }
 
@@ -93,7 +104,10 @@ impl<S: 'static> RouterBuilder<S> {
     #[must_use]
     pub fn on_error(
         mut self,
-        handler: impl Fn(Ctx<'_, S>, &ConnectionError) -> Result<(), DispatchError> + Send + Sync + 'static,
+        handler: impl Fn(Ctx<'_, S>, &ConnectionError) -> Result<(), DispatchError>
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.on_error = Some(Arc::new(handler));
         self

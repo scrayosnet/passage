@@ -1,9 +1,9 @@
-mod handle;
-mod error;
 mod connection;
 mod dispatch;
+mod error;
+mod handle;
 
-pub use handle::*;
-pub use error::*;
 pub use connection::*;
 pub use dispatch::*;
+pub use error::*;
+pub use handle::*;

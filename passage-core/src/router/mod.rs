@@ -1,9 +1,9 @@
-mod table;
+mod dispatch;
 mod error;
 mod router;
-mod dispatch;
+mod table;
 
-pub use table::*;
+pub use dispatch::*;
 pub use error::*;
 pub use router::*;
-pub use dispatch::*;
+pub use table::*;

@@ -1,12 +1,12 @@
 pub mod codec;
 pub mod connection;
 mod direction;
-pub mod router;
+pub mod driver;
 mod packet;
 mod phase;
+pub mod router;
 mod version;
 pub mod wire;
-pub mod driver;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

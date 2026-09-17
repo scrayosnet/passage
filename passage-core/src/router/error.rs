@@ -1,6 +1,6 @@
-use thiserror::Error;
 use crate::packet::Phase;
 use crate::version::ProtocolVersion;
+use thiserror::Error;
 
 /// A result type that can be returned from a [`Router`] handler.
 pub type Result<T, E = RouterError> = std::result::Result<T, E>;
@@ -35,7 +35,9 @@ pub enum RouterError {
     },
 
     /// Two packets resolve to the same ID in the same phase and version.
-    #[error("packets `{first}` and `{second}` conflict id {id:#04x} for phase {phase:?} and version {version}")]
+    #[error(
+        "packets `{first}` and `{second}` conflict id {id:#04x} for phase {phase:?} and version {version}"
+    )]
     IdCollision {
         /// The packet that claimed the ID first.
         first: &'static str,

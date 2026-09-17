@@ -2,10 +2,10 @@ use crate::codec::{Cipher, Frame};
 use crate::connection::error::{ConnectionError, Result};
 use crate::packet::{Packet, Phase};
 use crate::version::ProtocolVersion;
+use crate::wire::Options;
 use futures::future::BoxFuture;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
-use crate::wire::Options;
 
 /// An operation is used to mutate the connection state asynchronously without exclusive locks. Handlers
 /// get an (unbounded) channel sender to pass operations on.
@@ -137,7 +137,7 @@ pub struct ConnectionHandle<S> {
     options: Options,
 }
 
-impl <S> Clone for ConnectionHandle<S> {
+impl<S> Clone for ConnectionHandle<S> {
     fn clone(&self) -> Self {
         Self {
             ops: self.ops.clone(),
@@ -307,7 +307,7 @@ impl<S> ConnectionHandle<S> {
     pub async fn flush(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.queue(Op::Flush(tx))?;
-        rx.await.map_err(|_|ConnectionError::shutdown())
+        rx.await.map_err(|_| ConnectionError::shutdown())
     }
 
     /// Queues a [`Op::Fail`] to the connection.
@@ -367,7 +367,17 @@ pub struct Ctx<'a, S> {
 }
 
 impl<'a, S> Ctx<'a, S> {
-    pub(crate) fn new(state: &'a S, phase: Phase, version: ProtocolVersion, handle: &'a ConnectionHandle<S>) -> Self {
-        Self { state, phase, version, handle }
+    pub(crate) fn new(
+        state: &'a S,
+        phase: Phase,
+        version: ProtocolVersion,
+        handle: &'a ConnectionHandle<S>,
+    ) -> Self {
+        Self {
+            state,
+            phase,
+            version,
+            handle,
+        }
     }
 }

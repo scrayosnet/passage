@@ -1,8 +1,8 @@
-use thiserror::Error;
 use crate::codec::CodecError;
 use crate::connection::DispatchError;
 use crate::phase::Phase;
 use crate::version::ProtocolVersion;
+use thiserror::Error;
 
 /// The connection result type, defaulting to [`ConnectionError`].
 pub type Result<T> = std::result::Result<T, ConnectionError>;
@@ -73,16 +73,22 @@ pub enum ConnectionError {
 impl ConnectionError {
     /// Creates a new closed error because the connection was shut down.
     pub fn shutdown() -> Self {
-        Self::Closed { reason: CloseReason::Shutdown }
+        Self::Closed {
+            reason: CloseReason::Shutdown,
+        }
     }
 
     /// Creates a new closed error because the peer closed the connection.
     pub fn peer() -> Self {
-        Self::Closed { reason: CloseReason::Peer }
+        Self::Closed {
+            reason: CloseReason::Peer,
+        }
     }
 
     /// Creates a new closed error because the connection timed out.
     pub fn timeout() -> Self {
-        Self::Closed { reason: CloseReason::Timeout }
+        Self::Closed {
+            reason: CloseReason::Timeout,
+        }
     }
 }

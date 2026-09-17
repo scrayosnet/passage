@@ -56,7 +56,7 @@ impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
     }
 }
 
-impl <S, D: Dispatcher<S>> Dispatcher<S> for Option<D> {
+impl<S, D: Dispatcher<S>> Dispatcher<S> for Option<D> {
     fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
         let Some(this) = self else {
             return Ok(());

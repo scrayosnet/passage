@@ -1,17 +1,20 @@
-use std::sync::Arc;
-use tracing::warn;
 use crate::connection::{ConnectionError, Ctx, DispatchError};
 use crate::phase::Phase;
 use crate::version::ProtocolVersion;
+use std::sync::Arc;
+use tracing::warn;
 
 /// The dispatch handler type with an erased packet type.
-pub type ErasedHandler<S> = Box<dyn for<'c> Fn(Ctx<'c, S>, &[u8]) -> Result<(), DispatchError> + Send + Sync>;
+pub type ErasedHandler<S> =
+    Box<dyn for<'c> Fn(Ctx<'c, S>, &[u8]) -> Result<(), DispatchError> + Send + Sync>;
 
 /// The tick handler type.
-pub type TickHandler<S> = Arc<dyn for<'c> Fn(Ctx<'c, S>) -> Result<(), DispatchError> + Send + Sync>;
+pub type TickHandler<S> =
+    Arc<dyn for<'c> Fn(Ctx<'c, S>) -> Result<(), DispatchError> + Send + Sync>;
 
 /// The error handler type.
-pub type ErrorHandler<S> = Arc<dyn for<'c> Fn(Ctx<'c, S>, &ConnectionError) -> Result<(), DispatchError> + Send + Sync>;
+pub type ErrorHandler<S> =
+    Arc<dyn for<'c> Fn(Ctx<'c, S>, &ConnectionError) -> Result<(), DispatchError> + Send + Sync>;
 
 /// A packet handler entry. It contains the packet meta and dispatch handler.
 pub struct Entry<S> {
@@ -82,7 +85,9 @@ impl Table {
             table[slot] = Some(index as u16);
         }
 
-        Self { by_phase: by_phase.map(Vec::into_boxed_slice) }
+        Self {
+            by_phase: by_phase.map(Vec::into_boxed_slice),
+        }
     }
 
     /// Gets the dispatch handler for the given packet ID and phase. Returns `None` if no handler is

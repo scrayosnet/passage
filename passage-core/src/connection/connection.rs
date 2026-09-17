@@ -1,7 +1,8 @@
 use crate::codec::{Frame, FrameCodec};
-use crate::connection::{ConnectionHandle, Ctx, Dispatcher, Op, ConnectionError, Result};
+use crate::connection::{ConnectionError, ConnectionHandle, Ctx, Dispatcher, Op, Result};
 use crate::packet::Phase;
 use crate::version::ProtocolVersion;
+use crate::wire::Options as WireOptions;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use futures::{SinkExt, StreamExt, TryFutureExt};
@@ -14,7 +15,6 @@ use tokio::time::{Instant, Sleep, sleep_until};
 use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace};
-use crate::wire::Options as WireOptions;
 
 /// The default timeout for the `on_error` dispatcher hook.
 const DEFAULT_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -195,20 +195,14 @@ where
     }
 
     /// Creates a new connection.
-    fn new(
-        io: T,
-        dispatcher: D,
-        state: S,
-        config: Options,
-        shutdown: CancellationToken,
-    ) -> Self {
-        let ticker = config.tick_interval
-            .map(|interval| {
-                let mut ticker = tokio::time::interval_at(Instant::now() + interval, interval);
-                ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                ticker
-            });
-        let lifetime = config.max_lifetime
+    fn new(io: T, dispatcher: D, state: S, config: Options, shutdown: CancellationToken) -> Self {
+        let ticker = config.tick_interval.map(|interval| {
+            let mut ticker = tokio::time::interval_at(Instant::now() + interval, interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            ticker
+        });
+        let lifetime = config
+            .max_lifetime
             .map(|after| Box::pin(sleep_until(Instant::now() + after)));
 
         Self {
@@ -247,7 +241,8 @@ where
     /// Runs the connection loop. On error, it stops all handlers and starts the graceful shutdown.
     async fn serve(&mut self) -> Result<()> {
         // Run the handlers until they complete or raise an error.
-        let (handle, mut ops) = ConnectionHandle::new(self.shutdown.clone(), self.config.wire_options);
+        let (handle, mut ops) =
+            ConnectionHandle::new(self.shutdown.clone(), self.config.wire_options);
         let Err(mut error) = self.drive(&handle, &mut ops).await else {
             return Ok(());
         };
@@ -258,8 +253,12 @@ where
 
         // Restart the drive with the error handler.
         self.shutdown = CancellationToken::new();
-        self.lifetime = self.config.close_timeout.map(|d| Box::pin(sleep_until(Instant::now() + d)));
-        let (handle, mut ops) = ConnectionHandle::new(self.shutdown.clone(), self.config.wire_options);
+        self.lifetime = self
+            .config
+            .close_timeout
+            .map(|d| Box::pin(sleep_until(Instant::now() + d)));
+        let (handle, mut ops) =
+            ConnectionHandle::new(self.shutdown.clone(), self.config.wire_options);
 
         // Run the error hook and settle its results.
         let ctx = Ctx::new(&self.state, self.phase, self.version, &handle);
@@ -278,7 +277,11 @@ where
     }
 
     /// Drive the connection, using the provided handle and operations channel pair to schedule operations.
-    async fn drive(&mut self, handle: &ConnectionHandle<S>, ops: &mut mpsc::UnboundedReceiver<Op<S>>) -> Result<()> {
+    async fn drive(
+        &mut self,
+        handle: &ConnectionHandle<S>,
+        ops: &mut mpsc::UnboundedReceiver<Op<S>>,
+    ) -> Result<()> {
         loop {
             tokio::select! {
                 biased;
@@ -332,7 +335,11 @@ where
     /// Handles a single operation. It returns [`ControlFlow::Break`] if the connection should be
     /// closed (without raising an error). On error, it returns without handing partially finished
     /// operations.
-    async fn handle_op(&mut self, handle: &ConnectionHandle<S>, op: Op<S>) -> Result<ControlFlow<()>> {
+    async fn handle_op(
+        &mut self,
+        handle: &ConnectionHandle<S>,
+        op: Op<S>,
+    ) -> Result<ControlFlow<()>> {
         match op {
             Op::Send { encoded, version } => {
                 // The bytes were encoded against a snapshot of the version. Refuse them if the
@@ -396,7 +403,9 @@ where
 
     /// Handles a tick.
     fn handle_tick(&mut self, handle: &ConnectionHandle<S>) -> Result<()> {
-        Ok(self.dispatcher.on_tick(Ctx::new(&self.state, self.phase, self.version, &handle))?)
+        Ok(self
+            .dispatcher
+            .on_tick(Ctx::new(&self.state, self.phase, self.version, &handle))?)
     }
 
     /// Handles a frame (i.e., incoming packet). It checks whether the exclusive guard is violated.
@@ -456,7 +465,7 @@ async fn tick(ticker: &mut Option<tokio::time::Interval>) {
     match ticker {
         Some(ticker) => {
             ticker.tick().await;
-        },
+        }
         None => std::future::pending().await,
     }
 }

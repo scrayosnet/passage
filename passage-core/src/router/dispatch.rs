@@ -1,9 +1,9 @@
-use std::sync::Arc;
-use anyhow::bail;
-use tracing::trace;
 use crate::connection::{ConnectionError, Ctx, DispatchError, Dispatcher, MakeDispatcher};
 use crate::router::{Router, UnknownPolicy};
 use crate::version::ProtocolVersion;
+use anyhow::bail;
+use std::sync::Arc;
+use tracing::trace;
 
 /// A stateful [`Dispatcher`] based on a [`Router`]. It uses the router's tables to dispatch packets.
 pub struct RouterDispatcher<S> {
@@ -42,7 +42,10 @@ impl<S: 'static> RouterDispatcher<S> {
         // We can assume that the `ProtocolVersion::UNKNOWN` table is either the first table or not
         // configured. In both cases, this will work: Either it is correct or the caller will re-compute
         // it when calling with a different protocol version.
-        Self { router: router.into(), table: (ProtocolVersion::UNKNOWN, 0) }
+        Self {
+            router: router.into(),
+            table: (ProtocolVersion::UNKNOWN, 0),
+        }
     }
 }
 
@@ -72,7 +75,11 @@ impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
             }
             // While not ideal, we send an 'anyhow' error from the library code here. This makes the
             // error handling easier.
-            bail!("unknown packet ID {id} received in phase {:?} at version {:?}", ctx.phase, ctx.version);
+            bail!(
+                "unknown packet ID {id} received in phase {:?} at version {:?}",
+                ctx.phase,
+                ctx.version
+            );
         };
 
         // Tracing lives here rather than on the connection, because this is where the name is
