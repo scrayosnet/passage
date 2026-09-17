@@ -2,7 +2,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use crate::connection::{ConnectionError, Ctx, DispatchError};
 use crate::packet::{check_ids_unordered, Packet};
-use crate::router::{Entry, ErrorHandler, TickHandler, ErasedHandler, Table, BuildError};
+use crate::router::{Entry, ErrorHandler, TickHandler, ErasedHandler, Table, RouterError};
 use crate::version::ProtocolVersion;
 use crate::wire::Reader;
 
@@ -52,18 +52,18 @@ impl<S: 'static> RouterBuilder<S> {
     pub fn on<P: Packet>(
         mut self,
         handler: impl Fn(Ctx<'_, S>, P) -> Result<(), DispatchError> + Send + Sync + 'static,
-    ) -> Result<Self, BuildError> {
+    ) -> Result<Self, RouterError> {
         // Ensure that the packet may be registered to the router. The router can store at most
         // `MAX_PACKETS` packets. The packet IDs must also be ordered ascending by their protocol version.
         if self.entries.len() >= MAX_PACKETS {
-            return Err(BuildError::TooManyPackets {
+            return Err(RouterError::TooManyPackets {
                 count: self.entries.len() + 1,
                 limit: MAX_PACKETS,
             });
         }
 
         if let Some((previous, version)) = check_ids_unordered(P::IDS) {
-            return Err(BuildError::UnorderedIds { packet: P::NAME, previous, version })
+            return Err(RouterError::UnorderedIds { packet: P::NAME, previous, version })
         }
 
         // Creates the erased handler from the given handler. It tries to decode the packet from the
@@ -79,7 +79,7 @@ impl<S: 'static> RouterBuilder<S> {
         Ok(self)
     }
 
-    /// Registers the tick handler, used for keep-alives and deadlines.
+    /// Registers the tick handler, used for keep alive packets and deadlines.
     #[must_use]
     pub fn on_tick(
         mut self,
@@ -100,6 +100,7 @@ impl<S: 'static> RouterBuilder<S> {
     }
 
     /// Builds the (immutable) router from the handlers, optimizing the handler layout for fast dispatch.
+    /// A router should have at least one handler registered.
     pub fn build(self) -> Router<S> {
         let entries = self.entries.into_boxed_slice();
         let breakpoints = Table::breakpoints(&entries);
@@ -107,9 +108,6 @@ impl<S: 'static> RouterBuilder<S> {
         for version in breakpoints {
             tables.push((version, Table::new(entries.as_ref(), version)));
         }
-
-        // TODO ensure at least one entry?
-
         Router {
             unknown: self.unknown,
             entries,

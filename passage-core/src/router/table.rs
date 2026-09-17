@@ -4,45 +4,34 @@ use crate::connection::{ConnectionError, Ctx, DispatchError};
 use crate::phase::Phase;
 use crate::version::ProtocolVersion;
 
-// TODO add additional handler error type!
-
-/// A decoder and handler pair with the packet type erased.
-///
-/// A handler is synchronous by construction: everything it wants to happen it queues as an
-/// [`Op`](crate::conn::Op), and anything it has to wait for it hands to
-/// [`Ctx::spawn`](crate::conn::Ctx::spawn) or [`Ctx::exclusive`](crate::conn::Ctx::exclusive).
-///
-/// These three aliases used to be three public traits, each with a single `call` method and a
-/// blanket impl over the corresponding `Fn` -- the same construction written out three times, for a
-/// capability nothing used: a handler is a closure or an `fn` item. Written as the function types
-/// they always were, the erasure is visible where it happens and `.on::<P, _>(f)` loses the `_` that
-/// only ever stood for the handler's own type.
+/// The dispatch handler type with an erased packet type.
 pub type ErasedHandler<S> = Box<dyn for<'c> Fn(Ctx<'c, S>, &[u8]) -> Result<(), DispatchError> + Send + Sync>;
 
-/// The handler that runs on every tick instead of on a packet. Shared, so a dispatcher can hold the
-/// router rather than a copy of it.
+/// The tick handler type.
 pub type TickHandler<S> = Arc<dyn for<'c> Fn(Ctx<'c, S>) -> Result<(), DispatchError> + Send + Sync>;
 
-/// The handler that runs when a connection ends for a reason nobody asked for.
-///
-/// See [`Dispatcher::on_error`] for what it may do and what it is called for.
+/// The error handler type.
 pub type ErrorHandler<S> = Arc<dyn for<'c> Fn(Ctx<'c, S>, &ConnectionError) -> Result<(), DispatchError> + Send + Sync>;
 
+/// A packet handler entry. It contains the packet meta and dispatch handler.
 pub struct Entry<S> {
+    /// The packet name used for tracing.
     pub(crate) name: &'static str,
+
+    /// The packet phase used to get the dispatch table.
     pub(crate) phase: Phase,
-    /// The packet's own ID table, newest first. Read both to resolve an ID and to find the
-    /// versions at which dispatch changes.
+
+    /// The packet declared ID table (ordered).
     pub(crate) ids: &'static [(ProtocolVersion, i32)],
+
+    /// The packet dispatch handler.
     pub(crate) dispatch: ErasedHandler<S>,
 }
 
-/// The dispatch table for one interval of protocol versions: `phase -> id -> index into the
-/// router's entries`.
-///
-/// Indices rather than pointers, so a lookup is two loads with no reference count to touch, and so
-/// the table itself is free of `S` and can be shared as-is.
+/// The dispatch table for one interval of protocol versions.
 pub struct Table {
+    /// The phase table. It has one id map per phase. The map is represented as a list of optional
+    /// indices into the router dispatch handler (i.e., [`Entry`]).
     pub(crate) by_phase: [Box<[Option<u16>]>; Phase::COUNT],
 }
 
@@ -96,7 +85,8 @@ impl Table {
         Self { by_phase: by_phase.map(Vec::into_boxed_slice) }
     }
 
-    /// Gets the
+    /// Gets the dispatch handler for the given packet ID and phase. Returns `None` if no handler is
+    /// registered.
     pub fn lookup(&self, phase: Phase, id: i32) -> Option<u16> {
         let slot = usize::try_from(id).ok()?;
         *self.by_phase[phase.index()].get(slot)?
