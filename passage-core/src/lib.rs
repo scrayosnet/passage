@@ -1,10 +1,10 @@
 pub mod codec;
 pub mod connection;
 mod direction;
-pub mod driver;
 mod packet;
 mod phase;
 pub mod router;
+pub mod server;
 mod version;
 pub mod wire;
 

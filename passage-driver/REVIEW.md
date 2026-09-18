@@ -29,7 +29,7 @@ At a glance:
 | C3 | `elapsed` excluded queueing delay | the clock starts in the accept loop |
 | C4 | Two tasks per connection | one, with `catch_unwind` |
 | D | Four things built four ways | `X::builder()` for all three, typestate on the server |
-| E | Boxes that should be parameters, and boxes that should not | `Driver` propagates; `Router` erases |
+| E | Boxes that should be parameters, and boxes that should not | `Server` propagates; `Router` erases |
 | F1 | Two bespoke mechanisms for one job, and a central reporter | one `Layer` stack; the driver logs its own |
 
 86 tests pass, plus doctests; clippy and rustfmt are clean and `cargo doc` emits no warnings.
@@ -246,7 +246,7 @@ There is now one answer, `X::builder()`, and the nine-line example is one chain.
 
 ### D1. `Server::builder()`
 
-**Resolved.** `Driver` *is* the builder: `Server<L, F, M, A, R>` starts as `Server<(), (), ()>` and
+**Resolved.** `Server` *is* the builder: `Server<L, F, M, A, R>` starts as `Server<(), (), ()>` and
 each of the three required setters replaces one parameter, so `run()` -- and `IntoFuture`, and
 therefore `.await` -- exist only once a listener, something to dispatch to and a state factory have
 all been given. "You cannot forget one" survives the move away from positional arguments, which is
@@ -313,9 +313,9 @@ outward until it reaches something that has to erase it anyway.
 | `Op::With`, `Op::Spawn`, `Op::Encrypt` | `Box<dyn …>` | **kept erased** -- one queue holds all of them |
 | `RouterDispatcher::table` | `Arc<Table>` | **indirection removed entirely** -- B1 |
 
-### E1. `Driver`'s callbacks are type parameters, not boxes
+### E1. `Server`'s callbacks are type parameters, not boxes
 
-A `Driver` is built and awaited in a single expression; nobody stores one or names its type. `state`
+A `Server` is built and awaited in a single expression; nobody stores one or names its type. `state`
 was already `Arc<F>` in the very same struct, so the boxed callbacks beside it were the
 inconsistency.
 
@@ -331,14 +331,14 @@ was **dropped from the struct entirely** and recovered on the impl blocks from `
 `where F: Fn(&L::Addr) -> S` constrains it through the `Fn` bound's associated type. Checked by
 compiling a reduction, because the rule that governs it (an impl parameter must be constrained by the
 self type, the trait ref *or a predicate*) is exactly the kind that reads as if it might not apply.
-`Driver` lost a parameter instead of gaining a marker field.
+`Server` lost a parameter instead of gaining a marker field.
 
 The one cost worth recording: a closure passed to a setter whose bound is a *trait* rather than `Fn`
 needs its parameter annotated, because inference only flows from a bound naming `Fn` directly. That
 is why `.state(|addr| ...)` infers and `.layer(|addr: &SocketAddr| ...)` does not.
 ### E2. `Router`'s handlers stay erased -- and this is the case that proves the rule
 
-Making them parameters gives `Router<S, T, E>`. Unlike `Driver`, `Router` is named constantly: it
+Making them parameters gives `Router<S, T, E>`. Unlike `Server`, `Router` is named constantly: it
 lives in an `Arc` for the life of the process, it is a field in an application struct, and it is the
 return type of a factory function. The demo's is `fn router() -> Result<Router<Session>, BuildError>`.
 
@@ -423,7 +423,7 @@ where it refuses them, instead of stashing a label in `Session::refused` for a r
 later. (The field stays: it is what `Outcome` hands to a caller driving a connection without the
 accept loop, and `tests/ending.rs` asserts on it.)
 
-`Finished`, `Report`, `Server::on_finish` and `demo::log_completion` are gone, and `Driver` lost a
+`Finished`, `Report`, `Server::on_finish` and `demo::log_completion` are gone, and `Server` lost a
 type parameter with them.
 
 **The cost, stated plainly.** The driver's own reporting is now the only end-of-connection record, so
@@ -435,7 +435,7 @@ since the log line is now the feature. `tests/common` grows a ~40-line recorder 
 
 ## G. Smaller things
 
-* **`Driver` was not `#[must_use]`.** Now it is, on the type, which also covers every setter --
+* **`Server` was not `#[must_use]`.** Now it is, on the type, which also covers every setter --
   `Server::builder()…` dropped without awaiting warns. (The per-method `#[must_use]`s came off;
   clippy flags them as redundant once the type carries one.)
 * **`Options` is now `Copy`.** Every field already was, so the per-connection `Clone` read
@@ -467,7 +467,7 @@ Five places, all where writing the code showed the proposal was not quite right:
    type -- and a TLS layer could then hand the state factory a verified client identity instead of a
    socket address. It is not worth it yet: `.state()` would bind to the stack's output rather than
    the listener's, so adding a layer later would silently change what the factory receives.
-3. **D1 has no separate `ServerBuilder` type and no `.serve()`.** `Driver` is the builder; a second
+3. **D1 has no separate `ServerBuilder` type and no `.serve()`.** `Server` is the builder; a second
    type would have been two names for one thing, and `.serve()` a third name for `run()`/`.await`.
 4. **D2 forwards the connection knobs instead of giving `Options` a builder**, even though
    D3 happened -- see D2 for why.

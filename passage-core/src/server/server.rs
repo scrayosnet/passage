@@ -1,7 +1,7 @@
 use crate::connection::{Connection, Dispatcher, MakeDispatcher, Options as ConnectionConfig};
-use crate::driver::listener::Listener;
-use crate::driver::{Layer, Stack};
 use crate::phase::Phase;
+use crate::server::listener::Listener;
+use crate::server::{Layer, Stack};
 use crate::version::ProtocolVersion;
 use crate::wire::Options as WireOptions;
 use futures::FutureExt;
@@ -23,11 +23,11 @@ use tracing::{Instrument, Span, debug, error, field, info_span, warn};
 /// close, so the loop must neither give up nor spin.
 const ACCEPT_BACKOFF: Duration = Duration::from_secs(1);
 
-/// The [`Driver`] accepts new connections using the configured listener, passes it through the
+/// The [`Server`] accepts new connections using the configured listener, passes it through the
 /// configured layers, and creates a new connection from it. The connection is handled in its separate
 /// async context.
-#[must_use = "a driver does nothing until it is awaited"]
-pub struct Driver<L = (), F = (), M = (), A = ()> {
+#[must_use = "a server does nothing until it is awaited"]
+pub struct Server<L = (), F = (), M = (), A = ()> {
     /// The internal listener to accept new connections.
     listener: L,
 
@@ -49,13 +49,13 @@ pub struct Driver<L = (), F = (), M = (), A = ()> {
     /// How long to wait for connections to gracefully shut down before they are dropped.
     drain: Option<Duration>,
 
-    /// The number of connections the driver can accept at once.
+    /// The number of connections the server can accept at once.
     limit: Option<Arc<Semaphore>>,
 }
 
-impl Default for Driver<(), (), ()> {
+impl Default for Server<(), (), ()> {
     fn default() -> Self {
-        Driver {
+        Server {
             listener: (),
             state: (),
             dispatcher: (),
@@ -68,10 +68,10 @@ impl Default for Driver<(), (), ()> {
     }
 }
 
-impl<L: Listener, F, M, A: Layer<L::Io, L::Addr>> Driver<L, F, M, A> {
-    /// Sets the driver listener.
-    pub fn listener<L2>(self, listener: L2) -> Driver<L2, F, M, A> {
-        Driver {
+impl<L: Listener, F, M, A: Layer<L::Io, L::Addr>> Server<L, F, M, A> {
+    /// Sets the server listener.
+    pub fn listener<L2>(self, listener: L2) -> Server<L2, F, M, A> {
+        Server {
             listener,
             state: self.state,
             dispatcher: self.dispatcher,
@@ -83,9 +83,9 @@ impl<L: Listener, F, M, A: Layer<L::Io, L::Addr>> Driver<L, F, M, A> {
         }
     }
 
-    /// Sets the driver dispatch factory.
-    pub fn dispatch<M2>(self, dispatcher: M2) -> Driver<L, F, M2, A> {
-        Driver {
+    /// Sets the server dispatch factory.
+    pub fn dispatch<M2>(self, dispatcher: M2) -> Server<L, F, M2, A> {
+        Server {
             listener: self.listener,
             state: self.state,
             dispatcher,
@@ -139,27 +139,27 @@ impl<L: Listener, F, M, A: Layer<L::Io, L::Addr>> Driver<L, F, M, A> {
         self
     }
 
-    /// Sets the shutdown token for the driver.
+    /// Sets the shutdown token for the server.
     pub fn graceful_shutdown(mut self, shutdown: CancellationToken) -> Self {
         self.shutdown = shutdown;
         self
     }
 
-    /// Sets the graceful shutdown timeout for the driver.
+    /// Sets the graceful shutdown timeout for the server.
     pub fn drain_timeout(mut self, timeout: Option<Duration>) -> Self {
         self.drain = timeout;
         self
     }
 
-    /// Sets the max connections for the driver.
+    /// Sets the max connections for the server.
     pub fn max_connections(mut self, limit: Option<usize>) -> Self {
         self.limit = limit.map(|limit| Arc::new(Semaphore::new(limit)));
         self
     }
 
-    /// Adds a new layer to the driver, stacked behind the existing ones.
-    pub fn layer<A2: Layer<A::Io, L::Addr>>(self, layer: A2) -> Driver<L, F, M, Stack<A, A2>> {
-        Driver {
+    /// Adds a new layer to the server, stacked behind the existing ones.
+    pub fn layer<A2: Layer<A::Io, L::Addr>>(self, layer: A2) -> Server<L, F, M, Stack<A, A2>> {
+        Server {
             listener: self.listener,
             state: self.state,
             dispatcher: self.dispatcher,
@@ -171,12 +171,12 @@ impl<L: Listener, F, M, A: Layer<L::Io, L::Addr>> Driver<L, F, M, A> {
         }
     }
 
-    /// Sets the state factory for the driver.
-    pub fn state<S, F2>(self, state: F2) -> Driver<L, F2, M, A>
+    /// Sets the state factory for the server.
+    pub fn state<S, F2>(self, state: F2) -> Server<L, F2, M, A>
     where
         F2: Fn(&L::Addr) -> S,
     {
-        Driver {
+        Server {
             listener: self.listener,
             state,
             dispatcher: self.dispatcher,
@@ -189,7 +189,7 @@ impl<L: Listener, F, M, A: Layer<L::Io, L::Addr>> Driver<L, F, M, A> {
     }
 }
 
-impl<L, S, F, M, A> Driver<L, F, M, A>
+impl<L, S, F, M, A> Server<L, F, M, A>
 where
     L: Listener,
     S: Send + 'static,
@@ -197,10 +197,10 @@ where
     M: MakeDispatcher<S>,
     A: Layer<L::Io, L::Addr>,
 {
-    /// Serves the [`Driver`] to accept new connections. It completes once the shutdown token is
+    /// Serves the [`Server`] to accept new connections. It completes once the shutdown token is
     /// canceled. Connections are allowed to complete gracefully up to the configured timeout.
     pub async fn serve(mut self) {
-        // The shared driver state, used to create new connections.
+        // The shared server state, used to create new connections.
         let tasks = TaskTracker::new();
         let shared = Arc::new(Shared {
             state: self.state,
@@ -209,7 +209,7 @@ where
         });
 
         loop {
-            // Ensure that the driver is allowed to accept new connections. Otherwise, wait until it
+            // Ensure that the server is allowed to accept new connections. Otherwise, wait until it
             // is able to do so.
             let permit = match &self.limit {
                 None => None,
@@ -222,7 +222,7 @@ where
             };
 
             // Accept a new peer connection. If accepting a connection fails (unrelated to the peer),
-            // then the driver waits for its configured backoff.
+            // then the server waits for its configured backoff.
             let (io, addr) = tokio::select! {
                 biased;
                 () = self.shutdown.cancelled() => break,
@@ -281,7 +281,7 @@ where
     }
 }
 
-impl<L, S, F, M, A> IntoFuture for Driver<L, F, M, A>
+impl<L, S, F, M, A> IntoFuture for Server<L, F, M, A>
 where
     L: Listener,
     S: Send + 'static,
@@ -300,7 +300,7 @@ where
     }
 }
 
-/// What every connection task needs from the driver, shared by all of them.
+/// What every connection task needs from the server, shared by all of them.
 struct Shared<F, A> {
     state: F,
     layers: A,

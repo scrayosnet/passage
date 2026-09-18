@@ -182,7 +182,7 @@ own task -- so a peer that connects and says nothing holds up nobody else. A `Li
 only a *source* of sockets: one associated type for the socket, one for the address, one method.
 
 The driver ships no layers. A PROXY implementation belongs next to the PROXY parser and reaches the
-builder as an extension trait over `Driver`, which is why nothing in the accept loop mentions
+builder as an extension trait over `Server`, which is why nothing in the accept loop mentions
 proxies, TLS or rate limits.
 
 ## Shape of a handler
