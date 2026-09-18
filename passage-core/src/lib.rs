@@ -7,6 +7,7 @@ pub mod router;
 pub mod server;
 mod version;
 pub mod wire;
+pub mod client;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
