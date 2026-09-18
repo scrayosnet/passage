@@ -25,10 +25,12 @@
 
 mod dispatch;
 mod error;
+pub mod layer;
 mod router;
 mod table;
 
 pub use dispatch::*;
 pub use error::*;
+pub use layer::*;
 pub use router::*;
 pub use table::*;

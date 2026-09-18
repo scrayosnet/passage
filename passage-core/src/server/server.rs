@@ -1,7 +1,7 @@
 use crate::connection::{Connection, Dispatcher, MakeDispatcher, Options as ConnectionConfig};
 use crate::phase::Phase;
+use crate::router::{Layer, Stack};
 use crate::server::listener::Listener;
-use crate::server::{Layer, Stack};
 use crate::version::ProtocolVersion;
 use crate::wire::Options as WireOptions;
 use futures::FutureExt;

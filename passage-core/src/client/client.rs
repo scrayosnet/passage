@@ -2,7 +2,7 @@ use crate::client::connector::Connector;
 use crate::client::error::{ClientError, Result};
 use crate::connection::{Connection, MakeDispatcher, Options as ConnectionConfig, Outcome};
 use crate::phase::Phase;
-use crate::server::{Layer, Stack};
+use crate::router::{Layer, Stack};
 use crate::version::ProtocolVersion;
 use crate::wire::Options as WireOptions;
 use futures::future::BoxFuture;

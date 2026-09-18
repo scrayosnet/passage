@@ -13,10 +13,8 @@
 //! them -- a layer belongs next to the thing it implements.
 
 mod error;
-mod layer;
 mod listener;
 mod server;
 
-pub use layer::*;
 pub use listener::*;
 pub use server::*;
