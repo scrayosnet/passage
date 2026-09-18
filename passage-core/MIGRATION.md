@@ -110,6 +110,10 @@ No packet can be sent or received. Both halves are one-line fixes, but nothing i
 have caught them: this exact round trip was `frames_roundtrip` in the driver
 (`passage-driver/src/codec.rs:268`), one of the 80 tests that were dropped.
 
+> Decision: The packets should write and read their IDs. This should make the code more readable while
+> keeping it fast. The ID is read double, once into the frame for routing and a second time by the packet
+> decoding, but I would deem that okay.
+
 ### 3.2 The `Server` builder cannot be used — **critical, verified**
 
 `server/server.rs:71`. Every setter, including `listener`, lives in
@@ -125,6 +129,9 @@ error[E0599]: the method `listener` exists for struct `Server`,
 The driver kept the unconstrained setters in a bound-free `impl<L, F, M, A>` block and put only
 `layer` — the one setter that genuinely needs `L::Addr` in scope — behind the bounds
 (`passage-driver/src/server.rs:361` vs `:466`). Splitting the impl block the same way fixes it.
+
+> Decision: Implementing listener for `()` should be fix it while keeping the simple code? Otherwise
+> split as necessary.
 
 ### 3.3 The crate's core types are not publicly reachable — **critical, verified**
 
@@ -143,6 +150,8 @@ No downstream crate can define a packet, name a version, or set an initial phase
 during `cargo check` because the items are `pub` inside a private module — it only surfaces at the
 consumer. Four `pub mod` keywords.
 
+> Decision: Make the types public but partially independent of the actual module structure.
+
 ### 3.4 `Box<dyn Dispatcher>` silently ignores version changes — **high, by inspection**
 
 `connection/dispatch.rs:46`. The `Dispatcher for Box<D>` impl forwards `on_frame`, `on_tick` and
@@ -156,6 +165,8 @@ could not be forgotten.
 through an `Arc` at all — which is a sign the method does not belong on a trait that claims an `Arc`
 impl.
 
+> Decision: Implement the missing methods
+
 ### 3.5 Duplicate packet IDs are a warning instead of a build failure — **high**
 
 `router/table.rs:74`. Two packets that resolve to the same `(phase, id)` now log
@@ -168,6 +179,8 @@ impl.
   the crate constructs either (verified by grep). The error type advertises checks that no longer
   run.
 
+> Decision: This is documented behavior. Remove the unused error types.
+
 ### 3.6 Unbounded allocation from a packet ID — **high, by inspection**
 
 The driver rejected any resolved ID outside `0..=MAX_PACKET_ID` (1023) at build time
@@ -178,6 +191,9 @@ A packet declaring `IDS: &[(V1_20_5, i32::MAX)]` makes `build()` attempt a ~4 Gi
 negative ID sign-extends through `as usize` to ~1.8×10¹⁹ and aborts. This is developer-controlled
 data, not peer input, so it is a foot-gun rather than a vulnerability — but it turns a typo into an
 OOM at startup instead of a named error.
+
+> Decision: The max packet ID cannot be known as they are provided by another crate? If so, only pass
+> a warning if the ID is unexpected.
 
 ### 3.7 Everything a failing handler queued is discarded — **high**
 
@@ -190,6 +206,9 @@ implemented by `settle()` draining the existing queue before and after `on_error
 (`passage-driver/src/conn/connection.rs:582`). In `passage-core`, a handler that does
 `ctx.handle.send(version, Disconnect { .. })?; Err(..)` sends nothing — the disconnect packet is
 dropped on the floor and the peer sees a bare socket close.
+
+> Decision: A handler that handles the error itself (i.e., sends a disconnect packet) should not also
+> fail with an error. The on error hook is the last line of defense, not a control flow to handle errors.
 
 ### 3.8 The error path runs a full second connection loop — **high**
 
@@ -206,6 +225,9 @@ The driver's equivalent (`settle()`) was a `try_recv` drain that returned immedi
 nothing. Holding a failed connection open for five seconds while still accepting its input is both a
 resource-exhaustion lever and a correctness hazard.
 
+> Decision: We have to ensure that no other (detached) handler writes on the channel while the error
+> handler sends packets. This was the only way I could think of while keeping the code slim.
+
 ### 3.9 The socket close is pre-cancelled on the error path — **medium**
 
 `serve()` ends with `self.shutdown.cancel()` (line 276). `run()` then closes the socket via
@@ -213,6 +235,8 @@ resource-exhaustion lever and a correctness hazard.
 first `Poll::Pending` from `framed.close()` loses the race and the close is abandoned with
 `debug!("failed to close the socket")`. Every connection that ends in an error skips its clean
 shutdown.
+
+> Decision: Maybe create a new token for that too? It should kept simple.
 
 ### 3.10 Graceful drain no longer exists — **medium**
 
@@ -228,6 +252,9 @@ was an accident rather than a decision.
 
 The drain timeout is also now a no-op: on expiry it logs `warn!("the drain timeout expired")` and
 returns without cancelling or waiting.
+
+> Decision: This is by design. Cancelling the server should also stop any connections as soon as possible.
+> The double wait is not preferred here.
 
 ### 3.11 Connection logging is inverted — **medium**
 
@@ -248,6 +275,8 @@ read MOTD, disconnect — produces an error-level line per scanner.
 
 Both branches also carry the message `"connection closed"`, so the two cases are indistinguishable
 by message.
+
+> Decision: fix and update logging
 
 ### 3.12 Smaller correctness and hygiene items
 
@@ -270,6 +299,14 @@ by message.
 | `lib.rs:12-25` | The `cargo new` template `add()` function and its test are still in the crate root. |
 | `version.rs:80` | `// TODO move into router implementation where these are actually used` — and `V1_20_5`/`V26_2` are indeed dead (compiler warnings). `V1_21` was dropped. |
 | `codec/codec.rs:40` | `// TODO try to reuse the same buffer …`, `wire/writer.rs:154` `// TODO use bytestring instead`, `connection/connection.rs:293` `// TODO handle errors better?` — three unresolved TODOs shipped into the migrated crate. |
+
+> Decisions:
+> - update max size if you are sure
+> - protocol version will be positive so this is fine
+> - fix control flow check
+> - fix clippy warnings and unused code/imports
+> - remove option from reason
+> - update the lib root to export the types
 
 ---
 
@@ -315,6 +352,11 @@ Given that the project's stated requirement is *"keep the telemetry and even exp
 is the load-bearing loss. `reason()` is a partial replacement but is only defined for the connection
 layer's own variants; a `Dispatch(anyhow::Error)` collapses to the single label `"dispatch"`.
 
+> Decision: we cannot list every error the custom handlers will use. As such we have to use something
+> like anyhow. Maybe we could make the DispatchError a struct with additional metadata. But I'm unsure
+> whether it would be filled by the custom implementation. Telemetry can still use the anyhow error
+> downcast. You may propose a different solution
+
 ### 5.2 The typed unknown-packet diagnostic is gone
 
 The driver's dispatcher looked an unroutable ID up in the *other* phases before failing, so a login
@@ -322,6 +364,8 @@ packet arriving in the status phase reported
 `packet 'LoginStart' belongs to phase Login but arrived in phase Status` rather than "unknown packet
 0x00". `passage-core` (`router/dispatch.rs:78`) replaces both with an `anyhow::bail!` string. The
 `lookup_elsewhere` helper was deleted.
+
+> Decision: packet Ids are reused. Looking at other tables might cause confusion.
 
 ### 5.3 `anyhow` in a library's public API
 
@@ -334,6 +378,8 @@ An alternative that keeps the ergonomics: make the handler error generic or keep
 `{ class, label, source: Box<dyn Error> }` shape as the driver did. `anyhow` also carries a
 backtrace allocation on every error construction, which for peer-triggered rejections (the common
 case in this protocol) is paid per scanner.
+
+> Decision: You may do that, but think if there are better solutions.
 
 ### 5.4 `Ending` was folded back into the error type
 
@@ -350,12 +396,17 @@ predicted — a caller that cannot tell the happy path from the sad one by looki
 Also lost: `Ending::can_reply()`, which told `on_error` whether the peer was still there to receive a
 disconnect message.
 
+> Decision: Re-add the can_reply method. Keep the error type for now. Adding to many enum and struct
+> types might be confusing. Also, the happy path is not included in the error type.
+
 ### 5.5 `Dispatcher::ticks()` was removed
 
 The driver only armed `tokio::time::Interval` when the dispatcher actually had a tick handler
 (`filter(|_| dispatcher.ticks())`). `passage-core` arms it whenever `tick_interval` is set, so a
 router with no `on_tick` wakes every connection on a timer to call an empty method. Minor per
 connection, measurable at 10 000.
+
+> Decision: The caller will be able to keep the tick interval empty if they do not want to handle it, right?
 
 ### 5.6 `Ctx`'s convenience methods were removed
 
@@ -364,6 +415,8 @@ connection, measurable at 10 000.
 layer — but it does push the version-threading burden onto every call site, which is what §3 of the
 driver's own `ASSESSMENT.md` called the thing most likely to be got wrong by hand.
 
+> Decision: This is deliberate to ensure that the caller is reminded how the handler state might not
+> match the actual connection state (at the time the packet is sent).
 ---
 
 ## 6. Documentation
@@ -386,6 +439,8 @@ Those belong in `passage-core` as short comments at the three lines in question,
 
 A few `# Errors` sections also document the wrong error: `Reader::bytes` and `Reader::string` claim
 only `Eof` but propagate `NegativeLength` and `LengthLimit` from `length`.
+
+> Decision: Fix the wrong docs (keep it short!) and add a short doc on the lib and actually exported modules.
 
 ---
 
@@ -420,3 +475,6 @@ project's own telemetry requirement depends on, and §3.11 is what that looks li
 10. §3.12 hygiene, the three TODOs, and the `add()` template.
 11. Re-add `#![deny(unsafe_code)]` and `#![warn(missing_docs)]`.
 12. Decide §5.1 / §5.3 deliberately and record the decision in a comment.
+
+> Decision: Apply the decision above as necessary. The test will follow once I'm happy with the crate.
+> You should re-add `#![deny(unsafe_code)]` and `#![warn(missing_docs)]`.
