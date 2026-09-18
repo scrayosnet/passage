@@ -1,6 +1,7 @@
 use crate::codec::{Cipher, Frame};
 use crate::connection::error::{ConnectionError, Result};
-use crate::packet::{Packet, Phase};
+use crate::packet::Packet;
+use crate::phase::Phase;
 use crate::version::ProtocolVersion;
 use crate::wire::Options;
 use futures::future::BoxFuture;

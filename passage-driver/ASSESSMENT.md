@@ -250,7 +250,7 @@ after.
 
 ### 4.2 There is no metrics channel, and "keep the telemetry" was a requirement
 
-`Server` computes exactly what a metric wants -- `elapsed`, `Ending::label()`, version, phase -- and
+`Driver` computes exactly what a metric wants -- `elapsed`, `Ending::label()`, version, phase -- and
 then prints it (`src/server.rs:713`, `log_ending`). `Outcome` is dropped
 (`src/conn/connection.rs:118`). There is no hook.
 

@@ -13,6 +13,6 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 futures = { workspace = true }
-tokio = { workspace = true, features = ["rt", "time", "macros"] }
-tokio-util = { workspace = true, features = ["codec"] }
+tokio = { workspace = true, features = ["rt", "time", "macros", "net"] }
+tokio-util = { workspace = true, features = ["codec", "rt"] }
 tracing = { workspace = true, features = ["default"] }

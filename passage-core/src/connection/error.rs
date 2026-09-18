@@ -3,6 +3,7 @@ use crate::connection::DispatchError;
 use crate::phase::Phase;
 use crate::version::ProtocolVersion;
 use thiserror::Error;
+use tracing::Level;
 
 /// The connection result type, defaulting to [`ConnectionError`].
 pub type Result<T> = std::result::Result<T, ConnectionError>;
@@ -89,6 +90,44 @@ impl ConnectionError {
     pub fn timeout() -> Self {
         Self::Closed {
             reason: CloseReason::Timeout,
+        }
+    }
+
+    /// Gets the reason key for the error. This can be used in logs, spans, and metrics.
+    pub fn reason(&self) -> Option<&'static str> {
+        match self {
+            ConnectionError::Codec(_) => Some("codec"),
+            ConnectionError::Dispatch(_) => Some("dispatch"),
+            ConnectionError::Closed {
+                reason: CloseReason::Peer,
+            } => Some("peer-closed"),
+            ConnectionError::Closed {
+                reason: CloseReason::Shutdown,
+            } => Some("shutdown"),
+            ConnectionError::Closed {
+                reason: CloseReason::Timeout,
+            } => Some("peer-timeout"),
+            ConnectionError::StaleEncoding { .. } => Some("stale-encoding"),
+            ConnectionError::EarlyPacket { .. } => Some("early-packet"),
+        }
+    }
+
+    /// Gets whether the error was raised because of the peer
+    pub fn is_peer_error(&self) -> bool {
+        match self {
+            ConnectionError::Codec(_) => false,
+            ConnectionError::Dispatch(_) => false,
+            ConnectionError::Closed {
+                reason: CloseReason::Peer,
+            } => true,
+            ConnectionError::Closed {
+                reason: CloseReason::Shutdown,
+            } => false,
+            ConnectionError::Closed {
+                reason: CloseReason::Timeout,
+            } => true,
+            ConnectionError::StaleEncoding { .. } => false,
+            ConnectionError::EarlyPacket { .. } => true,
         }
     }
 }

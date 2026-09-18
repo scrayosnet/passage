@@ -1,5 +1,5 @@
 use crate::direction::Direction;
-pub(crate) use crate::phase::Phase;
+use crate::phase::Phase;
 use crate::version::ProtocolVersion;
 use crate::wire::{Reader, WireResult, Writer};
 

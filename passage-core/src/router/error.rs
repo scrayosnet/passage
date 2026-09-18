@@ -1,4 +1,4 @@
-use crate::packet::Phase;
+use crate::phase::Phase;
 use crate::version::ProtocolVersion;
 use thiserror::Error;
 

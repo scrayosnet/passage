@@ -1,4 +1,5 @@
 use crate::connection::{ConnectionError, Ctx};
+use std::sync::Arc;
 
 /// The [`Dispatcher`] is a thin wrapper around custom handler functions. These return custom errors
 /// that cannot be predicted at this point. As such, it refers to [`anyhow::Error`] instead.
@@ -56,6 +57,20 @@ impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
     }
 }
 
+impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Arc<D> {
+    fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
+        (**self).on_frame(ctx, id, payload)
+    }
+
+    fn on_tick(&self, ctx: Ctx<'_, S>) -> Result<()> {
+        (**self).on_tick(ctx)
+    }
+
+    fn on_error(&self, ctx: Ctx<'_, S>, error: &mut ConnectionError) -> Result<()> {
+        (**self).on_error(ctx, error)
+    }
+}
+
 impl<S, D: Dispatcher<S>> Dispatcher<S> for Option<D> {
     fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
         let Some(this) = self else {
@@ -87,4 +102,24 @@ pub trait MakeDispatcher<S>: Send + 'static {
 
     /// Makes one, for one connection.
     fn make(&self) -> Self::Dispatcher;
+}
+
+/// A [`MakeDispatcherFn`] builds a dispatcher from a closure.
+pub struct MakeDispatcherFn<F>(F);
+
+impl<S, D, F> MakeDispatcher<S> for MakeDispatcherFn<F>
+where
+    F: Fn() -> D + Send + 'static,
+    D: Dispatcher<S> + Send + 'static,
+{
+    type Dispatcher = D;
+
+    fn make(&self) -> D {
+        self.0()
+    }
+}
+
+/// Makes a dispatcher from a closure. Useful for stateless dispatchers.
+pub fn make_with<F>(make: F) -> MakeDispatcherFn<F> {
+    MakeDispatcherFn(make)
 }

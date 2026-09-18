@@ -1,6 +1,6 @@
 use crate::codec::{Frame, FrameCodec};
 use crate::connection::{ConnectionError, ConnectionHandle, Ctx, Dispatcher, Op, Result};
-use crate::packet::Phase;
+use crate::phase::Phase;
 use crate::version::ProtocolVersion;
 use crate::wire::Options as WireOptions;
 use futures::future::BoxFuture;
@@ -76,7 +76,7 @@ impl Default for Options {
 }
 
 /// Builds a new connection.
-pub struct ConnectionBuilder<S, T, D> {
+pub struct ConnectionBuilder<T, S, D> {
     io: T,
     dispatcher: D,
     state: S,
@@ -84,12 +84,7 @@ pub struct ConnectionBuilder<S, T, D> {
     shutdown: Option<CancellationToken>,
 }
 
-impl<S, T, D> ConnectionBuilder<S, T, D>
-where
-    S: Send + 'static,
-    T: AsyncRead + AsyncWrite + Unpin,
-    D: Dispatcher<S>,
-{
+impl<T, S, D> ConnectionBuilder<T, S, D> {
     /// Sets the configuration. Defaults to [`Options::default`].
     #[must_use]
     pub fn config(mut self, config: Options) -> Self {
@@ -106,7 +101,7 @@ where
 
     /// Sets the connection's dispatcher.
     #[must_use]
-    pub fn dispatcher<D1>(self, dispatcher: D1) -> ConnectionBuilder<S, T, D1> {
+    pub fn dispatcher<D1>(self, dispatcher: D1) -> ConnectionBuilder<T, S, D1> {
         ConnectionBuilder {
             io: self.io,
             dispatcher,
@@ -118,7 +113,7 @@ where
 
     /// Sets the connection's state.
     #[must_use]
-    pub fn state<S1>(self, state: S1) -> ConnectionBuilder<S1, T, D> {
+    pub fn state<S1>(self, state: S1) -> ConnectionBuilder<T, S1, D> {
         ConnectionBuilder {
             io: self.io,
             dispatcher: self.dispatcher,
@@ -127,9 +122,16 @@ where
             shutdown: self.shutdown,
         }
     }
+}
 
+impl<T, S, D> ConnectionBuilder<T, S, D>
+where
+    S: Send + 'static,
+    T: AsyncRead + AsyncWrite + Unpin,
+    D: Dispatcher<S>,
+{
     /// Builds the connection from the builder.
-    pub fn build(self) -> Connection<S, T, D> {
+    pub fn build(self) -> Connection<T, S, D> {
         Connection::new(
             self.io,
             self.dispatcher,
@@ -141,7 +143,7 @@ where
 }
 
 /// Drives one connection.
-pub struct Connection<S, T, D> {
+pub struct Connection<T, S = (), D = ()> {
     /// The peer socket connection, wrapped by a framed codec.
     framed: Framed<T, FrameCodec>,
 
@@ -177,14 +179,14 @@ pub struct Connection<S, T, D> {
     config: Options,
 }
 
-impl<S, T, D> Connection<S, T, D>
+impl<T, S, D> Connection<T, S, D>
 where
     S: Send + 'static,
     T: AsyncRead + AsyncWrite + Unpin,
     D: Dispatcher<S>,
 {
     /// Creates a new connection builder.
-    pub fn builder(io: T) -> ConnectionBuilder<(), T, ()> {
+    pub fn builder(io: T) -> ConnectionBuilder<T, (), ()> {
         ConnectionBuilder {
             io,
             dispatcher: (),
