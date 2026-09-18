@@ -18,7 +18,7 @@
 //!
 //! # Testing
 //!
-//! This is also the crate's test harness. [`Preconnected`] turns one half of a
+//! This is also the crate's test harness. [`Connected`] turns one half of a
 //! [`tokio::io::duplex`] pair into a [`Connector`], so a client and a server can be run against each
 //! other in-process, with no socket and no port.
 

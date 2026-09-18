@@ -121,12 +121,6 @@ type Result<T, E = DispatchError> = std::result::Result<T, E>;
 pub trait Dispatcher<S> {
     /// Called once, before the connection reads or writes anything.
     ///
-    /// This is where a peer that speaks first says so: a client queues its handshake here. It is
-    /// also the only hook that sees [`Options::initial_version`](crate::connection::Options), so a
-    /// dispatcher that keeps a version-dependent table binds it here rather than waiting for an
-    /// [`Op::SetVersion`](crate::connection::Op) that a client already knowing its version will
-    /// never send.
-    ///
     /// # Errors
     ///
     /// Returns whatever the implementation raises. An error here fails the connection before the
@@ -263,8 +257,6 @@ pub trait MakeDispatcher<S>: Send + 'static {
     fn make(&self) -> Self::Dispatcher;
 }
 
-/// The counterpart to [`Dispatcher`] for `()`: a driver that handles nothing. Useful to open a
-/// connection and watch what the peer does with it, which is what a test often wants.
 impl<S: 'static> MakeDispatcher<S> for () {
     type Dispatcher = ();
 

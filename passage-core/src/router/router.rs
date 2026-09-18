@@ -99,9 +99,7 @@ impl<S: 'static> RouterBuilder<S> {
         Ok(self)
     }
 
-    /// Registers the open handler, called once before the connection reads or writes anything.
-    ///
-    /// This is where the side that speaks first says so: a client queues its handshake here.
+    /// Registers the open handler, used by client implementations to send the initial packet.
     #[must_use]
     pub fn on_open(
         mut self,

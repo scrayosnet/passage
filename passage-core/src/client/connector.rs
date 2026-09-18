@@ -3,13 +3,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tracing::warn;
 
-/// A [`Connector`] opens a connection socket, the way a
-/// [`Listener`](crate::server::Listener) accepts one.
-///
-/// Like a listener, a connector already knows its target: it is configured with one and dials it,
-/// rather than being handed an address per call. That keeps the two halves the same shape, so a
-/// [`Client`](crate::client::Client) reads like a [`Server`](crate::server::Server) with the arrow
-/// turned around.
+/// A [`Connector`] opens a connection socket.
 pub trait Connector: Send + 'static {
     /// The underlying socket.
     type Io: AsyncRead + AsyncWrite + Send + Unpin + 'static;
@@ -52,7 +46,7 @@ where
     type Addr = A;
 
     fn connect(&mut self) -> impl Future<Output = io::Result<(T, A)>> + Send {
-        (self.0)()
+        self.0()
     }
 }
 
@@ -65,21 +59,18 @@ where
     ConnectorFn(connect)
 }
 
-/// A [`Connector`] that hands over a socket somebody else already opened, once.
-///
-/// This is what a test uses: one half of a [`tokio::io::duplex`] pair is a connection that was never
-/// dialled, and a client should not have to grow a second entry point to accept one. A second call
-/// reports [`io::ErrorKind::NotConnected`], because there is no second socket to give.
-pub struct Preconnected<T, A>(Option<(T, A)>);
+/// A [`Connector`] that hands over a socket somebody else already opened, once. A second call
+/// reports [`io::ErrorKind::NotConnected`] because there is no second socket to give.
+pub struct Connected<T, A>(Option<(T, A)>);
 
-impl<T, A> Preconnected<T, A> {
+impl<T, A> Connected<T, A> {
     /// Wraps an open socket and the address to report for it.
     pub fn new(io: T, addr: A) -> Self {
         Self(Some((io, addr)))
     }
 }
 
-impl<T, A> Connector for Preconnected<T, A>
+impl<T, A> Connector for Connected<T, A>
 where
     T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     A: fmt::Debug + Send + 'static,

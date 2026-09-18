@@ -116,7 +116,7 @@ This is why §3.1 through §3.4 reached a committed state. Each of them was cove
 
 The integration tests are the highest-value thing to port and they port almost unchanged: they drive
 a `Connection` over a `tokio::io::duplex` pair with a test-double dispatcher, which is exactly the
-seam `passage-core` kept -- and `Client` + `Preconnected` (§7) now wrap that seam, so a ported test
+seam `passage-core` kept -- and `Client` + `Connected` (§7) now wrap that seam, so a ported test
 can drive a router rather than a hand-written dispatcher.
 
 `tests/client.rs` covers §3.1 (a packet crosses a real socket and decodes), §3.2 and §3.3 (both
@@ -229,7 +229,7 @@ changed something outside `client/`:
    two ways there is no connection at all -- the dial failed, a layer rejected it -- are a
    `ClientError`.
 
-`Preconnected` is a `Connector` over a socket somebody else already opened, which is what makes this
+`Connected` is a `Connector` over a socket somebody else already opened, which is what makes this
 the test harness: both halves of a `tokio::io::duplex` pair become two clients pointed at each
 other, with no listener, no port and no `tokio::spawn` for the accept loop. `MakeDispatcher` is now
 implemented for `()` as well, so a connection that only watches what the peer does needs no

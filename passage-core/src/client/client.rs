@@ -11,19 +11,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, Span, debug, field, info_span};
 
 /// The [`Client`] opens a connection with the configured connector, passes it through the configured
-/// layers, and drives it with the same [`Connection`] the server uses.
-///
-/// It is the [`Server`](crate::server::Server) with the arrow turned around, and is built the same
-/// way -- so a [`Router`](crate::router::Router) can be handed to either. Two differences follow
-/// from there being exactly one connection:
-///
-/// * [`connect`](Client::connect) returns the connection's [`Outcome`] instead of logging it. The
-///   caller is the one place that knows what a failure means, which is also what makes this the
-///   harness for the crate's own tests.
-/// * The side that dials is the side that speaks first, so a client's first packet comes from
-///   [`Dispatcher::on_open`](crate::connection::Dispatcher::on_open) (or
-///   [`RouterBuilder::on_open`](crate::router::RouterBuilder::on_open)). Nothing is written before
-///   that hook runs.
+/// layers, and creates a new connection from it.
 #[must_use = "a client does nothing until it is awaited"]
 pub struct Client<C = (), F = (), M = (), A = ()> {
     /// The connector that opens the socket.
@@ -47,10 +35,6 @@ pub struct Client<C = (), F = (), M = (), A = ()> {
 
 impl<C: Connector> Client<C, (), (), ()> {
     /// Starts building a client that connects with `connector`.
-    ///
-    /// The connector comes first and is not optional, for the reason
-    /// [`Server::new`](crate::server::Server::new) takes its listener first: every other setter
-    /// needs `C::Addr` in scope to be able to type its closure.
     pub fn new(connector: C) -> Self {
         Client {
             connector,
@@ -123,10 +107,6 @@ impl<C: Connector, F, M, A: Layer<C::Io, C::Addr>> Client<C, F, M, A> {
     }
 
     /// Sets the initial protocol version of the connection config.
-    ///
-    /// A client usually knows its version before it says anything, and setting it here is what binds
-    /// the dispatch table to it: the version is never announced to the connection otherwise, because
-    /// a client has no handshake to read.
     pub fn initial_version(mut self, version: ProtocolVersion) -> Self {
         self.config.initial_version = version;
         self
@@ -139,9 +119,6 @@ impl<C: Connector, F, M, A: Layer<C::Io, C::Addr>> Client<C, F, M, A> {
     }
 
     /// Sets the shutdown token for the client.
-    ///
-    /// The connection runs on a child of it, so cancelling this stops the connection while the token
-    /// itself stays the caller's to cancel again.
     pub fn graceful_shutdown(mut self, shutdown: CancellationToken) -> Self {
         self.shutdown = shutdown;
         self
@@ -185,15 +162,10 @@ where
 {
     /// Opens the connection and drives it to completion.
     ///
-    /// The [`Outcome`] carries how it ended, including a
-    /// [`ConnectionError`](crate::connection::ConnectionError) if it failed. That is reported rather
-    /// than logged: unlike the server, a client has exactly one connection and a caller waiting for
-    /// it, and two places logging the same failure is one too many.
-    ///
     /// # Errors
     ///
     /// Returns a [`ClientError`] if the connector could not open a socket, or a layer rejected the
-    /// one it opened. Either way the protocol never started, so there is no outcome to report.
+    /// one it opened. Either way, the protocol never started, so there is no outcome to report.
     pub async fn connect(mut self) -> Result<Outcome<S>> {
         let (io, addr) = self
             .connector

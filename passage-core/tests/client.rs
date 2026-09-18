@@ -1,4 +1,4 @@
-use passage_core::client::{Client, Preconnected};
+use passage_core::client::{Client, Connected};
 use passage_core::connection::DispatchError;
 use passage_core::router::Router;
 use passage_core::server::Server;
@@ -107,7 +107,7 @@ async fn preconnected_drives_a_duplex_pair() {
             .build(),
     );
     let server = tokio::spawn(
-        Client::new(Preconnected::new(b, "server"))
+        Client::new(Connected::new(b, "server"))
             .state(|_: &&str| ())
             .dispatch(server_router)
             .connect(),
@@ -131,7 +131,7 @@ async fn preconnected_drives_a_duplex_pair() {
             .build(),
     );
 
-    let outcome = Client::new(Preconnected::new(a, "client"))
+    let outcome = Client::new(Connected::new(a, "client"))
         .state(|_: &&str| ())
         .dispatch(client_router)
         .initial_version(versions::V26_2)

@@ -247,8 +247,7 @@ where
     /// Runs the connection loop. On error, it stops all handlers and starts the graceful shutdown.
     async fn serve(&mut self) -> Result<()> {
         // Run the handlers until they complete or raise an error. `on_open` runs before the loop so
-        // that a peer which speaks first -- a client sending its handshake -- has somewhere to say
-        // so. Whatever it queues is drained by the first pass of the loop, ahead of any input.
+        // that a peer which speaks first (e.g., a client) is able to.
         let (handle, mut ops) =
             ConnectionHandle::new(self.shutdown.clone(), self.config.wire_options);
         let opened =
