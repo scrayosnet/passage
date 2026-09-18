@@ -26,7 +26,7 @@ is what is still open or was decided against.
 | `src/demo/**` (feature `demo`)          | —                                                                   | dropped                           |
 | `tests/**` (4 files, 2 175 lines)       | —                                                                   | dropped, see §4                   |
 | `README.md`, `REVIEW.md`, `ASSESSMENT.md`, `NOTES.md` | —                                                     | dropped                           |
-| —                                       | `src/client/{mod,client}.rs`                                        | new, placeholder                  |
+| —                                       | `src/client/{mod,client,connector,error}.rs`                        | new; the dialling half, see §7    |
 | deps: `thiserror`                       | deps: `thiserror` + `anyhow`                                        | see §5.2                          |
 
 ---
@@ -102,7 +102,7 @@ Two changes beyond what the findings asked for, both forced by the above:
 | | driver | core |
 |---|---|---|
 | unit tests | 35 | 0 |
-| integration tests | 45 (2 175 lines) | 0 |
+| integration tests | 45 (2 175 lines) | 3 (`tests/client.rs`) |
 | doc examples compiled | yes | none |
 | runnable worked example | `src/demo/`, behind a feature | none |
 
@@ -116,8 +116,12 @@ This is why §3.1 through §3.4 reached a committed state. Each of them was cove
 
 The integration tests are the highest-value thing to port and they port almost unchanged: they drive
 a `Connection` over a `tokio::io::duplex` pair with a test-double dispatcher, which is exactly the
-seam `passage-core` kept. The fixes in §3 are currently backed by a throwaway probe crate that no
-longer exists, not by anything in the repository.
+seam `passage-core` kept -- and `Client` + `Preconnected` (§7) now wrap that seam, so a ported test
+can drive a router rather than a hand-written dispatcher.
+
+`tests/client.rs` covers §3.1 (a packet crosses a real socket and decodes), §3.2 and §3.3 (both
+builders are called, and the packet is defined outside the crate). The rest of §3 is still backed by
+nothing in the repository.
 
 ---
 
@@ -189,3 +193,44 @@ packet ID and a builder that could not be called. All of them are fixed; none of
 
 **Next:** port `passage-driver/tests/` and the `src/*` unit tests. Everything else on the list is
 done.
+
+---
+
+## 7. New in `passage-core`: the client half
+
+The driver had no client. `Client` is `Server` with the arrow turned around: the same builder, the
+same `Layer` stack, the same state factory, the same `Router` -- only the socket comes from a
+`Connector` rather than a `Listener`, and there is exactly one of it.
+
+```rust
+let outcome = Client::new(addr)
+    .state(|_: &SocketAddr| ())
+    .dispatch(Arc::new(router))
+    .initial_version(versions::V26_2)
+    .connect()
+    .await?;
+```
+
+Three things follow from a client rather than a server owning the connection, and each of them
+changed something outside `client/`:
+
+1. **The dialling side speaks first.** Nothing in the crate could run before the first frame arrived,
+   so a client had no way to send a handshake. `Dispatcher::on_open` is now called once, before the
+   loop, with the handle in hand; `RouterBuilder::on_open` registers one on a router. The server
+   ignores it by default, which is the correct behaviour for a side that answers rather than asks.
+
+2. **A client already knows its protocol version.** It therefore never queues `Op::SetVersion`, and
+   `RouterDispatcher` used to bind its table only on that operation -- so a connection configured
+   with `initial_version` dispatched the whole session against the fallback table. `on_open` now
+   binds it. That was a latent bug on the server side too, for anyone setting `initial_version`.
+
+3. **One connection has a caller waiting for it.** `connect` returns the `Outcome` rather than
+   logging it, because the caller is the one place that knows whether a failure matters. Only the
+   two ways there is no connection at all -- the dial failed, a layer rejected it -- are a
+   `ClientError`.
+
+`Preconnected` is a `Connector` over a socket somebody else already opened, which is what makes this
+the test harness: both halves of a `tokio::io::duplex` pair become two clients pointed at each
+other, with no listener, no port and no `tokio::spawn` for the accept loop. `MakeDispatcher` is now
+implemented for `()` as well, so a connection that only watches what the peer does needs no
+dispatcher at all.

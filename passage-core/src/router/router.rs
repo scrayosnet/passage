@@ -1,6 +1,8 @@
 use crate::connection::{ConnectionError, Ctx, DispatchError};
 use crate::packet::{Packet, check_ids_unordered};
-use crate::router::{Entry, ErasedHandler, ErrorHandler, RouterError, Table, TickHandler};
+use crate::router::{
+    Entry, ErasedHandler, ErrorHandler, OpenHandler, RouterError, Table, TickHandler,
+};
 use crate::version::ProtocolVersion;
 use crate::wire::Reader;
 use anyhow::Context;
@@ -28,6 +30,9 @@ pub struct RouterBuilder<S> {
 
     /// The list of packet handlers.
     entries: Vec<Entry<S>>,
+
+    /// The open handler.
+    on_open: Option<OpenHandler<S>>,
 
     /// The tick handler.
     tick: Option<TickHandler<S>>,
@@ -94,6 +99,18 @@ impl<S: 'static> RouterBuilder<S> {
         Ok(self)
     }
 
+    /// Registers the open handler, called once before the connection reads or writes anything.
+    ///
+    /// This is where the side that speaks first says so: a client queues its handshake here.
+    #[must_use]
+    pub fn on_open(
+        mut self,
+        handler: impl Fn(Ctx<'_, S>) -> Result<(), DispatchError> + Send + Sync + 'static,
+    ) -> Self {
+        self.on_open = Some(Arc::new(handler));
+        self
+    }
+
     /// Registers the tick handler, used for keep alive packets and deadlines.
     #[must_use]
     pub fn on_tick(
@@ -130,6 +147,7 @@ impl<S: 'static> RouterBuilder<S> {
             unknown: self.unknown,
             entries,
             tables: tables.into_boxed_slice(),
+            on_open: self.on_open,
             tick: self.tick,
             on_error: self.on_error,
         }
@@ -150,6 +168,9 @@ pub struct Router<S> {
     /// searches. The first table should hold the initial routing table (i.e., [`ProtocolVersion::UNKNOWN`]).
     pub(crate) tables: Box<[(ProtocolVersion, Table)]>,
 
+    /// The open handler.
+    pub(crate) on_open: Option<OpenHandler<S>>,
+
     /// The tick handler.
     pub(crate) tick: Option<TickHandler<S>>,
 
@@ -163,6 +184,7 @@ impl<S> std::fmt::Debug for Router<S> {
             .field("unknown", &self.unknown)
             .field("packets", &self.entries.len())
             .field("tables", &self.tables.len())
+            .field("handles_open", &self.on_open.is_some())
             .field("ticks", &self.tick.is_some())
             .field("handles_errors", &self.on_error.is_some())
             .finish()
@@ -176,6 +198,7 @@ impl<S: 'static> Router<S> {
         RouterBuilder {
             unknown: UnknownPolicy::default(),
             entries: Vec::new(),
+            on_open: None,
             tick: None,
             on_error: None,
         }

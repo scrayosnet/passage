@@ -58,6 +58,17 @@ impl<S: 'static> MakeDispatcher<S> for Arc<Router<S>> {
 }
 
 impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
+    fn on_open(&mut self, ctx: Ctx<'_, S>) -> Result<(), DispatchError> {
+        // A connection that starts at a known version -- a client that has no handshake to wait for
+        // -- never sends `Op::SetVersion`, so binding the table here is the only thing that keeps it
+        // from dispatching the whole connection against the fallback table.
+        self.table = (ctx.version, self.router.table(ctx.version));
+        match &self.router.on_open {
+            Some(handler) => handler(ctx),
+            None => Ok(()),
+        }
+    }
+
     fn on_version(&mut self, ctx: Ctx<'_, S>) -> Result<(), DispatchError> {
         let table = self.router.table(ctx.version);
         self.table = (ctx.version, table);

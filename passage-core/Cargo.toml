@@ -13,6 +13,9 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 futures = { workspace = true }
-tokio = { workspace = true, features = ["rt", "time", "macros", "net"] }
+tokio = { workspace = true, features = ["rt", "time", "macros", "net", "io-util"] }
 tokio-util = { workspace = true, features = ["codec", "rt"] }
 tracing = { workspace = true, features = ["default"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }

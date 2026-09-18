@@ -8,6 +8,10 @@ use tracing::warn;
 pub type ErasedHandler<S> =
     Box<dyn for<'c> Fn(Ctx<'c, S>, &[u8]) -> Result<(), DispatchError> + Send + Sync>;
 
+/// The open handler type, called once before the connection reads or writes anything.
+pub type OpenHandler<S> =
+    Arc<dyn for<'c> Fn(Ctx<'c, S>) -> Result<(), DispatchError> + Send + Sync>;
+
 /// The tick handler type.
 pub type TickHandler<S> =
     Arc<dyn for<'c> Fn(Ctx<'c, S>) -> Result<(), DispatchError> + Send + Sync>;
@@ -68,7 +72,7 @@ impl Table {
     /// is overwritten in the table (printing a warning). This may, but should not, be used to overwrite
     /// from default configurations.
     ///
-    /// A packet whose ID falls outside `0..=`[`MAX_PACKET_ID`] is skipped with a warning rather than
+    /// A packet whose ID falls outside `0..=MAX_PACKET_ID` is skipped with a warning rather than
     /// registered.
     pub fn new<S>(entries: &[Entry<S>], version: ProtocolVersion) -> Self {
         let mut by_phase: [Vec<Option<u16>>; Phase::COUNT] = Default::default();

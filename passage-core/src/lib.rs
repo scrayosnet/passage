@@ -11,7 +11,7 @@
 //! | [`router`]          | typed packet registration with erased dispatch                    |
 //! | [`connection`]      | one socket: the state, the operation queue, the loop              |
 //! | [`server`]          | the accept loop, listeners and layers                             |
-//! | [`client`]          | the client half (not implemented yet)                             |
+//! | [`client`]          | the dialling half, and the in-process harness the tests use       |
 //!
 //! Packet identity lives at the crate root rather than in a module of its own, because a packet is
 //! named by all four of [`Packet`], [`Phase`], [`Direction`] and [`ProtocolVersion`] at once.

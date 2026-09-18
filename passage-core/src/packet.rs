@@ -27,7 +27,7 @@ pub trait Packet: Sized + Send + Sync + 'static {
     /// [`RouterBuilder::build`](crate::router::RouterBuilder::build).
     ///
     /// The order is load-bearing and checked at build time
-    /// ([`BuildError::UnorderedIds`](crate::error::BuildError::UnorderedIds)): a table written
+    /// ([`RouterError::UnorderedIds`](crate::router::RouterError::UnorderedIds)): a table written
     /// oldest-first would silently resolve to the wrong ID.
     const IDS: &'static [(ProtocolVersion, i32)];
 

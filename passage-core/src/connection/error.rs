@@ -29,7 +29,7 @@ pub enum ConnectionError {
     #[error(transparent)]
     Codec(#[from] CodecError),
 
-    /// A [`Dispatcher`] (i.e., custom handler) raised an error. Or an error occurred while preparing
+    /// A [`Dispatcher`](crate::connection::Dispatcher) (i.e., custom handler) raised an error. Or an error occurred while preparing
     /// the dispatch (e.g., packet parsing for types handlers).
     #[error("dispatch failed: {0}")]
     Dispatch(#[from] DispatchError),

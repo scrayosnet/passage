@@ -119,6 +119,23 @@ type Result<T, E = DispatchError> = std::result::Result<T, E>;
 /// Every method has a default that does nothing, so an implementation only writes the hooks it
 /// cares about.
 pub trait Dispatcher<S> {
+    /// Called once, before the connection reads or writes anything.
+    ///
+    /// This is where a peer that speaks first says so: a client queues its handshake here. It is
+    /// also the only hook that sees [`Options::initial_version`](crate::connection::Options), so a
+    /// dispatcher that keeps a version-dependent table binds it here rather than waiting for an
+    /// [`Op::SetVersion`](crate::connection::Op) that a client already knowing its version will
+    /// never send.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever the implementation raises. An error here fails the connection before the
+    /// first frame, and [`on_error`](Dispatcher::on_error) still gets the last word.
+    fn on_open(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
+        let _ = ctx;
+        Ok(())
+    }
+
     /// Called when the connection changes the protocol version. This can be used to update internal
     /// dispatch tables.
     ///
@@ -174,6 +191,10 @@ pub trait Dispatcher<S> {
 impl<S> Dispatcher<S> for () {}
 
 impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
+    fn on_open(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
+        (**self).on_open(ctx)
+    }
+
     fn on_version(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
         (**self).on_version(ctx)
     }
@@ -196,6 +217,13 @@ impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
 // started on, which is exactly the bug the connection calls `on_version` to prevent.
 
 impl<S, D: Dispatcher<S>> Dispatcher<S> for Option<D> {
+    fn on_open(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
+        let Some(this) = self else {
+            return Ok(());
+        };
+        this.on_open(ctx)
+    }
+
     fn on_version(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
         let Some(this) = self else {
             return Ok(());
@@ -233,6 +261,14 @@ pub trait MakeDispatcher<S>: Send + 'static {
 
     /// Makes one, for one connection.
     fn make(&self) -> Self::Dispatcher;
+}
+
+/// The counterpart to [`Dispatcher`] for `()`: a driver that handles nothing. Useful to open a
+/// connection and watch what the peer does with it, which is what a test often wants.
+impl<S: 'static> MakeDispatcher<S> for () {
+    type Dispatcher = ();
+
+    fn make(&self) {}
 }
 
 /// A [`MakeDispatcherFn`] builds a dispatcher from a closure. See [`make_with`].
