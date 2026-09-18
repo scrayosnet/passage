@@ -17,10 +17,10 @@ pub struct Frame {
     /// that should be written *to* the wire, not for packets that are read.
     pub name: &'static str,
 
-    /// The packet ID.
+    /// The packet ID, decoded from [`payload`](Frame::payload).
     pub id: i32,
 
-    /// The payload, excluding the length prefix.
+    /// The packet ID followed by the packet payload, excluding the length prefix.
     pub payload: Bytes,
 }
 
@@ -28,7 +28,13 @@ impl Frame {
     /// Encodes a packet for the given protocol version.
     ///
     /// This is the only place an outbound packet ID is resolved, so no call site can drift from the
-    /// ID table in the packet's own declaration.
+    /// ID table in the packet's own declaration and no packet has to write its own ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`CodecError::PacketNotInVersion`] if the packet does not exist in `version`, a
+    /// [`CodecError::OversizedFrame`] if the encoded packet does not fit a frame, and any error the
+    /// packet's own encoder raises.
     pub fn of<P: Packet>(packet: &P, version: ProtocolVersion, options: Options) -> Result<Self> {
         // Sending a packet that does not exist in the peer's version is an internal error, not a
         // silent no-op: the alternative is a client waiting forever for something we never sent.
@@ -41,6 +47,8 @@ impl Frame {
         let mut buf = BytesMut::with_capacity(64);
         {
             let mut writer = Writer::new(&mut buf).with_options(options);
+            // The ID leads the payload, exactly as the decoder will find it.
+            writer.var_int(id);
             packet.encode(&mut writer, version)?;
         }
 
@@ -49,8 +57,7 @@ impl Frame {
                 packet: P::NAME,
                 length: buf.len(),
                 limit: options.max_frame_len,
-            }
-            .into());
+            });
         }
 
         Ok(Self {
@@ -119,7 +126,7 @@ impl<C: Cipher> Decoder for FrameCodec<C> {
         let mut reader = Reader::new(src).with_options(self.options);
         let length = match reader.var_int("packet_length") {
             Ok(length) => length,
-            Err(err) if matches!(err, WireError::Eof { .. }) => return Ok(None),
+            Err(WireError::Eof { .. }) => return Ok(None),
             Err(err) => return Err(err.into()),
         };
         if length < 0 {
@@ -135,8 +142,7 @@ impl<C: Cipher> Decoder for FrameCodec<C> {
                 packet: UNKNOWN_PACKET_NAME,
                 limit: self.options.max_frame_len,
                 length,
-            }
-            .into());
+            });
         }
 
         // Wait for the full frame. Reserving up front avoids repeated growth for large frames.
@@ -152,6 +158,8 @@ impl<C: Cipher> Decoder for FrameCodec<C> {
         self.decrypted = self.decrypted.saturating_sub(total);
         let _prefix = frame.split_to(header);
 
+        // The ID is read for routing but left in the payload, so that what we decode has the same
+        // shape as what `Frame::of` builds.
         let mut reader = Reader::new(&frame).with_options(self.options);
         let id = reader.var_int("packet_id")?;
         let payload = frame.freeze();

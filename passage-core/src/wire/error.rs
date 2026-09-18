@@ -1,7 +1,12 @@
 use thiserror::Error;
 
+/// The wire result type, defaulting to [`WireError`].
 pub type Result<T> = std::result::Result<T, WireError>;
 
+/// An error raised while reading or writing the Minecraft wire format.
+///
+/// Every variant names the field it was raised for, so a malformed packet says which of its fields
+/// disagreed rather than only that one did.
 #[derive(Debug, Error, PartialOrd, PartialEq)]
 pub enum WireError {
     /// The buffer ended in the middle of a value.

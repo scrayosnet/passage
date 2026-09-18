@@ -226,9 +226,13 @@ where
     pub async fn run(mut self) -> Outcome<S> {
         let result = self.serve().await;
 
-        // Close the socket.
+        // Close the socket under a token of its own. The connection's token is already cancelled by
+        // the time the error path reaches here, and a cancelled token would abandon the close on its
+        // first `Poll::Pending`. What still bounds it is the lifetime, which the error path has
+        // already switched to `close_timeout`.
+        let closing = CancellationToken::new();
         let close = self.framed.close().map_err(Into::into);
-        if let Err(error) = guarded(&self.shutdown, &mut self.lifetime, close).await {
+        if let Err(error) = guarded(&closing, &mut self.lifetime, close).await {
             debug!(%error, "failed to close the socket");
         }
 
@@ -249,11 +253,14 @@ where
             return Ok(());
         };
 
-        // Notify any detached tasks and re-create timeout limits for error hooks.
+        // Stop everything the connection started and cut off any detached task that still holds a
+        // handle. Together with the fresh queue below, this makes the error hook the only writer
+        // from here on. Nothing can interleave with the last thing we say to the peer.
         self.tasks.clear();
         self.shutdown.cancel();
 
-        // Restart the drive with the error handler.
+        // The error hook gets its own clock. An expired lifetime and a canceled token are two of
+        // the reasons there is something left to say, so neither may bound the answer.
         self.shutdown = CancellationToken::new();
         self.lifetime = self
             .config
@@ -262,20 +269,44 @@ where
         let (handle, mut ops) =
             ConnectionHandle::new(self.shutdown.clone(), self.config.wire_options);
 
-        // Run the error hook and settle its results.
+        // Run the error hook and write whatever it queued.
         let ctx = Ctx::new(&self.state, self.phase, self.version, &handle);
         if let Err(error) = self.dispatcher.on_error(ctx, &mut error) {
             debug!(%error, "failed to complete error handling");
         }
-        if let Err(error) = self.drive(&handle, &mut ops).await {
-            debug!(%error, "failed to complete error handling");
-        };
+        self.settle(&handle, &mut ops).await;
 
         // Notify any detached task of the error hook to complete.
         self.tasks.clear();
         self.shutdown.cancel();
 
         Err(error)
+    }
+
+    /// Carries out what the error hook queued without accepting new frames or handling ticks.
+    ///
+    /// Failures here are logged and stop the drain. The reason the connection is ending was decided
+    /// before this ran, and losing it to a broken socket on the way out would replace the diagnosis
+    /// with the symptom.
+    async fn settle(
+        &mut self,
+        handle: &ConnectionHandle<S>,
+        ops: &mut mpsc::UnboundedReceiver<Op<S>>,
+    ) {
+        while let Ok(op) = ops.try_recv() {
+            match self.handle_op(handle, op).await {
+                // The hook asked to end; there is nothing after it to write.
+                Ok(ControlFlow::Break(())) => return,
+                Ok(ControlFlow::Continue(())) => {}
+                Err(error) => {
+                    debug!(%error, "gave up on what the error handler queued");
+                    return;
+                }
+            }
+        }
+        if let Err(error) = self.flush().await {
+            debug!(%error, "gave up flushing what the error handler queued");
+        }
     }
 
     /// Drive the connection, using the provided handle and operations channel pair to schedule operations.
@@ -290,20 +321,22 @@ where
 
                 // 1. Everything handlers asked for, before anything else.
                 op = ops.recv() => {
-                    // TODO handle errors better?
-                    let flow = self.handle_op(handle, op.expect("cannot be closed")).await?;
+                    let op = op.expect("the drive holds a handle, so the queue cannot close");
+                    if self.handle_op(handle, op).await?.is_break() {
+                        return Ok(());
+                    }
+                    // One 'write' for a batch of packets rather than one per packet.
                     if ops.is_empty() {
                         self.flush().await?;
                     }
-                    if flow.is_break() {
-                        return Ok(());
-                    };
                 },
 
                 // 2. Finished handler tasks.
                 done = self.tasks.next(), if !self.tasks.is_empty() => {
-                    let (exclusive, result) = done.expect("cannot be empty");
-                    self.exclusive = self.exclusive.saturating_sub(exclusive.then(|| 1).unwrap_or(0));
+                    let (exclusive, result) = done.expect("the set is not empty");
+                    if exclusive {
+                        self.exclusive = self.exclusive.saturating_sub(1);
+                    }
                     result?;
                 },
 
@@ -394,7 +427,7 @@ where
                     }
                 }
             }
-            Op::Fail(err) => return Err(err.into()),
+            Op::Fail(err) => return Err(err),
             Op::Close => {
                 self.flush().await?;
                 return Ok(ControlFlow::Break(()));
@@ -407,7 +440,7 @@ where
     fn handle_tick(&mut self, handle: &ConnectionHandle<S>) -> Result<()> {
         Ok(self
             .dispatcher
-            .on_tick(Ctx::new(&self.state, self.phase, self.version, &handle))?)
+            .on_tick(Ctx::new(&self.state, self.phase, self.version, handle))?)
     }
 
     /// Handles a frame (i.e., incoming packet). It checks whether the exclusive guard is violated.

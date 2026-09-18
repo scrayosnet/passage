@@ -1,7 +1,7 @@
 use crate::connection::{ConnectionError, Ctx, DispatchError, Dispatcher, MakeDispatcher};
 use crate::router::{Router, UnknownPolicy};
 use crate::version::ProtocolVersion;
-use anyhow::bail;
+use anyhow::anyhow;
 use std::sync::Arc;
 use tracing::trace;
 
@@ -73,13 +73,16 @@ impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
                 trace!(id, phase = ?ctx.phase, "ignoring unhandled packet");
                 return Ok(());
             }
-            // While not ideal, we send an 'anyhow' error from the library code here. This makes the
-            // error handling easier.
-            bail!(
-                "unknown packet ID {id} received in phase {:?} at version {:?}",
-                ctx.phase,
-                ctx.version
-            );
+            // A packet nobody registered is the peer's doing -- an unsupported client or someone
+            // probing -- so it is classified as one and does not page anyone.
+            return Err(DispatchError::peer(
+                "unknown_packet",
+                anyhow!(
+                    "unknown packet ID {id:#04x} received in phase {:?} at version {}",
+                    ctx.phase,
+                    ctx.version
+                ),
+            ));
         };
 
         // Tracing lives here rather than on the connection, because this is where the name is

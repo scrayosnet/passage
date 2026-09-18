@@ -31,6 +31,14 @@ pub struct Entry<S> {
     pub(crate) dispatch: ErasedHandler<S>,
 }
 
+/// The highest packet ID a registration may claim.
+///
+/// This is a sanity ceiling, not the table's width: a table is sized by the IDs actually registered
+/// in its phase. It exists because the slot is the index, so an absurd ID would size the table
+/// rather than be rejected by it. It sits above the Play phase, whose client-bound IDs already run
+/// past `0x80`.
+const MAX_PACKET_ID: i32 = 1023;
+
 /// The dispatch table for one interval of protocol versions.
 pub struct Table {
     /// The phase table. It has one id map per phase. The map is represented as a list of optional
@@ -59,12 +67,26 @@ impl Table {
     /// Creates a new [`Table`] from the entries and protocol version. On conflict, the previous entry
     /// is overwritten in the table (printing a warning). This may, but should not, be used to overwrite
     /// from default configurations.
+    ///
+    /// A packet whose ID falls outside `0..=`[`MAX_PACKET_ID`] is skipped with a warning rather than
+    /// registered.
     pub fn new<S>(entries: &[Entry<S>], version: ProtocolVersion) -> Self {
         let mut by_phase: [Vec<Option<u16>>; Phase::COUNT] = Default::default();
         for (index, entry) in entries.iter().enumerate() {
             let Some(id) = crate::packet::ids(version, entry.ids) else {
                 continue;
             };
+
+            if !(0..=MAX_PACKET_ID).contains(&id) {
+                warn!(
+                    packet = entry.name,
+                    packet_id = id,
+                    limit = MAX_PACKET_ID,
+                    version = %version,
+                    "Packet ID out of range, skipping registration"
+                );
+                continue;
+            }
 
             let table = &mut by_phase[entry.phase.index()];
             let slot = id as usize;

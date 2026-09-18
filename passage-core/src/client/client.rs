@@ -1,1 +1,3 @@
-// TODO implement me!
+//! The client connection flow.
+//!
+//! Not implemented yet.

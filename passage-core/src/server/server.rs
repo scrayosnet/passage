@@ -53,10 +53,15 @@ pub struct Server<L = (), F = (), M = (), A = ()> {
     limit: Option<Arc<Semaphore>>,
 }
 
-impl Default for Server<(), (), ()> {
-    fn default() -> Self {
+impl<L: Listener> Server<L, (), (), ()> {
+    /// Starts building a server that accepts from `listener`.
+    ///
+    /// The listener comes first and is not optional. Every other setter needs `L::Addr` in scope to
+    /// be able to type its closure, so there is no useful server to build before it is known -- and
+    /// a `Server` that has no listener is not a state worth being able to name.
+    pub fn new(listener: L) -> Self {
         Server {
-            listener: (),
+            listener,
             state: (),
             dispatcher: (),
             layers: (),
@@ -198,7 +203,12 @@ where
     A: Layer<L::Io, L::Addr>,
 {
     /// Serves the [`Server`] to accept new connections. It completes once the shutdown token is
-    /// canceled. Connections are allowed to complete gracefully up to the configured timeout.
+    /// canceled.
+    ///
+    /// Every connection holds a child of the shutdown token, so cancelling the server stops the
+    /// accept loop *and* every live connection at once. Each connection then gets its
+    /// [`close_timeout`](crate::connection::Options::close_timeout) to say goodbye;
+    /// [`drain_timeout`](Server::drain_timeout) bounds how long the server waits for all of them.
     pub async fn serve(mut self) {
         // The shared server state, used to create new connections.
         let tasks = TaskTracker::new();
@@ -343,20 +353,31 @@ async fn connection<L, S, F, D, A>(
             let elapsed = started.elapsed();
             let version = outcome.version;
             let phase = outcome.phase;
-            let reason = outcome.error.as_ref().map(|err| err.reason()).flatten();
-            let peer_error = outcome
-                .error
-                .as_ref()
-                .map(|err| err.is_peer_error())
-                .unwrap_or(false);
-            if !peer_error {
-                debug!(?elapsed, ?version, ?phase, "connection closed");
-            } else {
-                error!(?elapsed, ?version, ?phase, error = ?outcome.error, reason, "connection closed");
+            match &outcome.error {
+                // A handler closed it. There is nothing to report.
+                None => debug!(?elapsed, ?version, ?phase, "connection closed"),
+                // A hangup, a timeout, a peer that sent nonsense. All ordinary weather, and a
+                // scanner that took its MOTD and left looks exactly like the first of them.
+                Some(err) if err.is_peer_error() => debug!(
+                    ?elapsed,
+                    ?version,
+                    ?phase,
+                    reason = err.reason(),
+                    "connection ended"
+                ),
+                // Our bug, or a dependency failing: the one case an operator has to see.
+                Some(err) => error!(
+                    ?elapsed,
+                    ?version,
+                    ?phase,
+                    reason = err.reason(),
+                    cause = %err,
+                    "connection failed"
+                ),
             }
         }
         Err(payload) => {
-            error!(err = panic_message(&payload), "Connection paniced");
+            error!(cause = panic_message(&payload), "connection panicked");
         }
     };
 }
@@ -369,15 +390,6 @@ fn panic_message(payload: &(dyn Any + Send)) -> String {
         message.clone()
     } else {
         "a handler panicked".to_owned()
-    }
-}
-
-/// Wraps a cancellation token, canceling it when the struct is dropped.
-struct CancelOnDrop(CancellationToken);
-
-impl Drop for CancelOnDrop {
-    fn drop(&mut self) {
-        self.0.cancel();
     }
 }
 

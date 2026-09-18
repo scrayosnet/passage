@@ -143,7 +143,7 @@ impl<S> Clone for ConnectionHandle<S> {
         Self {
             ops: self.ops.clone(),
             shutdown: self.shutdown.clone(),
-            options: self.options.clone(),
+            options: self.options,
         }
     }
 }

@@ -132,8 +132,7 @@ impl<'a> Writer<'a> {
                 field,
                 actual: value,
                 limit: self.options.max_frame_len,
-            }
-            .into());
+            });
         }
         // Bounded by `max_frame_len`, so the cast is lossless.
         self.var_int(value as i32);
@@ -161,11 +160,12 @@ impl<'a> Writer<'a> {
         self.bytes(field, value.as_bytes())
     }
 
-    /// Writes a value preceded by a boolean saying whether it is there. This is different from
-    /// [`gated`](Writer::gated) in that it does not write a length prefix.
+    /// Writes a value preceded by a boolean saying whether it is there. This is the write half of
+    /// [`Reader::optional`](crate::wire::Reader::optional): the boolean is emitted either way, so a
+    /// `None` costs one byte on the wire rather than nothing.
     ///
     /// ```ignore
-    /// w.optional(self.payload.as_deref(), |w, payload| w.bytes(payload))?;
+    /// w.optional(self.payload.as_deref(), |w, payload| w.bytes("payload", payload))?;
     /// ```
     ///
     /// # Errors

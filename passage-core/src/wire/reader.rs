@@ -62,8 +62,7 @@ impl<'a> Reader<'a> {
                 field,
                 needed: n,
                 remaining,
-            }
-            .into());
+            });
         }
         let slice = &self.buf[self.pos..self.pos + n];
         self.pos += n;
@@ -91,10 +90,6 @@ impl<'a> Reader<'a> {
     }
 
     /// Reads a signed byte.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`WireError::Eof`] in case the reader has not enough bytes remaining.
     ///
     /// # Errors
     ///
@@ -176,6 +171,10 @@ impl<'a> Reader<'a> {
     }
 
     /// Reads a UUID (two big-endian `u64`s).
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`WireError::Eof`] in case the reader has not enough bytes remaining.
     pub fn uuid(&mut self, field: &'static str) -> Result<Uuid> {
         Ok(Uuid::from_bytes(self.fixed(field)?))
     }
@@ -196,17 +195,17 @@ impl<'a> Reader<'a> {
             let bits = i32::from(byte & 0b0111_1111);
             // The fifth byte only has four significant bits; anything else would silently wrap.
             if index == 4 && bits > 0b1111 {
-                return Err(WireError::VarIntTooLong { field, kind: KIND }.into());
+                return Err(WireError::VarIntTooLong { field, kind: KIND });
             }
             result |= bits << (7 * index);
             if byte & 0b1000_0000 == 0 {
                 if self.options.strict_varints && index > 0 && bits == 0 {
-                    return Err(WireError::VarIntNotCanonical { field, kind: KIND }.into());
+                    return Err(WireError::VarIntNotCanonical { field, kind: KIND });
                 }
                 return Ok(result);
             }
         }
-        Err(WireError::VarIntTooLong { field, kind: KIND }.into())
+        Err(WireError::VarIntTooLong { field, kind: KIND })
     }
 
     /// Reads a `VarLong`.
@@ -225,17 +224,17 @@ impl<'a> Reader<'a> {
             let bits = i64::from(byte & 0b0111_1111);
             // The tenth byte only has one significant bit.
             if index == 9 && bits > 0b1 {
-                return Err(WireError::VarIntTooLong { field, kind: KIND }.into());
+                return Err(WireError::VarIntTooLong { field, kind: KIND });
             }
             result |= bits << (7 * index);
             if byte & 0b1000_0000 == 0 {
                 if self.options.strict_varints && index > 0 && bits == 0 {
-                    return Err(WireError::VarIntNotCanonical { field, kind: KIND }.into());
+                    return Err(WireError::VarIntNotCanonical { field, kind: KIND });
                 }
                 return Ok(result);
             }
         }
-        Err(WireError::VarIntTooLong { field, kind: KIND }.into())
+        Err(WireError::VarIntTooLong { field, kind: KIND })
     }
 
     /// Reads a length prefix for `field`.
@@ -248,7 +247,7 @@ impl<'a> Reader<'a> {
     pub fn length(&mut self, field: &'static str, limit: usize) -> Result<usize> {
         let raw = self.var_int(field)?;
         if raw < 0 {
-            return Err(WireError::NegativeLength { field, value: raw }.into());
+            return Err(WireError::NegativeLength { field, value: raw });
         }
         // `raw` is non-negative, so the cast is lossless on every target we support.
         let length = raw as usize;
@@ -257,8 +256,7 @@ impl<'a> Reader<'a> {
                 field,
                 limit,
                 actual: length,
-            }
-            .into());
+            });
         }
         let remaining = self.remaining();
         if length > remaining {
@@ -266,8 +264,7 @@ impl<'a> Reader<'a> {
                 field,
                 needed: length,
                 remaining,
-            }
-            .into());
+            });
         }
         Ok(length)
     }
@@ -290,7 +287,7 @@ impl<'a> Reader<'a> {
     /// it returns a [`WireError::Utf8`] if the string is an invalid UTF-8 encoding.
     pub fn string(&mut self, field: &'static str, limit: usize) -> Result<String> {
         let bytes = self.bytes(field, limit)?;
-        String::from_utf8(bytes.to_vec()).map_err(|_| WireError::Utf8 { field }.into())
+        String::from_utf8(bytes.to_vec()).map_err(|_| WireError::Utf8 { field })
     }
 
     /// Reads a length-prefixed array of composite values with up to `limit` elements.
@@ -374,10 +371,14 @@ impl<'a> Reader<'a> {
     }
 
     /// Asserts that the whole payload was consumed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`WireError::TrailingBytes`] if any byte of the payload was left undecoded.
     pub fn finish(&self, packet: &'static str) -> Result<()> {
         let remaining = self.remaining();
         if remaining > 0 {
-            return Err(WireError::TrailingBytes { packet, remaining }.into());
+            return Err(WireError::TrailingBytes { packet, remaining });
         }
         Ok(())
     }

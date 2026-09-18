@@ -1,33 +1,152 @@
 use crate::connection::{ConnectionError, Ctx};
-use std::sync::Arc;
+use std::fmt;
 
-/// The [`Dispatcher`] is a thin wrapper around custom handler functions. These return custom errors
-/// that cannot be predicted at this point. As such, it refers to [`anyhow::Error`] instead.
-pub type DispatchError = anyhow::Error;
+/// Who caused a handler failure.
+///
+/// The driver cannot know whether a failed authentication is the peer's fault, ours, or a
+/// dependency's, so the handler that raised it says. This is what decides the log level and whether
+/// a failure is worth reporting: see [`ConnectionError::is_peer_error`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum Class {
+    /// The peer sent something illegal or stopped playing along. Expected in the wild (scanners,
+    /// mods, bots, timeouts): count it, log it at `debug`, never page anyone.
+    Peer,
 
-/// The [`Dispatcher`] is a thin wrapper around custom handler functions. These return custom errors
-/// that cannot be predicted at this point. As such, it refers to [`anyhow::Error`] instead.
+    /// A bug on our side, or a dependency failing. Log it at `warn`/`error` and report it. The
+    /// default, because an unclassified failure is one nobody has thought about yet.
+    #[default]
+    Internal,
+}
+
+/// An error raised by a [`Dispatcher`]'s handlers.
+///
+/// The source is an [`anyhow::Error`] because the driver cannot list what a custom handler will
+/// fail with. What it *can* ask for is the two things telemetry needs and a handler always knows:
+/// who is to blame ([`class`](DispatchError::class)) and a stable metric label
+/// ([`label`](DispatchError::label)). A plain `?` on an [`anyhow::Error`] fills both with the
+/// conservative default, so handlers that do not care pay nothing.
+#[derive(Debug)]
+pub struct DispatchError {
+    /// Who is to blame.
+    pub class: Class,
+
+    /// A stable, low-cardinality metric label. Never peer-controlled.
+    pub label: &'static str,
+
+    /// The underlying error.
+    pub source: anyhow::Error,
+}
+
+/// The label a [`DispatchError`] carries when a handler did not choose one.
+const DEFAULT_LABEL: &str = "dispatch";
+
+impl DispatchError {
+    /// Raises a handler error the peer is to blame for: a rejection, a timeout, a failed check.
+    #[must_use]
+    pub fn peer(label: &'static str, source: impl Into<anyhow::Error>) -> Self {
+        Self {
+            class: Class::Peer,
+            label,
+            source: source.into(),
+        }
+    }
+
+    /// Raises a handler error we are to blame for: a bug, a misconfiguration, a failing dependency.
+    #[must_use]
+    pub fn internal(label: &'static str, source: impl Into<anyhow::Error>) -> Self {
+        Self {
+            class: Class::Internal,
+            label,
+            source: source.into(),
+        }
+    }
+
+    /// Whether the peer is to blame for this error.
+    #[must_use]
+    pub fn is_peer_error(&self) -> bool {
+        self.class == Class::Peer
+    }
+}
+
+impl fmt::Display for DispatchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.source, f)
+    }
+}
+
+impl std::error::Error for DispatchError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+/// So that a handler can `?` an [`anyhow::Error`] without classifying it. An unclassified failure is
+/// [`Class::Internal`], because assuming the peer's fault would hide our own bugs.
+impl From<anyhow::Error> for DispatchError {
+    fn from(source: anyhow::Error) -> Self {
+        Self {
+            class: Class::Internal,
+            label: DEFAULT_LABEL,
+            source,
+        }
+    }
+}
+
+/// So that a handler can `?` the queue operations on its own [`Ctx`] -- `ctx.handle.close()?` and
+/// friends return a [`ConnectionError`]. The classification the connection already made is carried
+/// across rather than flattened to the default.
+impl From<ConnectionError> for DispatchError {
+    fn from(error: ConnectionError) -> Self {
+        Self {
+            class: if error.is_peer_error() {
+                Class::Peer
+            } else {
+                Class::Internal
+            },
+            label: error.reason(),
+            source: anyhow::Error::new(error),
+        }
+    }
+}
+
+/// The dispatch result type, defaulting to [`DispatchError`]. Private, so that the crate has one
+/// exported `Result` alias ([`ConnectionError`]'s) rather than two that shadow each other.
 type Result<T, E = DispatchError> = std::result::Result<T, E>;
 
-/// A [`Dispatcher`] is used by the connection to handle incoming packets. It is implemented for [`Box`]
-/// and [`Option`].
+/// A [`Dispatcher`] is used by the connection to handle incoming packets. It is implemented for
+/// [`Box`] and [`Option`].
 ///
-/// The [`Dispatcher`] is a thin wrapper around custom handler functions returning [`DispatchError`].
+/// Every method has a default that does nothing, so an implementation only writes the hooks it
+/// cares about.
 pub trait Dispatcher<S> {
     /// Called when the connection changes the protocol version. This can be used to update internal
     /// dispatch tables.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever the implementation raises while rebinding. An error here fails the
+    /// connection.
     fn on_version(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
         let _ = ctx;
         Ok(())
     }
 
-    /// Handles an incoming packet.
+    /// Handles an incoming packet. `payload` leads with the ID varint the frame was routed by.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever the handler raises. An error here fails the connection, and
+    /// [`on_error`](Dispatcher::on_error) gets the last word before the socket goes away.
     fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
         let _ = (ctx, id, payload);
         Ok(())
     }
 
     /// Handles a tick event.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever the tick handler raises. An error here fails the connection.
     fn on_tick(&self, ctx: Ctx<'_, S>) -> Result<()> {
         let _ = ctx;
         Ok(())
@@ -35,6 +154,17 @@ pub trait Dispatcher<S> {
 
     /// Handles a connection error. It is called before the connection is closed and should be used
     /// to send custom disconnect packets to the peer.
+    ///
+    /// It is a last word, not a veto: whether the connection ends was decided before it was called,
+    /// and the error it returns is logged rather than reported. It may rewrite `error`, which is
+    /// what the connection then reports. Check
+    /// [`ConnectionError::can_reply`] before composing a message: after a hangup there is nobody
+    /// left to read it.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever the hook raises. The failure is logged and does not replace the ending the
+    /// connection already had.
     fn on_error(&self, ctx: Ctx<'_, S>, error: &mut ConnectionError) -> Result<()> {
         let _ = (ctx, error);
         Ok(())
@@ -44,6 +174,10 @@ pub trait Dispatcher<S> {
 impl<S> Dispatcher<S> for () {}
 
 impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
+    fn on_version(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
+        (**self).on_version(ctx)
+    }
+
     fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
         (**self).on_frame(ctx, id, payload)
     }
@@ -57,21 +191,18 @@ impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
     }
 }
 
-impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Arc<D> {
-    fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
-        (**self).on_frame(ctx, id, payload)
-    }
-
-    fn on_tick(&self, ctx: Ctx<'_, S>) -> Result<()> {
-        (**self).on_tick(ctx)
-    }
-
-    fn on_error(&self, ctx: Ctx<'_, S>, error: &mut ConnectionError) -> Result<()> {
-        (**self).on_error(ctx, error)
-    }
-}
+// There is deliberately no impl for `Arc<D>`. `on_version` takes `&mut self`, so a shared dispatcher
+// could not rebind its table -- it would silently keep serving every connection from the table it
+// started on, which is exactly the bug the connection calls `on_version` to prevent.
 
 impl<S, D: Dispatcher<S>> Dispatcher<S> for Option<D> {
+    fn on_version(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
+        let Some(this) = self else {
+            return Ok(());
+        };
+        this.on_version(ctx)
+    }
+
     fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
         let Some(this) = self else {
             return Ok(());
@@ -104,7 +235,7 @@ pub trait MakeDispatcher<S>: Send + 'static {
     fn make(&self) -> Self::Dispatcher;
 }
 
-/// A [`MakeDispatcherFn`] builds a dispatcher from a closure.
+/// A [`MakeDispatcherFn`] builds a dispatcher from a closure. See [`make_with`].
 pub struct MakeDispatcherFn<F>(F);
 
 impl<S, D, F> MakeDispatcher<S> for MakeDispatcherFn<F>

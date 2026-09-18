@@ -14,6 +14,30 @@ observations are quoted inline. Claims marked *by inspection* were not executed.
 
 ---
 
+## Status
+
+Every decision recorded in the blockquotes below has been applied. What that leaves:
+
+* **Fixed:** §3.1 (frame IDs, both directions), §3.2 (`Server::new` requires the listener), §3.3
+  (types re-exported at the crate root), §3.4 (`on_version` forwarded; the `Arc` impl removed,
+  because `&mut self` cannot be forwarded through one), §3.5 (dead error variants removed; the
+  overwrite-with-warning is now documented behaviour), §3.6 (`MAX_PACKET_ID`; out-of-range IDs are
+  skipped with a warning instead of sizing the table), §3.8 (`settle` replaces the second `drive`, so
+  no frame is dispatched after the connection has failed), §3.9 (the close gets its own token),
+  §3.11 (log branches inverted back), §3.12 in full, §5.1 (`DispatchError` carries `class` and
+  `label`; unknown packets are `Class::Peer` again), §5.4 (`can_reply` re-added). `#![deny(unsafe_code)]`
+  and `#![warn(missing_docs)]` are back, and the crate is clippy- and rustfmt-clean.
+* **Accepted as designed, not changed:** §3.7 (a handler that answers an error itself must not also
+  fail), §3.10 (cancelling the server cancels its connections), §5.2 (no cross-phase packet lookup),
+  §5.3 (`anyhow` as the handler source type), §5.5 (`tick_interval: None` is the opt-out), §5.6
+  (`Ctx` has no forwarding methods, so the version is visible at every send).
+* **Outstanding:** §4. The test suite is still to be ported.
+
+The sections below are the original findings and are left unedited, so the decisions read against
+what they answered.
+
+---
+
 ## 1. Structural map
 
 | `passage-driver`                        | `passage-core`                                                     | Note                              |

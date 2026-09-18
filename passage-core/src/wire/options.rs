@@ -4,7 +4,11 @@
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     /// Maximum length of a single frame, excluding the length prefix. Enforced in both directions.
-    /// Defaults to `8KB` which exceeds any realistic frame size (strings are limited to `32767` bytes).
+    ///
+    /// Sized by the biggest thing a server legitimately *sends*, which is a status response
+    /// carrying a favicon: base64 of a 64x64 PNG, plus a MOTD and a sample. The vanilla client caps
+    /// that JSON at 32 767 characters, so a limit below it refuses ordinary content. It also bounds
+    /// every field transitively: no field can be longer than the frame that carries it.
     pub max_frame_len: usize,
 
     /// Whether non-canonical (overlong) `VarInt`/`VarLong` encodings are rejected.
@@ -18,7 +22,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            max_frame_len: 8 * 1024,
+            max_frame_len: 32 * 1024,
             strict_varints: true,
         }
     }
@@ -27,6 +31,7 @@ impl Default for Options {
 impl Options {
     /// Creates new permissive `Options`, allowing non-canonical (overlong) `VarInt`/`VarLong` encodings
     /// and not limiting the frame length. In general, the default options should be used.
+    #[must_use]
     pub fn permissive() -> Self {
         Self {
             max_frame_len: usize::MAX,

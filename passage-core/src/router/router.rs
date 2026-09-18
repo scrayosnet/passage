@@ -75,10 +75,12 @@ impl<S: 'static> RouterBuilder<S> {
         // handlers. As such, decoding handlers are wrapped as dispatch errors (i.e., anyhow).
         let dispatch: ErasedHandler<S> = Box::new(move |ctx: Ctx<'_, S>, payload: &[u8]| {
             let mut reader = Reader::new(payload).with_options(ctx.handle.options());
-            let packet = P::decode(&mut reader, ctx.version).context("packet failed to decode")?;
-            reader
-                .finish(P::NAME)
-                .context("packet failed to consume buffer")?;
+            reader.var_int("packet_id")
+                .with_context(|| format!("packet {} id failed to decode", P::NAME))?;
+            let packet = P::decode(&mut reader, ctx.version)
+                .with_context(|| format!("packet {} failed to decode", P::NAME))?;
+            reader.finish(P::NAME)
+                .with_context(|| format!("packet {} failed to consume buffer", P::NAME))?;
             handler(ctx, packet)
         });
         self.entries.push(Entry {

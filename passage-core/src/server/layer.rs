@@ -40,6 +40,7 @@ where
 pub struct Stack<A, B>(A, B);
 
 impl<A, B> Stack<A, B> {
+    /// Stacks `b` behind `a`: `a` sees the socket first, `b` sees what `a` produced.
     pub fn new(a: A, b: B) -> Self {
         Self(a, b)
     }

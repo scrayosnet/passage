@@ -2,13 +2,17 @@ use crate::version::ProtocolVersion;
 use crate::wire::WireError;
 use thiserror::Error;
 
-pub type Result<T> = std::result::Result<T, CodecError>;
+/// The codec result type, defaulting to [`CodecError`].
+pub type Result<T, E = CodecError> = std::result::Result<T, E>;
 
+/// An error raised while framing or unframing the byte stream.
 #[derive(Debug, Error)]
 pub enum CodecError {
+    /// A field of the frame could not be read or written.
     #[error(transparent)]
     Wire(#[from] WireError),
 
+    /// The transport failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
