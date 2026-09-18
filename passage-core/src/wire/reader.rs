@@ -273,7 +273,8 @@ impl<'a> Reader<'a> {
     ///
     /// # Errors
     ///
-    /// Returns an [`WireError::Eof`] in case the reader has not enough bytes remaining.
+    /// Returns whatever [`length`](Reader::length) raises for the prefix, and an
+    /// [`WireError::Eof`] in case the reader has not enough bytes remaining.
     pub fn bytes(&mut self, field: &'static str, limit: usize) -> Result<&'a [u8]> {
         let length = self.length(field, limit)?;
         self.take(field, length)
@@ -283,8 +284,8 @@ impl<'a> Reader<'a> {
     ///
     /// # Errors
     ///
-    /// Returns an [`WireError::Eof`] in case the reader has not enough bytes remaining. Additionally,
-    /// it returns a [`WireError::Utf8`] if the string is an invalid UTF-8 encoding.
+    /// Returns whatever [`bytes`](Reader::bytes) raises, and a [`WireError::Utf8`] if what it read is
+    /// not valid UTF-8.
     pub fn string(&mut self, field: &'static str, limit: usize) -> Result<String> {
         let bytes = self.bytes(field, limit)?;
         String::from_utf8(bytes.to_vec()).map_err(|_| WireError::Utf8 { field })
