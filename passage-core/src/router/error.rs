@@ -31,3 +31,44 @@ pub enum RouterError {
         limit: usize,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::version::versions;
+
+    #[test]
+    fn an_unordered_table_names_the_pair_that_is_the_wrong_way_round() {
+        // The table is read newest-first, so the message has to show which two entries swapped --
+        // the packet name alone does not say where to look in a long table.
+        let error = RouterError::UnorderedIds {
+            packet: "LoginStart",
+            previous: versions::V1_20_5,
+            version: versions::V26_2,
+        };
+        let message = error.to_string();
+        assert!(message.contains("LoginStart"), "{message}");
+        assert!(
+            message.contains("766") && message.contains("775"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_saturated_router_says_what_it_can_hold() {
+        let error = RouterError::TooManyPackets {
+            count: 65_536,
+            limit: 65_535,
+        };
+        assert!(error.to_string().contains("65535"), "{error}");
+    }
+
+    #[test]
+    fn a_registration_failure_can_be_compared() {
+        // Which is what lets a caller match on one without reaching for a string.
+        assert_eq!(
+            RouterError::TooManyPackets { count: 1, limit: 0 },
+            RouterError::TooManyPackets { count: 1, limit: 0 },
+        );
+    }
+}

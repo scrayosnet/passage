@@ -377,7 +377,13 @@ async fn connection<L, S, F, D, A>(
             }
         }
         Err(payload) => {
-            error!(cause = panic_message(&payload), "connection panicked");
+            // `as_ref`, not `&payload`: a `&Box<dyn Any>` coerces to a `dyn Any` whose concrete
+            // type is the *box*, so every downcast inside would miss and every panic would be
+            // reported as the fallback text.
+            error!(
+                cause = panic_message(payload.as_ref()),
+                "connection panicked"
+            );
         }
     };
 }

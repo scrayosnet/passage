@@ -78,3 +78,66 @@ pub enum WireError {
         remaining: usize,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One of every variant, so a new one cannot be added without a message to go with it.
+    fn every_error() -> Vec<WireError> {
+        vec![
+            WireError::Eof {
+                field: "server_address",
+                needed: 4,
+                remaining: 3,
+            },
+            WireError::VarIntTooLong {
+                field: "protocol_version",
+                kind: "VarInt",
+            },
+            WireError::VarIntNotCanonical {
+                field: "protocol_version",
+                kind: "VarLong",
+            },
+            WireError::NegativeLength {
+                field: "server_address",
+                value: -1,
+            },
+            WireError::LengthLimit {
+                field: "server_address",
+                limit: 255,
+                actual: 300,
+            },
+            WireError::Utf8 { field: "user_name" },
+            WireError::TrailingBytes {
+                packet: "Intention",
+                remaining: 2,
+            },
+        ]
+    }
+
+    #[test]
+    fn every_error_names_what_it_was_reading() {
+        // A malformed packet has to say which of its fields disagreed, not only that one did. The
+        // last variant names the packet instead, because by then the fields are all accounted for.
+        for error in every_error() {
+            let message = error.to_string();
+            let named = message.contains("server_address")
+                || message.contains("protocol_version")
+                || message.contains("user_name")
+                || message.contains("Intention");
+            assert!(named, "{message}");
+        }
+    }
+
+    #[test]
+    fn a_var_int_error_says_which_of_the_two_it_was() {
+        // `VarInt` and `VarLong` fail the same way and are bounded differently, so the message has
+        // to distinguish them or the number it names looks wrong.
+        let error = WireError::VarIntTooLong {
+            field: "id",
+            kind: "VarLong",
+        };
+        assert!(error.to_string().contains("VarLong"), "{error}");
+    }
+}

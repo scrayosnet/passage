@@ -17,3 +17,16 @@ impl Direction {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flipping_twice_is_the_identity() {
+        for direction in [Direction::Serverbound, Direction::Clientbound] {
+            assert_ne!(direction.flip(), direction);
+            assert_eq!(direction.flip().flip(), direction);
+        }
+    }
+}

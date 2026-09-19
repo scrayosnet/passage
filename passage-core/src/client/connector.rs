@@ -87,3 +87,54 @@ where
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::duplex;
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn a_socket_somebody_else_opened_is_handed_over_once() {
+        // What a test uses: one half of a duplex pair is a connection that was never dialed, and a
+        // client should not have to grow a second entry point to accept one.
+        let (io, _peer) = duplex(64);
+        let mut connector = Connected::new(io, "in-process");
+
+        let (_io, addr) = connector.connect().await.expect("the socket is there");
+        assert_eq!(addr, "in-process");
+
+        let err = connector.connect().await.expect_err("there is only one");
+        assert_eq!(err.kind(), io::ErrorKind::NotConnected);
+    }
+
+    #[tokio::test]
+    async fn a_closure_is_a_connector_for_a_socket_the_crate_knows_nothing_about() {
+        let mut connector = connect_with(|| async { Ok((duplex(64).0, "made up")) });
+        let (_io, addr) = connector.connect().await.expect("connects");
+        assert_eq!(addr, "made up");
+        // Unlike `Connected`, a closure can be dialed again.
+        assert!(connector.connect().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn an_address_dials_itself_and_reports_where_it_landed() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("binds");
+        let mut addr = listener.local_addr().expect("bound");
+
+        let (_io, reported) = addr.connect().await.expect("connects");
+        assert_eq!(reported, addr);
+        let (_accepted, _peer) = listener.accept().await.expect("accepts");
+    }
+
+    #[tokio::test]
+    async fn a_refused_dial_is_an_error_the_caller_can_read() {
+        // Nothing listens on a port we bound and dropped.
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("binds");
+        let mut addr = listener.local_addr().expect("bound");
+        drop(listener);
+
+        let err = addr.connect().await.expect_err("nothing is listening");
+        assert_eq!(err.kind(), io::ErrorKind::ConnectionRefused);
+    }
+}

@@ -31,3 +31,36 @@ impl Listener for TcpListener {
         Ok((io, addr))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpStream;
+
+    #[tokio::test]
+    async fn a_tcp_listener_is_a_listener() {
+        // The trait is three lines because a listener is a *source* of sockets and nothing else.
+        let mut listener = TcpListener::bind("127.0.0.1:0").await.expect("binds");
+        let bound = listener.local_addr().expect("bound");
+
+        let dialling = tokio::spawn(async move { TcpStream::connect(bound).await });
+        let (io, addr) = Listener::accept(&mut listener).await.expect("accepts");
+        let dialled = dialling.await.expect("no panic").expect("connects");
+
+        assert_eq!(addr, dialled.local_addr().expect("connected"));
+        assert!(io.nodelay().expect("a live socket"), "Nagle is off");
+    }
+
+    #[tokio::test]
+    async fn a_listener_can_be_accepted_from_more_than_once() {
+        // Returning is not the end of it: the accept loop calls this until it is cancelled.
+        let mut listener = TcpListener::bind("127.0.0.1:0").await.expect("binds");
+        let bound = listener.local_addr().expect("bound");
+
+        for _ in 0..2 {
+            let dialling = tokio::spawn(async move { TcpStream::connect(bound).await });
+            Listener::accept(&mut listener).await.expect("accepts");
+            dialling.await.expect("no panic").expect("connects");
+        }
+    }
+}

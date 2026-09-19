@@ -76,3 +76,60 @@ pub fn check_ids_unordered(
     ids.windows(2)
         .find_map(|pair| (pair[0].0 <= pair[1].0).then_some((pair[0].0, pair[1].0)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::version::versions;
+
+    #[test]
+    fn ids_pick_the_newest_matching_entry() {
+        let table = [(versions::V26_2, 0x05), (versions::V1_20_5, 0x02)];
+        assert_eq!(ids(versions::V26_2, &table), Some(0x05));
+        assert_eq!(ids(ProtocolVersion::new(767), &table), Some(0x02));
+        assert_eq!(ids(versions::V1_20_5, &table), Some(0x02));
+        // Below the oldest entry the packet does not exist.
+        assert_eq!(ids(ProtocolVersion::new(765), &table), None);
+        // A hostile version must not resolve to anything either.
+        assert_eq!(ids(ProtocolVersion::new(i32::MIN), &table), None);
+        // An empty table is a packet that exists nowhere.
+        assert_eq!(ids(versions::V26_2, &[]), None);
+    }
+
+    #[test]
+    fn a_version_that_cannot_be_placed_resolves_like_the_floor() {
+        let versioned = [(versions::V26_2, 0x05), (versions::V1_20_5, 0x02)];
+        let anchored = [(ProtocolVersion::UNKNOWN, 0x00)];
+        // A snapshot is numerically above every release, so a plain `>=` would hand it the newest
+        // ID -- while the router dispatches it against the floor table. That disagreement is the
+        // bug: an ID we would accept is not one we would send.
+        let snapshot = ProtocolVersion::new(0x4000_0000 | 132);
+        assert_eq!(ids(snapshot, &versioned), None);
+        assert_eq!(ids(snapshot, &anchored), Some(0x00));
+        // And a client that sends garbage can still be answered with the packets that never
+        // depended on a version: a status response, and a reason for turning it away.
+        assert_eq!(ids(ProtocolVersion::new(-1), &anchored), Some(0x00));
+    }
+
+    #[test]
+    fn an_id_table_written_the_wrong_way_round_is_detected() {
+        // `ids` takes the first entry that matches, so an ascending table resolves every version
+        // above the second entry to an ID from the wrong era -- silently, and only for some clients.
+        assert_eq!(
+            check_ids_unordered(&[(versions::V1_20_5, 0x02), (versions::V26_2, 0x05)]),
+            Some((versions::V1_20_5, versions::V26_2)),
+        );
+        assert_eq!(
+            check_ids_unordered(&[(versions::V26_2, 0x05), (versions::V1_20_5, 0x02)]),
+            None,
+        );
+        // A version listed twice is also out of order: the second entry is unreachable.
+        assert_eq!(
+            check_ids_unordered(&[(versions::V26_2, 0x05), (versions::V26_2, 0x02)]),
+            Some((versions::V26_2, versions::V26_2)),
+        );
+        // Nothing to compare is nothing to complain about.
+        assert_eq!(check_ids_unordered(&[]), None);
+        assert_eq!(check_ids_unordered(&[(versions::V26_2, 0x05)]), None);
+    }
+}

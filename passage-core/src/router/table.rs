@@ -123,3 +123,149 @@ impl Table {
         *self.by_phase[phase.index()].get(slot)?
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::version::versions;
+
+    fn entry<S>(
+        name: &'static str,
+        phase: Phase,
+        ids: &'static [(ProtocolVersion, i32)],
+    ) -> Entry<S> {
+        Entry {
+            name,
+            phase,
+            ids,
+            dispatch: Box::new(|_, _| Ok(())),
+        }
+    }
+
+    #[test]
+    fn breakpoints_are_the_versions_the_packets_name() {
+        // Which versions get a table is not something the caller has to know: the packets say.
+        let entries: Vec<Entry<()>> = vec![
+            entry(
+                "Newer",
+                Phase::Login,
+                &[(versions::V26_2, 0x05), (versions::V1_20_5, 0x02)],
+            ),
+            entry("Older", Phase::Login, &[(versions::V1_20_5, 0x03)]),
+            entry(
+                "Anchored",
+                Phase::Handshake,
+                &[(ProtocolVersion::UNKNOWN, 0x00)],
+            ),
+        ];
+        assert_eq!(
+            Table::breakpoints(&entries),
+            vec![ProtocolVersion::UNKNOWN, versions::V1_20_5, versions::V26_2],
+            "ascending, deduplicated, and the floor is always present",
+        );
+    }
+
+    #[test]
+    fn the_floor_is_present_even_when_no_packet_names_it() {
+        // It is what a pre-handshake connection, and anything the version table cannot place,
+        // dispatches against.
+        let entries: Vec<Entry<()>> = vec![entry("Only", Phase::Login, &[(versions::V26_2, 0x01)])];
+        assert_eq!(
+            Table::breakpoints(&entries),
+            vec![ProtocolVersion::UNKNOWN, versions::V26_2],
+        );
+        assert_eq!(
+            Table::breakpoints::<()>(&[]),
+            vec![ProtocolVersion::UNKNOWN]
+        );
+    }
+
+    #[test]
+    fn a_table_indexes_by_phase_and_id() {
+        let entries: Vec<Entry<()>> = vec![
+            entry("First", Phase::Login, &[(ProtocolVersion::UNKNOWN, 0x00)]),
+            entry("Second", Phase::Status, &[(ProtocolVersion::UNKNOWN, 0x00)]),
+            entry("Third", Phase::Login, &[(ProtocolVersion::UNKNOWN, 0x04)]),
+        ];
+        let table = Table::new(&entries, ProtocolVersion::UNKNOWN);
+
+        // IDs are only unique within a phase, which is why the phase is part of the key.
+        assert_eq!(table.lookup(Phase::Login, 0x00), Some(0));
+        assert_eq!(table.lookup(Phase::Status, 0x00), Some(1));
+        assert_eq!(table.lookup(Phase::Login, 0x04), Some(2));
+        // A gap inside the table, an ID past its end, and a phase nobody registered.
+        assert_eq!(table.lookup(Phase::Login, 0x01), None);
+        assert_eq!(table.lookup(Phase::Login, 0x99), None);
+        assert_eq!(table.lookup(Phase::Configuration, 0x00), None);
+    }
+
+    #[test]
+    fn a_packet_that_does_not_exist_in_a_version_is_not_in_its_table() {
+        let entries: Vec<Entry<()>> =
+            vec![entry("Newer", Phase::Login, &[(versions::V26_2, 0x05)])];
+        assert_eq!(
+            Table::new(&entries, versions::V1_20_5).lookup(Phase::Login, 0x05),
+            None,
+        );
+        assert_eq!(
+            Table::new(&entries, versions::V26_2).lookup(Phase::Login, 0x05),
+            Some(0),
+        );
+    }
+
+    #[test]
+    fn an_id_out_of_range_is_skipped_rather_than_sizing_the_table() {
+        // The slot is the index, so an absurd ID would otherwise resize a `Vec` to whatever the
+        // packet claimed. It is skipped, and the packets around it still register.
+        let entries: Vec<Entry<()>> = vec![
+            entry(
+                "Absurd",
+                Phase::Login,
+                &[(ProtocolVersion::UNKNOWN, i32::MAX)],
+            ),
+            entry("Negative", Phase::Login, &[(ProtocolVersion::UNKNOWN, -1)]),
+            entry(
+                "Ordinary",
+                Phase::Login,
+                &[(ProtocolVersion::UNKNOWN, 0x02)],
+            ),
+        ];
+        let table = Table::new(&entries, ProtocolVersion::UNKNOWN);
+
+        assert_eq!(table.lookup(Phase::Login, i32::MAX), None);
+        assert_eq!(table.lookup(Phase::Login, -1), None);
+        assert_eq!(table.lookup(Phase::Login, 0x02), Some(2));
+        assert_eq!(
+            table.by_phase[Phase::Login.index()].len(),
+            3,
+            "the table is sized by the IDs it accepted, not by the one it refused",
+        );
+    }
+
+    #[test]
+    fn the_highest_id_a_registration_may_claim_is_still_accepted() {
+        let entries: Vec<Entry<()>> = vec![entry(
+            "Edge",
+            Phase::Play,
+            &[(ProtocolVersion::UNKNOWN, MAX_PACKET_ID)],
+        )];
+        let table = Table::new(&entries, ProtocolVersion::UNKNOWN);
+        assert_eq!(table.lookup(Phase::Play, MAX_PACKET_ID), Some(0));
+    }
+
+    #[test]
+    fn a_duplicate_id_overwrites_the_registration_before_it() {
+        // Documented rather than rejected, so a default set of handlers can be overridden. The
+        // warning is what makes an accident visible.
+        let entries: Vec<Entry<()>> = vec![
+            entry("First", Phase::Login, &[(ProtocolVersion::UNKNOWN, 0x00)]),
+            entry("Second", Phase::Login, &[(ProtocolVersion::UNKNOWN, 0x00)]),
+        ];
+        let table = Table::new(&entries, ProtocolVersion::UNKNOWN);
+        assert_eq!(
+            table.lookup(Phase::Login, 0x00),
+            Some(1),
+            "the later one wins"
+        );
+    }
+}

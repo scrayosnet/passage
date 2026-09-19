@@ -18,4 +18,5 @@ tokio-util = { workspace = true, features = ["codec", "rt"] }
 tracing = { workspace = true, features = ["default"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util", "sync"] }
+tracing-subscriber = { workspace = true }

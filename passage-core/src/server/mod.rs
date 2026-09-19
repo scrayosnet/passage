@@ -8,7 +8,7 @@
 //! State is *per connection*, not shared, so [`Server::state`] takes a factory and calls it once per
 //! socket. Anything genuinely shared belongs in a captured [`Arc`](std::sync::Arc).
 //!
-//! Everything between the accept and the protocol is a [`Layer`]: a PROXY header, a TLS handshake, a
+//! Everything between the accept and the protocol is a [`Layer`](crate::router::Layer): a PROXY header, a TLS handshake, a
 //! rate limiter. All the same shape, all set with [`Server::layer`], and this module ships none of
 //! them -- a layer belongs next to the thing it implements.
 

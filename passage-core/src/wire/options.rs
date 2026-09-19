@@ -39,3 +39,24 @@ impl Options {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_default_frame_limit_holds_a_status_response_with_a_favicon() {
+        // The regression an 8 KiB default caused: a 64x64 favicon is base64 of a PNG that runs to
+        // several kilobytes, and refusing it would have been our own error for content the client
+        // asks for by default. The vanilla client caps that JSON at 32 767 characters.
+        assert!(Options::default().max_frame_len >= 32 * 1024);
+        assert!(Options::default().strict_varints);
+    }
+
+    #[test]
+    fn permissive_options_are_permissive_in_both_respects() {
+        let options = Options::permissive();
+        assert_eq!(options.max_frame_len, usize::MAX);
+        assert!(!options.strict_varints);
+    }
+}

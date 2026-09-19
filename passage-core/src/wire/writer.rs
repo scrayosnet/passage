@@ -206,3 +206,104 @@ impl<'a> Writer<'a> {
         self.buf.put_slice(value);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(f: impl FnOnce(&mut Writer<'_>)) -> BytesMut {
+        let mut buf = BytesMut::new();
+        f(&mut Writer::new(&mut buf));
+        buf
+    }
+
+    #[test]
+    fn var_ints_are_encoded_minimally() {
+        // The canonical form the reader insists on by default, from the side that produces it.
+        assert_eq!(write(|w| w.var_int(0)).as_ref(), &[0x00]);
+        assert_eq!(write(|w| w.var_int(127)).as_ref(), &[0x7F]);
+        assert_eq!(write(|w| w.var_int(128)).as_ref(), &[0x80, 0x01]);
+        assert_eq!(
+            write(|w| w.var_int(-1)).as_ref(),
+            &[0xFF, 0xFF, 0xFF, 0xFF, 0x0F]
+        );
+        assert_eq!(write(|w| w.var_int(i32::MAX)).len(), 5);
+        assert_eq!(write(|w| w.var_long(i64::MIN)).len(), 10);
+    }
+
+    #[test]
+    fn an_unencodable_length_is_refused_instead_of_wrapping() {
+        // The outbound counterpart of an oversized frame: no length prefix is emitted at all, so a
+        // prefix can never disagree with the payload that follows it.
+        let mut buf = BytesMut::new();
+        let mut writer = Writer::new(&mut buf).with_options(Options {
+            max_frame_len: 16,
+            ..Options::default()
+        });
+        let err = writer
+            .bytes("payload", &[0u8; 32])
+            .expect_err("must refuse");
+        assert!(
+            matches!(
+                err,
+                WireError::LengthLimit {
+                    limit: 16,
+                    actual: 32,
+                    ..
+                }
+            ),
+            "{err}"
+        );
+        assert!(buf.is_empty(), "nothing may reach the buffer");
+    }
+
+    #[test]
+    fn an_array_that_does_not_fit_is_refused_before_its_elements() {
+        let mut buf = BytesMut::new();
+        let values = vec![0u8; 32];
+        let err = Writer::new(&mut buf)
+            .with_options(Options {
+                max_frame_len: 4,
+                ..Options::default()
+            })
+            .array("values", &values, |w, value| {
+                w.u8(*value);
+                Ok(())
+            })
+            .expect_err("must refuse");
+        assert!(
+            matches!(err, WireError::LengthLimit { limit: 4, .. }),
+            "{err}"
+        );
+        assert!(buf.is_empty(), "nothing may reach the buffer");
+    }
+
+    #[test]
+    fn a_status_response_with_a_favicon_fits_the_default_frame() {
+        // The regression an 8 KiB default caused: a 64x64 favicon is base64 of a PNG that runs to
+        // several kilobytes, and refusing it would have been our own error for content the client
+        // asks for by default.
+        let favicon = "A".repeat(12 * 1024);
+        let body = format!(r#"{{"favicon":"data:image/png;base64,{favicon}"}}"#);
+        let mut buf = BytesMut::new();
+        Writer::new(&mut buf)
+            .string("body", &body)
+            .expect("a favicon is ordinary content, not an oversized frame");
+    }
+
+    #[test]
+    fn the_writer_reports_what_it_has_written() {
+        let mut buf = BytesMut::new();
+        let mut writer = Writer::new(&mut buf);
+        assert!(writer.is_empty());
+        writer.u8(0x01);
+        assert_eq!(writer.len(), 1);
+        assert!(!writer.is_empty());
+    }
+
+    #[test]
+    fn raw_bytes_carry_no_prefix() {
+        // What the frame codec writes a payload with: the length was already accounted for.
+        assert_eq!(write(|w| w.raw(&[0x01, 0x02])).as_ref(), &[0x01, 0x02]);
+    }
+}

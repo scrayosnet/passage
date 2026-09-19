@@ -90,3 +90,91 @@ pub mod versions {
     /// The 26.2 protocol: Added the session ID field to `Login Success`.
     pub const V26_2: V = V::new(775);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 1.21: a release between the two breakpoints, which no list in this crate names.
+    const V1_21: ProtocolVersion = ProtocolVersion::new(767);
+
+    /// 24w03a, a 1.20.5 snapshot: numerically above every release, which is the trap.
+    const SNAPSHOT: ProtocolVersion = ProtocolVersion::new(0x4000_0000 | 132);
+
+    #[test]
+    fn thresholds_are_inclusive_lower_bounds() {
+        assert!(!V1_21.at_least(versions::V26_2));
+        assert!(versions::V26_2.at_least(versions::V26_2));
+        assert!(versions::V26_2.at_least(versions::V1_20_5));
+        // 1.20.4: below the oldest version Passage can serve.
+        assert!(!ProtocolVersion::new(765).at_least(versions::V1_20_5));
+    }
+
+    #[test]
+    fn hostile_versions_do_not_cross_a_threshold_by_accident() {
+        // A client is free to send a negative or absurd version. Neither may cross a threshold
+        // unexpectedly, and neither may panic.
+        assert!(!ProtocolVersion::new(i32::MIN).at_least(versions::V1_20_5));
+        assert!(ProtocolVersion::new(i32::MAX).at_least(versions::V1_20_5));
+        // Which is precisely why neither is a version a codec may be resolved against.
+        assert!(!ProtocolVersion::new(i32::MIN).is_release());
+        assert!(!ProtocolVersion::new(i32::MAX).is_release());
+    }
+
+    #[test]
+    fn a_snapshot_outranks_every_release_and_is_refused_for_it() {
+        // Anything gated on `at_least` would be written for a client that cannot read it.
+        assert!(SNAPSHOT.at_least(versions::V26_2));
+        assert!(SNAPSHOT.is_snapshot());
+        assert!(!SNAPSHOT.is_release());
+
+        // Releases are not snapshots, and neither is the pre-handshake floor.
+        for version in [versions::V1_20_5, V1_21, versions::V26_2] {
+            assert!(version.is_release(), "{version}");
+        }
+        assert!(ProtocolVersion::UNKNOWN.is_release());
+        assert!(!ProtocolVersion::UNKNOWN.is_snapshot());
+    }
+
+    #[test]
+    fn a_version_that_cannot_be_placed_falls_back_to_the_floor() {
+        // Everything a codec could be resolved against keeps its own place.
+        for version in [
+            ProtocolVersion::UNKNOWN,
+            versions::V1_20_5,
+            V1_21,
+            versions::V26_2,
+        ] {
+            assert_eq!(version.placed(), version, "{version}");
+        }
+        // Everything else lands on the floor, in *both* directions -- which is the point: the
+        // table a connection dispatches against and the IDs it encodes with have to agree.
+        for version in [
+            SNAPSHOT,
+            ProtocolVersion::new(-1),
+            ProtocolVersion::new(i32::MIN),
+            ProtocolVersion::new(i32::MAX),
+        ] {
+            assert_eq!(version.placed(), ProtocolVersion::UNKNOWN, "{version}");
+        }
+    }
+
+    #[test]
+    fn unknown_is_below_every_real_version() {
+        // Load-bearing: it is what makes the pre-handshake state resolve to the version-independent
+        // packets and nothing else.
+        for version in [versions::V1_20_5, V1_21, versions::V26_2] {
+            assert!(!ProtocolVersion::UNKNOWN.at_least(version), "{version}");
+        }
+    }
+
+    #[test]
+    fn a_raw_version_survives_the_round_trip() {
+        for raw in [0, 765, 775, -1, i32::MIN, i32::MAX] {
+            let version = ProtocolVersion::from(raw);
+            assert_eq!(version.get(), raw);
+            assert_eq!(*version.as_ref(), raw);
+            assert_eq!(version.to_string(), raw.to_string());
+        }
+    }
+}

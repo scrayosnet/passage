@@ -151,3 +151,106 @@ impl ConnectionError {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::connection::Class;
+    use crate::version::versions;
+    use anyhow::anyhow;
+
+    fn every_error() -> Vec<ConnectionError> {
+        vec![
+            ConnectionError::Codec(crate::wire::WireError::Utf8 { field: "host" }.into()),
+            ConnectionError::Codec(std::io::Error::from(std::io::ErrorKind::BrokenPipe).into()),
+            ConnectionError::Dispatch(DispatchError::peer("refused", anyhow!("not today"))),
+            ConnectionError::Dispatch(DispatchError::internal("broke", anyhow!("our bug"))),
+            ConnectionError::shutdown(),
+            ConnectionError::peer(),
+            ConnectionError::timeout(),
+            ConnectionError::StaleEncoding {
+                packet: "StatusResponse",
+                encoded_version: versions::V1_20_5,
+                version: versions::V26_2,
+            },
+            ConnectionError::EarlyPacket {
+                phase: Phase::Login,
+                id: 0x03,
+            },
+        ]
+    }
+
+    #[test]
+    fn every_reason_is_a_stable_low_cardinality_label() {
+        // Logs, spans and metrics are keyed by this, so it may never carry peer-controlled data.
+        let reasons: Vec<_> = every_error().iter().map(ConnectionError::reason).collect();
+        assert_eq!(
+            reasons,
+            vec![
+                "codec",
+                "codec",
+                "refused",
+                "broke",
+                "shutdown",
+                "peer-closed",
+                "peer-timeout",
+                "stale-encoding",
+                "early-packet",
+            ],
+        );
+    }
+
+    #[test]
+    fn blame_decides_the_log_level_and_is_never_guessed() {
+        // A malformed frame is the peer's doing; a broken socket is nobody's, and an unclassified
+        // handler failure is ours -- because assuming the peer's fault would hide our own bugs.
+        let blame: Vec<_> = every_error()
+            .iter()
+            .map(ConnectionError::is_peer_error)
+            .collect();
+        assert_eq!(
+            blame,
+            vec![true, false, true, false, false, true, true, false, true],
+        );
+    }
+
+    #[test]
+    fn only_a_hangup_answers_whether_anything_can_still_be_written() {
+        // A broken transport or a peer that stopped reading will refuse the write too, but there is
+        // no way to know that without trying. A hangup is the one case worth checking first.
+        assert!(!ConnectionError::peer().can_reply());
+        assert!(ConnectionError::timeout().can_reply());
+        assert!(ConnectionError::shutdown().can_reply());
+        assert!(
+            ConnectionError::Dispatch(DispatchError::peer("refused", anyhow!("no"))).can_reply()
+        );
+    }
+
+    #[test]
+    fn a_handler_failure_carries_its_classification_across_the_conversion() {
+        // The blame and the label are the two things telemetry needs, so neither may be flattened
+        // when a dispatch failure becomes a connection failure -- or the other way round.
+        let error = ConnectionError::from(DispatchError::peer("refused", anyhow!("not today")));
+        assert_eq!(error.reason(), "refused");
+        assert!(error.is_peer_error());
+
+        let back = DispatchError::from(error);
+        assert_eq!(back.class, Class::Peer);
+        assert_eq!(back.label, "refused");
+
+        // And an error nobody classified stays ours.
+        let internal = DispatchError::from(ConnectionError::shutdown());
+        assert_eq!(internal.class, Class::Internal);
+        assert_eq!(internal.label, "shutdown");
+    }
+
+    #[test]
+    fn a_close_reason_reads_the_same_in_the_message_as_in_the_label() {
+        assert_eq!(CloseReason::default(), CloseReason::Shutdown);
+        assert!(
+            ConnectionError::timeout().to_string().contains("Timeout"),
+            "{}",
+            ConnectionError::timeout(),
+        );
+    }
+}

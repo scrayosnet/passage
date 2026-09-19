@@ -38,3 +38,18 @@ impl Phase {
         self as usize
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn indices_are_dense_and_stable() {
+        // The index *is* the table slot, so a phase whose index does not match its position in
+        // `ALL` would dispatch against another phase's table.
+        for (index, phase) in Phase::ALL.into_iter().enumerate() {
+            assert_eq!(phase.index(), index, "{phase:?}");
+        }
+        assert_eq!(Phase::COUNT, Phase::ALL.len());
+    }
+}

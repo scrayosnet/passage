@@ -512,3 +512,98 @@ async fn tick(ticker: &mut Option<tokio::time::Interval>) {
         None => std::future::pending().await,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::duplex;
+
+    #[test]
+    fn a_connection_nobody_configured_still_has_a_deadline() {
+        // The documented minimal setup is `Options::default()`, so that is where the security
+        // posture lives: a peer that connects and then says nothing must not hold the socket
+        // forever, and the last word must be bounded too.
+        let options = Options::default();
+        assert_eq!(options.max_lifetime, Some(DEFAULT_MAX_LIFETIME));
+        assert_eq!(options.close_timeout, Some(DEFAULT_CLOSE_TIMEOUT));
+        assert_eq!(
+            options.tick_interval, None,
+            "ticks are the caller's to ask for"
+        );
+        assert_eq!(options.initial_version, ProtocolVersion::UNKNOWN);
+        assert_eq!(options.initial_phase, Phase::Handshake);
+    }
+
+    #[tokio::test]
+    async fn a_connection_starts_where_its_configuration_says() {
+        // A client knows both before it says anything; a server learns them from the handshake.
+        let options = Options {
+            initial_phase: Phase::Status,
+            initial_version: crate::version::versions::V26_2,
+            tick_interval: Some(Duration::from_secs(16)),
+            ..Options::default()
+        };
+        let connection = Connection::<_, (), ()>::builder(duplex(64).0)
+            .config(options)
+            .build();
+
+        assert_eq!(connection.phase, Phase::Status);
+        assert_eq!(connection.version, crate::version::versions::V26_2);
+        assert!(connection.ticker.is_some());
+        assert!(connection.lifetime.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_timer_nobody_asked_for_is_not_armed() {
+        let connection = Connection::<_, (), ()>::builder(duplex(64).0)
+            .config(Options {
+                max_lifetime: None,
+                ..Options::default()
+            })
+            .build();
+        assert!(connection.ticker.is_none());
+        assert!(connection.lifetime.is_none());
+    }
+
+    #[tokio::test]
+    async fn awaiting_a_deadline_that_does_not_exist_waits_forever() {
+        // What the `if` guards in the loop rely on: an absent timer must never be ready, or the
+        // connection would spin on the arm that has nothing to report.
+        let mut nothing: Option<Pin<Box<Sleep>>> = None;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), expire(&mut nothing))
+                .await
+                .is_err(),
+        );
+        let mut never: Option<tokio::time::Interval> = None;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), tick(&mut never))
+                .await
+                .is_err(),
+        );
+    }
+
+    #[tokio::test]
+    async fn a_guarded_future_loses_to_a_cancelled_token() {
+        // Everything the connection writes goes through this, so a peer that stopped reading cannot
+        // hold the loop past its deadline or past a shutdown.
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        let error = guarded(&shutdown, &mut None, std::future::pending::<Result<()>>())
+            .await
+            .expect_err("the token is cancelled");
+        assert!(matches!(error, ConnectionError::Closed { .. }), "{error}");
+
+        let mut expired: Option<Pin<Box<Sleep>>> = Some(Box::pin(sleep_until(
+            Instant::now() - Duration::from_secs(1),
+        )));
+        let error = guarded(
+            &CancellationToken::new(),
+            &mut expired,
+            std::future::pending::<Result<()>>(),
+        )
+        .await
+        .expect_err("the deadline has passed");
+        assert_eq!(error.reason(), "peer-timeout");
+    }
+}

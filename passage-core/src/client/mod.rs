@@ -1,7 +1,7 @@
 //! The dialling half: one [`Connection`](crate::connection::Connection) over a socket we opened.
 //!
 //! [`Client`] is [`Server`](crate::server::Server) with the arrow turned around. It is built the
-//! same way, takes the same [`Layer`](crate::server::Layer) stack and the same
+//! same way, takes the same [`Layer`](crate::router::Layer) stack and the same
 //! [`Router`](crate::router::Router), and hands the socket to the same connection -- only the socket
 //! comes from a [`Connector`] instead of a [`Listener`](crate::server::Listener), and there is
 //! exactly one of it.

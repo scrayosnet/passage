@@ -2,11 +2,11 @@
 
 A comparison of the agent-generated `passage-driver` sketch against the migrated `passage-core`
 crate. Findings that have since been fixed are reduced to one line each in §3; what remains in full
-is what is still open or was decided against.
+is what was decided against. Nothing on the list is open.
 
 **Baseline.** `passage-driver`: 5 926 lines of `src/` (984 of them the optional `demo` feature),
-2 175 lines of integration tests, 80 test functions, all passing. `passage-core`: 3 657 lines of
-`src/`, no tests.
+2 175 lines of integration tests, 80 test functions, all passing. `passage-core`: 6 682 lines of
+`src/` including its unit tests, 3 078 lines of `tests/`, 176 test functions, all passing.
 
 ---
 
@@ -19,12 +19,12 @@ is what is still open or was decided against.
 | `src/packet.rs`                         | `src/packet.rs` + `src/phase.rs` + `src/direction.rs`               | split                             |
 | `src/wire.rs`                           | `src/wire/{mod,options,reader,writer,error}.rs`                     | split                             |
 | `src/codec.rs`                          | `src/codec/{mod,codec,cipher,error}.rs`                             | split                             |
-| `src/router.rs`                         | `src/router/{mod,router,table,dispatch,error}.rs`                   | split                             |
+| `src/router.rs`                         | `src/router/{mod,router,table,dispatch,layer,error}.rs`             | split; `Layer` moved here         |
 | `src/conn/{mod,connection,dispatch,handle}.rs` | `src/connection/{mod,connection,dispatch,handle,error}.rs`   | renamed + split                   |
-| `src/server.rs`                         | `src/server/{mod,server,listener,layer,error}.rs`                   | split; `error.rs` still empty     |
+| `src/server.rs`                         | `src/server/{mod,server,listener,error}.rs`                         | split; `error.rs` still empty     |
 | `src/error.rs` (one taxonomy)           | four per-module error enums                                         |                                   |
 | `src/demo/**` (feature `demo`)          | —                                                                   | dropped                           |
-| `tests/**` (4 files, 2 175 lines)       | —                                                                   | dropped, see §4                   |
+| `tests/**` (4 files, 2 175 lines)       | `tests/{flow,bytes,server,dispatch,client}.rs` + `tests/common/`    | ported and regrouped, see §4      |
 | `README.md`, `REVIEW.md`, `ASSESSMENT.md`, `NOTES.md` | —                                                     | dropped                           |
 | —                                       | `src/client/{mod,client,connector,error}.rs`                        | new; the dialling half, see §7    |
 | deps: `thiserror`                       | deps: `thiserror` + `anyhow`                                        | see §5.2                          |
@@ -97,31 +97,61 @@ Two changes beyond what the findings asked for, both forced by the above:
 
 ---
 
-## 4. Verification was removed, not replaced — **open**
+## 4. Verification, ported
 
 | | driver | core |
 |---|---|---|
-| unit tests | 35 | 0 |
-| integration tests | 45 (2 175 lines) | 3 (`tests/client.rs`) |
-| doc examples compiled | yes | none |
-| runnable worked example | `src/demo/`, behind a feature | none |
+| unit tests | 35 | 121, one module at a time |
+| integration tests | 45 (2 175 lines) | 55 across five binaries |
+| runnable worked example | `src/demo/`, behind a feature | the test protocol in `tests/common/packets.rs` |
 
-This is why §3.1 through §3.4 reached a committed state. Each of them was covered:
+Every property the driver's tests proved is proved here, and the driver-specific ones were rewritten
+rather than dropped: what a failing handler queued is now asserted to be *discarded* (§5.1), and
+cancelling the server is asserted to end its connections (§5.3).
 
-* 3.1 → `frames_roundtrip`, `partial_frames_are_not_an_error`,
-  `encryption_applies_from_the_switchover_point_only` (`passage-driver/src/codec.rs`)
-* 3.2 → every test in `passage-driver/tests/server.rs` builds a `Server`
-* 3.3 → `passage-driver/src/demo/` is compiled as a *consumer* of the public API
-* 3.4, 3.8 → `passage-driver/tests/ending.rs`, `tests/dispatch.rs`
+### Where the tests live
 
-The integration tests are the highest-value thing to port and they port almost unchanged: they drive
-a `Connection` over a `tokio::io::duplex` pair with a test-double dispatcher, which is exactly the
-seam `passage-core` kept -- and `Client` + `Connected` (§7) now wrap that seam, so a ported test
-can drive a router rather than a hand-written dispatcher.
+| File | What it holds |
+|------|---------------|
+| `src/**` | one `#[cfg(test)] mod tests` per module, against that module alone |
+| `tests/flow.rs` | two routers meeting: versions, phases, gating, endings, deadlines |
+| `tests/bytes.rs` | what a connection does with bytes that are not a packet |
+| `tests/server.rs` | the accept loop: layers, state, shutdown, draining, panics |
+| `tests/dispatch.rs` | a connection driven by a dispatcher that is not a router |
+| `tests/client.rs` | the dialling half, including one exchange over a real TCP socket |
+| `tests/common/` | the suite itself, below |
 
-`tests/client.rs` covers §3.1 (a packet crosses a real socket and decodes), §3.2 and §3.3 (both
-builders are called, and the packet is defined outside the crate). The rest of §3 is still backed by
-nothing in the repository.
+### The suite
+
+The driver's tests each built a `Connection`, a duplex pair, a dispatcher and a hand-written client.
+Here a test says what the two sides route, and nothing else:
+
+```rust
+let meeting = Scenario::new(server_router, client_router)
+    .version(versions::V26_2)
+    .run()
+    .await;
+
+meeting.expect_clean();
+assert_eq!(meeting.client_saw(), ["status mc.justchunks.net"]);
+```
+
+`Scenario` runs both routers over a socket pair and returns **both** `Outcome`s, so an ending is
+asserted as a value rather than fished out of a log. State is `Notes`, a shared list a handler
+writes to, so "what did the server see" is a `Vec<String>`. Three seams sit beside it for what a
+scenario cannot express: `Harness` (a real `Server` on a channel-backed listener), `RawClient` (a
+peer that sends bytes rather than packets), and `record_logs` (for the server's endings, which are
+reported by logging and by nothing else).
+
+### What the port found
+
+Three defects, each caught by the test that was written for a property rather than for the code:
+
+| Found by | Defect | Fix |
+|---|---|---|
+| `a_hostile_length_prefix_is_a_peer_error_not_a_panic` | A payload that failed to decode was classified **internal** -- so any client sending a malformed packet would page somebody | The erased handler raises `Class::Peer` under `malformed_packet`, with the field the decoder named in the message |
+| `a_panicking_connection_is_reported_loudly_rather_than_vanishing` | `panic_message(&payload)` coerced `&Box<dyn Any>` to a `dyn Any` holding the *box*, so every downcast missed and every panic logged the fallback text | `payload.as_ref()` |
+| `spawned_work_runs_while_keep_alives_are_exchanged` | `Batch` could not change the version, so a handshake handler could not apply version and phase as one change | `Batch::set_version` |
 
 ---
 
@@ -186,13 +216,13 @@ The restructuring was right. The module split, the per-module error types, the f
 errors, the removal of the `Wire` trait and the version-free `ConnectionHandle` are all improvements,
 and the crate is smaller for them.
 
-What the migration did not carry across is the verification. Eighty passing tests, a compiled worked
-example and two lint attributes went to zero, and in their absence four defects landed that each of
-those mechanisms would have caught independently -- including a frame codec that could not send a
-packet ID and a builder that could not be called. All of them are fixed; none of them is guarded.
+What the migration did not carry across was the verification. Eighty passing tests, a compiled
+worked example and two lint attributes went to zero, and in their absence four defects landed that
+each of those mechanisms would have caught independently -- including a frame codec that could not
+send a packet ID and a builder that could not be called.
 
-**Next:** port `passage-driver/tests/` and the `src/*` unit tests. Everything else on the list is
-done.
+That is now closed: 176 tests, every module unit-tested and every property the driver proved proved
+again (§4). Porting them found three more defects, which is the argument for having done it.
 
 ---
 
