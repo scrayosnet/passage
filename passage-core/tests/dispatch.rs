@@ -71,7 +71,7 @@ impl Dispatcher<()> for Recorder {
         // Proves the ordinary operation vocabulary is available to any dispatcher, not only to
         // handlers a router happens to hold.
         if seen == 1 {
-            ctx.handle.set_version(versions::V26_2)?;
+            ctx.handle.set_version(versions::V26_1)?;
             ctx.handle.set_phase(Phase::Status)?;
         }
         if seen >= self.close_after {
@@ -134,7 +134,7 @@ async fn a_connection_runs_on_a_dispatcher_that_is_not_a_router() {
             // Opened at the configured version, then what the dispatcher itself asked for -- which
             // it learns about the same way a router does, through the connection.
             opened: vec![ProtocolVersion::UNKNOWN],
-            versions: vec![versions::V26_2],
+            versions: vec![versions::V26_1],
             // The payload leads with the ID, so a two byte body is three bytes here.
             frames: vec![(7, 3), (9, 1)],
             ticks: 0,
@@ -151,7 +151,7 @@ async fn a_dispatcher_is_opened_at_the_version_the_connection_starts_with() {
     let (mut peer, server) = connect(
         make_with(move || recorder.clone()),
         Options {
-            initial_version: versions::V26_2,
+            initial_version: versions::V26_1,
             initial_phase: Phase::Login,
             ..Options::default()
         },
@@ -163,7 +163,7 @@ async fn a_dispatcher_is_opened_at_the_version_the_connection_starts_with() {
 
     assert_eq!(
         log.lock().expect("not poisoned").opened,
-        vec![versions::V26_2]
+        vec![versions::V26_1]
     );
 }
 
@@ -238,7 +238,7 @@ async fn a_dispatcher_can_be_chosen_at_runtime() {
         vec![versions::V1_20_5],
         "through the box as well"
     );
-    assert_eq!(log.versions, vec![versions::V26_2]);
+    assert_eq!(log.versions, vec![versions::V26_1]);
 }
 
 #[tokio::test]

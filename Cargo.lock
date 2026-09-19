@@ -3064,6 +3064,7 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "fastnbt",
  "futures",
  "num-bigint",
  "opentelemetry",

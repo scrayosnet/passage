@@ -1,6 +1,47 @@
 use crate::ProtocolVersion;
+use crate::common::{Nbt, TextComponent};
 use crate::wire::{Property, Reader, WireError, Writer};
 use std::fmt::Display;
+
+/// The maximum length of an identifier (a namespaced key).
+pub(crate) const MAX_IDENTIFIER_LEN: usize = 32_767;
+
+/// The maximum length of a URL.
+pub(crate) const MAX_URL_LEN: usize = 32_767;
+
+/// The length of a resource pack hash, which is a hexadecimal SHA-1 digest.
+pub(crate) const MAX_HASH_LEN: usize = 40;
+
+/// The maximum length of a locale, such as `en_GB`.
+pub(crate) const MAX_LOCALE_LEN: usize = 16;
+
+/// The maximum size of a cookie payload, matching what the vanilla client and server accept.
+pub(crate) const MAX_COOKIE_LEN: usize = 5_120;
+
+/// The maximum length of a code of conduct.
+pub(crate) const MAX_CODE_OF_CONDUCT_LEN: usize = 32_767;
+
+/// The maximum length of a report detail title, and of its description.
+pub(crate) const MAX_REPORT_TITLE_LEN: usize = 128;
+pub(crate) const MAX_REPORT_DESCRIPTION_LEN: usize = 4_096;
+
+/// The maximum number of entries in a registry.
+pub(crate) const MAX_REGISTRY_ENTRIES: usize = 32_767;
+
+/// The maximum number of feature flags.
+pub(crate) const MAX_FEATURES: usize = 1_024;
+
+/// The maximum number of registries, of tags per registry, and of IDs per tag.
+pub(crate) const MAX_TAGS: usize = 32_767;
+
+/// The maximum number of data packs either side may report.
+pub(crate) const MAX_KNOWN_PACKS: usize = 1_024;
+
+/// The maximum number of report details.
+pub(crate) const MAX_REPORT_DETAILS: usize = 32;
+
+/// The maximum number of server links.
+pub(crate) const MAX_SERVER_LINKS: usize = 256;
 
 /// A 32-byte random token exchanged during the encryption handshake to verify the client.
 pub type VerifyToken = [u8; 32];
@@ -331,6 +372,334 @@ impl Property for ParticleStatus {
             ParticleStatus::Minimal => 2,
         };
         w.var_int(val);
+        Ok(())
+    }
+}
+
+/// One entry of a [`ServerRegistryDataPacket`](crate::packet::configuration::ServerRegistryDataPacket).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegistryEntry {
+    /// The identifier of the entry, such as `minecraft:overworld`.
+    pub id: String,
+    /// The entry data, absent if the client is to use its own.
+    pub data: Option<Nbt>,
+}
+
+impl Property for RegistryEntry {
+    const NAME: &'static str = "registry_entry";
+
+    fn decode(
+        r: &mut Reader<'_>,
+        version: ProtocolVersion,
+        _: &'static str,
+    ) -> Result<Self, WireError> {
+        Ok(Self {
+            id: r.string("id", MAX_IDENTIFIER_LEN)?,
+            data: r.optional("data", |r| r.property(version, "data"))?,
+        })
+    }
+
+    fn encode(
+        &self,
+        w: &mut Writer<'_>,
+        version: ProtocolVersion,
+        _: &'static str,
+    ) -> Result<(), WireError> {
+        w.string("id", self.id.as_str())?;
+        w.optional(self.data.as_ref(), |w, data| {
+            w.property(version, "data", data)
+        })?;
+        Ok(())
+    }
+}
+
+/// One tag of a [`TagRegistry`]: a name and the IDs it stands for.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Tag {
+    /// The identifier of the tag, such as `minecraft:climbable`.
+    pub name: String,
+    /// The numeric IDs that carry the tag.
+    pub entries: Vec<VarInt>,
+}
+
+impl Property for Tag {
+    const NAME: &'static str = "tag";
+
+    fn decode(r: &mut Reader<'_>, _: ProtocolVersion, _: &'static str) -> Result<Self, WireError> {
+        Ok(Self {
+            name: r.string("name", MAX_IDENTIFIER_LEN)?,
+            entries: r.array("entries", MAX_TAGS, |r| r.var_int("entry"))?,
+        })
+    }
+
+    fn encode(
+        &self,
+        w: &mut Writer<'_>,
+        _: ProtocolVersion,
+        _: &'static str,
+    ) -> Result<(), WireError> {
+        w.string("name", self.name.as_str())?;
+        w.array("entries", &self.entries, |w, entry| {
+            w.var_int(*entry);
+            Ok(())
+        })?;
+        Ok(())
+    }
+}
+
+/// The tags one registry defines, as sent by a
+/// [`ServerUpdateTagsPacket`](crate::packet::configuration::ServerUpdateTagsPacket).
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TagRegistry {
+    /// The identifier of the registry, such as `minecraft:block`.
+    pub registry: String,
+    /// The tags defined for the registry.
+    pub tags: Vec<Tag>,
+}
+
+impl Property for TagRegistry {
+    const NAME: &'static str = "tag_registry";
+
+    fn decode(
+        r: &mut Reader<'_>,
+        version: ProtocolVersion,
+        _: &'static str,
+    ) -> Result<Self, WireError> {
+        Ok(Self {
+            registry: r.string("registry", MAX_IDENTIFIER_LEN)?,
+            tags: r.array("tags", MAX_TAGS, |r| r.property(version, "tag"))?,
+        })
+    }
+
+    fn encode(
+        &self,
+        w: &mut Writer<'_>,
+        version: ProtocolVersion,
+        _: &'static str,
+    ) -> Result<(), WireError> {
+        w.string("registry", self.registry.as_str())?;
+        w.array("tags", &self.tags, |w, tag| w.property(version, "tag", tag))?;
+        Ok(())
+    }
+}
+
+/// One data pack, as reported by either side of the known packs exchange.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct KnownPack {
+    /// The namespace of the pack, such as `minecraft`.
+    pub namespace: String,
+    /// The ID of the pack, such as `core`.
+    pub id: String,
+    /// The version of the pack.
+    pub version: String,
+}
+
+impl Property for KnownPack {
+    const NAME: &'static str = "known_pack";
+
+    fn decode(r: &mut Reader<'_>, _: ProtocolVersion, _: &'static str) -> Result<Self, WireError> {
+        Ok(Self {
+            namespace: r.string("namespace", MAX_IDENTIFIER_LEN)?,
+            id: r.string("id", MAX_IDENTIFIER_LEN)?,
+            version: r.string("version", MAX_IDENTIFIER_LEN)?,
+        })
+    }
+
+    fn encode(
+        &self,
+        w: &mut Writer<'_>,
+        _: ProtocolVersion,
+        _: &'static str,
+    ) -> Result<(), WireError> {
+        w.string("namespace", self.namespace.as_str())?;
+        w.string("id", self.id.as_str())?;
+        w.string("version", self.version.as_str())?;
+        Ok(())
+    }
+}
+
+/// One entry of a
+/// [`ServerCustomReportDetailsPacket`](crate::packet::configuration::ServerCustomReportDetailsPacket).
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ReportDetail {
+    /// The title of the detail.
+    pub title: String,
+    /// The description of the detail.
+    pub description: String,
+}
+
+impl Property for ReportDetail {
+    const NAME: &'static str = "report_detail";
+
+    fn decode(r: &mut Reader<'_>, _: ProtocolVersion, _: &'static str) -> Result<Self, WireError> {
+        Ok(Self {
+            title: r.string("title", MAX_REPORT_TITLE_LEN)?,
+            description: r.string("description", MAX_REPORT_DESCRIPTION_LEN)?,
+        })
+    }
+
+    fn encode(
+        &self,
+        w: &mut Writer<'_>,
+        _: ProtocolVersion,
+        _: &'static str,
+    ) -> Result<(), WireError> {
+        w.string("title", self.title.as_str())?;
+        w.string("description", self.description.as_str())?;
+        Ok(())
+    }
+}
+
+/// One of the labels the client knows how to name itself.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(i32)]
+pub enum ServerLinkType {
+    /// Where to report a bug, which the client also offers on a disconnect screen.
+    BugReport = 0,
+    /// The community guidelines of the server.
+    CommunityGuidelines,
+    /// Where to get support.
+    Support,
+    /// The status page of the server.
+    Status,
+    /// Where to leave feedback.
+    Feedback,
+    /// The community of the server.
+    Community,
+    /// The website of the server.
+    Website,
+    /// The forums of the server.
+    Forums,
+    /// The news of the server.
+    News,
+    /// The announcements of the server.
+    Announcements,
+}
+
+impl Property for ServerLinkType {
+    const NAME: &'static str = "server_link_type";
+
+    fn decode(
+        r: &mut Reader<'_>,
+        _: ProtocolVersion,
+        field: &'static str,
+    ) -> Result<Self, WireError> {
+        match r.var_int(field)? {
+            0 => Ok(ServerLinkType::BugReport),
+            1 => Ok(ServerLinkType::CommunityGuidelines),
+            2 => Ok(ServerLinkType::Support),
+            3 => Ok(ServerLinkType::Status),
+            4 => Ok(ServerLinkType::Feedback),
+            5 => Ok(ServerLinkType::Community),
+            6 => Ok(ServerLinkType::Website),
+            7 => Ok(ServerLinkType::Forums),
+            8 => Ok(ServerLinkType::News),
+            9 => Ok(ServerLinkType::Announcements),
+            _ => Err(WireError::IllegalEnumValue {
+                field,
+                kind: Self::NAME,
+            }),
+        }
+    }
+
+    fn encode(
+        &self,
+        w: &mut Writer<'_>,
+        _: ProtocolVersion,
+        _: &'static str,
+    ) -> Result<(), WireError> {
+        let val = match self {
+            ServerLinkType::BugReport => 0,
+            ServerLinkType::CommunityGuidelines => 1,
+            ServerLinkType::Support => 2,
+            ServerLinkType::Status => 3,
+            ServerLinkType::Feedback => 4,
+            ServerLinkType::Community => 5,
+            ServerLinkType::Website => 6,
+            ServerLinkType::Forums => 7,
+            ServerLinkType::News => 8,
+            ServerLinkType::Announcements => 9,
+        };
+        w.var_int(val);
+        Ok(())
+    }
+}
+
+/// How a [`ServerLink`] is labelled: either one of the client's own labels, or a component the
+/// server writes itself.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ServerLinkLabel {
+    /// A label the client already has a translation for.
+    BuiltIn(ServerLinkType),
+    /// A label the server supplies.
+    Custom(TextComponent),
+}
+
+impl Property for ServerLinkLabel {
+    const NAME: &'static str = "server_link_label";
+
+    fn decode(
+        r: &mut Reader<'_>,
+        version: ProtocolVersion,
+        field: &'static str,
+    ) -> Result<Self, WireError> {
+        if r.bool(field)? {
+            Ok(Self::BuiltIn(r.property(version, field)?))
+        } else {
+            Ok(Self::Custom(r.property(version, field)?))
+        }
+    }
+
+    fn encode(
+        &self,
+        w: &mut Writer<'_>,
+        version: ProtocolVersion,
+        field: &'static str,
+    ) -> Result<(), WireError> {
+        match self {
+            Self::BuiltIn(kind) => {
+                w.bool(true);
+                w.property(version, field, kind)
+            }
+            Self::Custom(label) => {
+                w.bool(false);
+                w.property(version, field, label)
+            }
+        }
+    }
+}
+
+/// One link of a [`ServerLinksPacket`](crate::packet::configuration::ServerLinksPacket).
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ServerLink {
+    /// What the link is called.
+    pub label: ServerLinkLabel,
+    /// Where the link points.
+    pub url: String,
+}
+
+impl Property for ServerLink {
+    const NAME: &'static str = "server_link";
+
+    fn decode(
+        r: &mut Reader<'_>,
+        version: ProtocolVersion,
+        _: &'static str,
+    ) -> Result<Self, WireError> {
+        Ok(Self {
+            label: r.property(version, "label")?,
+            url: r.string("url", MAX_URL_LEN)?,
+        })
+    }
+
+    fn encode(
+        &self,
+        w: &mut Writer<'_>,
+        version: ProtocolVersion,
+        _: &'static str,
+    ) -> Result<(), WireError> {
+        w.property(version, "label", &self.label)?;
+        w.string("url", self.url.as_str())?;
         Ok(())
     }
 }

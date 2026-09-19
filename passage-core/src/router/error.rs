@@ -44,7 +44,7 @@ mod tests {
         let error = RouterError::UnorderedIds {
             packet: "LoginStart",
             previous: versions::V1_20_5,
-            version: versions::V26_2,
+            version: versions::V26_1,
         };
         let message = error.to_string();
         assert!(message.contains("LoginStart"), "{message}");

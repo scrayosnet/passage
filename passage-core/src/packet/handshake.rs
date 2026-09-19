@@ -2,14 +2,11 @@ use crate::common::{State, VarInt};
 use crate::wire::{Reader, WireError, Writer};
 use crate::{Packet, Phase, ProtocolVersion};
 
-/// The [`ServerIntentionPacket`].
-///
-/// This packet causes the server to switch into the target state. It should be sent right after opening
-/// the TCP connection to prevent the server from disconnecting.
+/// The [`ClientIntentionPacket`].
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Handshake)
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ServerIntentionPacket {
+pub struct ClientIntentionPacket {
     /// The pretended protocol version.
     pub protocol_version: VarInt,
     /// The pretended server address.
@@ -20,8 +17,8 @@ pub struct ServerIntentionPacket {
     pub next_state: State,
 }
 
-impl Packet for ServerIntentionPacket {
-    const NAME: &'static str = "server::intention";
+impl Packet for ClientIntentionPacket {
+    const NAME: &'static str = "client::intention";
     const PHASE: Phase = Phase::Handshake;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 

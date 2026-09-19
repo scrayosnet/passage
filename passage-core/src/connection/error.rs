@@ -171,7 +171,7 @@ mod tests {
             ConnectionError::StaleEncoding {
                 packet: "StatusResponse",
                 encoded_version: versions::V1_20_5,
-                version: versions::V26_2,
+                version: versions::V26_1,
             },
             ConnectionError::EarlyPacket {
                 phase: Phase::Login,

@@ -87,8 +87,19 @@ pub mod versions {
     /// This is the oldest version Passage (router) can serve.
     pub const V1_20_5: V = V::new(766);
 
-    /// The 26.2 protocol: Added the session ID field to `Login Success`.
-    pub const V26_2: V = V::new(775);
+    /// Minecraft 1.21.2: added the `Custom Report Details` and `Server Links` packets, and the
+    /// particle status field to `Client Information`.
+    pub const V1_21_2: V = V::new(768);
+
+    /// Minecraft 1.21.6: added the dialog packets (`Clear Dialog`, `Show Dialog` and
+    /// `Custom Click Action`).
+    pub const V1_21_6: V = V::new(771);
+
+    /// Minecraft 1.21.9: added the code of conduct packets.
+    pub const V1_21_9: V = V::new(773);
+
+    /// The 26.1 protocol: Added the session ID field to `Login Success`.
+    pub const V26_1: V = V::new(775);
 }
 
 #[cfg(test)]
@@ -103,9 +114,9 @@ mod tests {
 
     #[test]
     fn thresholds_are_inclusive_lower_bounds() {
-        assert!(!V1_21.at_least(versions::V26_2));
-        assert!(versions::V26_2.at_least(versions::V26_2));
-        assert!(versions::V26_2.at_least(versions::V1_20_5));
+        assert!(!V1_21.at_least(versions::V26_1));
+        assert!(versions::V26_1.at_least(versions::V26_1));
+        assert!(versions::V26_1.at_least(versions::V1_20_5));
         // 1.20.4: below the oldest version Passage can serve.
         assert!(!ProtocolVersion::new(765).at_least(versions::V1_20_5));
     }
@@ -124,12 +135,12 @@ mod tests {
     #[test]
     fn a_snapshot_outranks_every_release_and_is_refused_for_it() {
         // Anything gated on `at_least` would be written for a client that cannot read it.
-        assert!(SNAPSHOT.at_least(versions::V26_2));
+        assert!(SNAPSHOT.at_least(versions::V26_1));
         assert!(SNAPSHOT.is_snapshot());
         assert!(!SNAPSHOT.is_release());
 
         // Releases are not snapshots, and neither is the pre-handshake floor.
-        for version in [versions::V1_20_5, V1_21, versions::V26_2] {
+        for version in [versions::V1_20_5, V1_21, versions::V26_1] {
             assert!(version.is_release(), "{version}");
         }
         assert!(ProtocolVersion::UNKNOWN.is_release());
@@ -143,7 +154,7 @@ mod tests {
             ProtocolVersion::UNKNOWN,
             versions::V1_20_5,
             V1_21,
-            versions::V26_2,
+            versions::V26_1,
         ] {
             assert_eq!(version.placed(), version, "{version}");
         }
@@ -163,7 +174,7 @@ mod tests {
     fn unknown_is_below_every_real_version() {
         // Load-bearing: it is what makes the pre-handshake state resolve to the version-independent
         // packets and nothing else.
-        for version in [versions::V1_20_5, V1_21, versions::V26_2] {
+        for version in [versions::V1_20_5, V1_21, versions::V26_1] {
             assert!(!ProtocolVersion::UNKNOWN.at_least(version), "{version}");
         }
     }

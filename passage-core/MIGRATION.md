@@ -128,7 +128,7 @@ Here a test says what the two sides route, and nothing else:
 
 ```rust
 let meeting = Scenario::new(server_router, client_router)
-    .version(versions::V26_2)
+    .version(versions::V26_1)
     .run()
     .await;
 
@@ -236,7 +236,7 @@ same `Layer` stack, the same state factory, the same `Router` -- only the socket
 let outcome = Client::new(addr)
     .state(|_: &SocketAddr| ())
     .dispatch(Arc::new(router))
-    .initial_version(versions::V26_2)
+    .initial_version(versions::V26_1)
     .connect()
     .await?;
 ```

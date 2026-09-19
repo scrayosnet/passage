@@ -398,14 +398,14 @@ mod tests {
     use crate::connection::CloseReason;
     use crate::wire::{Reader, WireResult, Writer};
 
-    /// A packet that exists only from 26.2 on, so sending it at an older version is a mistake the
+    /// A packet that exists only from 26.1 on, so sending it at an older version is a mistake the
     /// encoder can catch.
     struct Recent;
 
     impl Packet for Recent {
         const NAME: &'static str = "Recent";
         const PHASE: Phase = Phase::Configuration;
-        const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V26_2, 0x0B)];
+        const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V26_1, 0x0B)];
 
         fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self)
@@ -437,9 +437,9 @@ mod tests {
         // A handler holds nothing and mutates nothing: it queues, and the connection drains in
         // order with exclusive access. "Record the profile, then announce it" means what it says.
         let (handle, mut ops) = handle();
-        handle.set_version(versions::V26_2).expect("queues");
+        handle.set_version(versions::V26_1).expect("queues");
         handle.set_phase(Phase::Login).expect("queues");
-        handle.send(versions::V26_2, Recent).expect("queues");
+        handle.send(versions::V26_1, Recent).expect("queues");
         handle
             .update(|state| state.push("recorded"))
             .expect("queues");
@@ -477,7 +477,7 @@ mod tests {
         let (handle, mut ops) = handle();
         handle
             .batch(|batch| {
-                batch.send(versions::V26_2, Recent)?;
+                batch.send(versions::V26_1, Recent)?;
                 batch.set_phase(Phase::Configuration);
                 batch.close();
                 Ok(())
@@ -497,7 +497,7 @@ mod tests {
         let (handle, mut ops) = handle();
         let error = handle
             .batch(|batch| {
-                batch.send(versions::V26_2, Recent)?;
+                batch.send(versions::V26_1, Recent)?;
                 batch.send(versions::V1_20_5, Recent)?;
                 Ok(())
             })
@@ -596,10 +596,10 @@ mod tests {
     fn a_context_is_a_borrow_plus_a_snapshot() {
         let state = vec!["recorded"];
         let (handle, _ops) = handle();
-        let ctx = Ctx::new(&state, Phase::Status, versions::V26_2, &handle);
+        let ctx = Ctx::new(&state, Phase::Status, versions::V26_1, &handle);
         assert_eq!(ctx.state, &vec!["recorded"]);
         assert_eq!(ctx.phase, Phase::Status);
-        assert_eq!(ctx.version, versions::V26_2);
+        assert_eq!(ctx.version, versions::V26_1);
         // `ctx.send(p)` is deliberately absent: the explicit version reminds the caller that this
         // snapshot may not match the connection by the time the packet is written.
         ctx.handle.close().expect("queues");

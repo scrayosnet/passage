@@ -54,7 +54,7 @@ pub fn client(io: DuplexStream, router: Router<Notes>) -> TestClient {
 ///
 /// ```ignore
 /// let meeting = Scenario::new(server_router, client_router)
-///     .version(versions::V26_2)
+///     .version(versions::V26_1)
 ///     .run()
 ///     .await;
 /// meeting.expect_clean();

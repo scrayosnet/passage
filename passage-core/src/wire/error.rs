@@ -68,6 +68,16 @@ pub enum WireError {
         field: &'static str,
     },
 
+    /// An NBT value could not be decoded or encoded. Text components are NBT from 1.20.3 on, so
+    /// this is what a malformed disconnect reason or resource pack prompt looks like.
+    #[error("field `{field}` is not a valid NBT value: {message}")]
+    Nbt {
+        /// The field being read or written.
+        field: &'static str,
+        /// What the NBT codec said about it.
+        message: String,
+    },
+
     /// An enum value was invalid.
     #[error("{kind} field `{field}` got invalid representation")]
     IllegalEnumValue {
@@ -118,6 +128,10 @@ mod tests {
                 actual: 300,
             },
             WireError::Utf8 { field: "user_name" },
+            WireError::Nbt {
+                field: "reason",
+                message: "unexpected tag".to_owned(),
+            },
             WireError::TrailingBytes {
                 packet: "Intention",
                 remaining: 2,
@@ -134,6 +148,7 @@ mod tests {
             let named = message.contains("server_address")
                 || message.contains("protocol_version")
                 || message.contains("user_name")
+                || message.contains("reason")
                 || message.contains("Intention");
             assert!(named, "{message}");
         }

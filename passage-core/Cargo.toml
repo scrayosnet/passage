@@ -18,6 +18,7 @@ tokio-util = { workspace = true, features = ["codec", "rt"] }
 tracing = { workspace = true, features = ["std", "attributes"] }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }
+fastnbt = { workspace = true }
 num-bigint = { workspace = true }
 sha1 = { workspace = true }
 opentelemetry = { workspace = true }

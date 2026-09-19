@@ -265,7 +265,7 @@ mod tests {
         const NAME: &'static str = "Moved";
         const PHASE: Phase = Phase::Login;
         const IDS: &'static [(ProtocolVersion, i32)] =
-            &[(versions::V26_2, 0x05), (versions::V1_20_5, 0x02)];
+            &[(versions::V26_1, 0x05), (versions::V1_20_5, 0x02)];
 
         fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self)
@@ -283,7 +283,7 @@ mod tests {
         const NAME: &'static str = "Backwards";
         const PHASE: Phase = Phase::Login;
         const IDS: &'static [(ProtocolVersion, i32)] =
-            &[(versions::V1_20_5, 0x40), (versions::V26_2, 0x41)];
+            &[(versions::V1_20_5, 0x40), (versions::V26_1, 0x41)];
 
         fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self)
@@ -306,7 +306,7 @@ mod tests {
     #[test]
     fn a_router_holds_one_table_per_change_and_nothing_between() {
         let router = router();
-        // The floor, 1.20.5 and 26.2 -- the versions the packets themselves name.
+        // The floor, 1.20.5 and 26.1 -- the versions the packets themselves name.
         assert_eq!(router.tables.len(), 3);
 
         // Everything between two thresholds dispatches against the same table.
@@ -318,7 +318,7 @@ mod tests {
             1,
             "1.21 is 1.20.5's table"
         );
-        assert_eq!(router.table(versions::V26_2), 2);
+        assert_eq!(router.table(versions::V26_1), 2);
         assert_eq!(router.table(ProtocolVersion::new(999)), 2);
     }
 
@@ -343,10 +343,10 @@ mod tests {
 
         assert_eq!(table(versions::V1_20_5).lookup(Phase::Login, 0x02), Some(1));
         assert_eq!(table(versions::V1_20_5).lookup(Phase::Login, 0x05), None);
-        assert_eq!(table(versions::V26_2).lookup(Phase::Login, 0x05), Some(1));
-        assert_eq!(table(versions::V26_2).lookup(Phase::Login, 0x02), None);
+        assert_eq!(table(versions::V26_1).lookup(Phase::Login, 0x05), Some(1));
+        assert_eq!(table(versions::V26_1).lookup(Phase::Login, 0x02), None);
         // The anchored packet is in every table, which is what lets any client be answered.
-        for version in [ProtocolVersion::UNKNOWN, versions::V1_20_5, versions::V26_2] {
+        for version in [ProtocolVersion::UNKNOWN, versions::V1_20_5, versions::V26_1] {
             assert_eq!(table(version).lookup(Phase::Status, 0x00), Some(0));
         }
     }
@@ -364,7 +364,7 @@ mod tests {
                     packet: "Backwards",
                     previous,
                     version,
-                } if previous == versions::V1_20_5 && version == versions::V26_2
+                } if previous == versions::V1_20_5 && version == versions::V26_1
             ),
             "{err}",
         );

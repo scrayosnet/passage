@@ -69,7 +69,7 @@ async fn a_client_and_a_server_meet_over_a_real_socket() {
     let outcome = Client::new(addr)
         .state(|_: &SocketAddr| Notes::default())
         .dispatch(std::sync::Arc::new(status_client()))
-        .initial_version(versions::V26_2)
+        .initial_version(versions::V26_1)
         .connect()
         .await
         .expect("the server is listening");
@@ -92,7 +92,7 @@ async fn a_client_is_a_future_as_well_as_a_method() {
     let server = tokio::spawn(client(server_io, status_server()).connect());
 
     let outcome = client(client_io, status_client())
-        .initial_version(versions::V26_2)
+        .initial_version(versions::V26_1)
         .await
         .expect("preconnected");
 
@@ -179,7 +179,7 @@ async fn a_connector_can_be_anything_that_produces_a_socket() {
     }))
     .state(|_: &Side| Notes::default())
     .dispatch(std::sync::Arc::new(status_client()))
-    .initial_version(versions::V26_2)
+    .initial_version(versions::V26_1)
     .connect()
     .await
     .expect("the closure produced a socket");

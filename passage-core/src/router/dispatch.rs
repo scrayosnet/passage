@@ -141,7 +141,7 @@ mod tests {
         const NAME: &'static str = "Moved";
         const PHASE: Phase = Phase::Login;
         const IDS: &'static [(ProtocolVersion, i32)] =
-            &[(versions::V26_2, 0x05), (versions::V1_20_5, 0x02)];
+            &[(versions::V26_1, 0x05), (versions::V1_20_5, 0x02)];
 
         fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self {
@@ -187,9 +187,9 @@ mod tests {
         let (handle, _ops) = handle();
         let mut dispatcher = router(UnknownPolicy::Reject).make();
 
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_2, &handle);
+        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
         dispatcher.on_open(ctx).expect("opens");
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_2, &handle);
+        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
         let frame = payload(0x05, |w| w.string("text", "hello").expect("writes"));
         dispatcher.on_frame(ctx, 0x05, &frame).expect("dispatches");
 
@@ -209,11 +209,11 @@ mod tests {
         let mut dispatcher = router(UnknownPolicy::Reject).make();
         assert_eq!(dispatcher.table, (ProtocolVersion::UNKNOWN, 0));
 
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_2, &handle);
+        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
         dispatcher.on_open(ctx).expect("opens");
-        assert_eq!(dispatcher.table.0, versions::V26_2);
+        assert_eq!(dispatcher.table.0, versions::V26_1);
 
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_2, &handle);
+        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
         let frame = payload(0x05, |w| w.string("text", "bound").expect("writes"));
         dispatcher.on_frame(ctx, 0x05, &frame).expect("dispatches");
         assert_eq!(
@@ -248,7 +248,7 @@ mod tests {
         let (handle, _ops) = handle();
         let dispatcher = router(UnknownPolicy::Reject).make();
 
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_2, &handle);
+        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
         let error = dispatcher
             .on_frame(ctx, 0x7F, &payload(0x7F, |_| {}))
             .expect_err("must fail the connection");
@@ -263,7 +263,7 @@ mod tests {
         let (handle, _ops) = handle();
         let dispatcher = router(UnknownPolicy::Ignore).make();
 
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_2, &handle);
+        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
         dispatcher
             .on_frame(ctx, 0x7F, &payload(0x7F, |_| {}))
             .expect("ignored, not failed");
@@ -278,12 +278,12 @@ mod tests {
         let (handle, _ops) = handle();
         let mut dispatcher = router(UnknownPolicy::Reject).make();
         dispatcher
-            .on_open(Ctx::new(&state, Phase::Login, versions::V26_2, &handle))
+            .on_open(Ctx::new(&state, Phase::Login, versions::V26_1, &handle))
             .expect("opens");
 
         let mut frame = payload(0x05, |w| w.string("text", "hello").expect("writes"));
         frame.extend_from_slice(b"trailing");
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_2, &handle);
+        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
         let error = dispatcher
             .on_frame(ctx, 0x05, &frame)
             .expect_err("must fail the connection");
@@ -297,15 +297,15 @@ mod tests {
         let mut dispatcher = RouterDispatcher::new(Arc::new(Router::<Seen>::builder().build()));
 
         dispatcher
-            .on_open(Ctx::new(&state, Phase::Login, versions::V26_2, &handle))
+            .on_open(Ctx::new(&state, Phase::Login, versions::V26_1, &handle))
             .expect("nothing to do");
         dispatcher
-            .on_tick(Ctx::new(&state, Phase::Login, versions::V26_2, &handle))
+            .on_tick(Ctx::new(&state, Phase::Login, versions::V26_1, &handle))
             .expect("nothing to do");
         let mut error = ConnectionError::shutdown();
         dispatcher
             .on_error(
-                Ctx::new(&state, Phase::Login, versions::V26_2, &handle),
+                Ctx::new(&state, Phase::Login, versions::V26_1, &handle),
                 &mut error,
             )
             .expect("nothing to do");
@@ -343,15 +343,15 @@ mod tests {
         let mut dispatcher = router.make();
 
         dispatcher
-            .on_open(Ctx::new(&state, Phase::Login, versions::V26_2, &handle))
+            .on_open(Ctx::new(&state, Phase::Login, versions::V26_1, &handle))
             .expect("opens");
         dispatcher
-            .on_tick(Ctx::new(&state, Phase::Login, versions::V26_2, &handle))
+            .on_tick(Ctx::new(&state, Phase::Login, versions::V26_1, &handle))
             .expect("ticks");
         let mut error = ConnectionError::timeout();
         dispatcher
             .on_error(
-                Ctx::new(&state, Phase::Login, versions::V26_2, &handle),
+                Ctx::new(&state, Phase::Login, versions::V26_1, &handle),
                 &mut error,
             )
             .expect("reports");

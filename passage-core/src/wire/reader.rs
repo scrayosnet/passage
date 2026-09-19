@@ -330,7 +330,7 @@ impl<'a> Reader<'a> {
     /// different from [`optional`](Reader::optional), which reads a boolean and then an optional value.
     ///
     /// ```ignore
-    /// session_id: r.gated(version.at_least(versions::V26_2), Reader::uuid)?,
+    /// session_id: r.gated(version.at_least(versions::V26_1), Reader::uuid)?,
     /// ```
     ///
     /// # Errors

@@ -5,9 +5,6 @@ use serde::Serialize;
 
 /// The [`ServerStatusResponsePacket`].
 ///
-/// This packet can be received only after a [`StatusRequestPacket`](super::serverbound::StatusRequestPacket) and will not close the connection, allowing for a
-/// ping sequence to be exchanged afterward.
-///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Status_Response)
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ServerStatusResponsePacket {
@@ -42,18 +39,17 @@ impl Packet for ServerStatusResponsePacket {
     }
 }
 
-/// This is the response to a specific [`PingPacket`](super::serverbound::PingPacket) that can be used to measure the server ping.
+/// The [`ServerPongResponsePacket`].
 ///
-/// This packet will be sent after a corresponding [`PingPacket`](super::serverbound::PingPacket) and will have the same payload as the request. This
-/// also consumes the connection, ending the Server List Ping sequence.
+/// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Pong_Response_(status))
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ServerPongPacket {
+pub struct ServerPongResponsePacket {
     /// The arbitrary payload that was sent from the client (to identify the corresponding response).
     pub payload: u64,
 }
 
-impl Packet for ServerPongPacket {
-    const NAME: &'static str = "server::pong";
+impl Packet for ServerPongResponsePacket {
+    const NAME: &'static str = "server::pong_response";
     const PHASE: Phase = Phase::Status;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(ProtocolVersion::UNKNOWN, 0x01)];
 
@@ -70,9 +66,6 @@ impl Packet for ServerPongPacket {
 }
 
 /// The [`ClientStatusRequestPacket`].
-///
-/// The status can only be requested once immediately after the handshake, before any ping. The
-/// server won't respond otherwise.
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Status_Request)
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -92,17 +85,17 @@ impl Packet for ClientStatusRequestPacket {
     }
 }
 
-/// The [`ClientPingPacket`].
+/// The [`ClientPingRequestPacket`].
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Ping_Request_(status))
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ClientPingPacket {
+pub struct ClientPingRequestPacket {
     /// The arbitrary payload that will be returned from the server (to identify the corresponding request).
     pub payload: u64,
 }
 
-impl Packet for ClientPingPacket {
-    const NAME: &'static str = "client::ping";
+impl Packet for ClientPingRequestPacket {
+    const NAME: &'static str = "client::ping_request";
     const PHASE: Phase = Phase::Status;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(ProtocolVersion::UNKNOWN, 0x01)];
 

@@ -332,7 +332,7 @@ mod tests {
         let state = ();
         let (handle, _ops) =
             ConnectionHandle::<()>::new(CancellationToken::new(), Options::default());
-        let ctx = || Ctx::new(&state, Phase::Login, versions::V26_2, &handle);
+        let ctx = || Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
 
         dispatcher.on_open(ctx()).expect("opens");
         dispatcher.on_version(ctx()).expect("rebinds");
