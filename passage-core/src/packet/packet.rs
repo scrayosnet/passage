@@ -1,6 +1,6 @@
-use crate::phase::Phase;
-use crate::version::ProtocolVersion;
-use crate::wire::{Reader, WireResult, Writer};
+use crate::common::ProtocolVersion;
+use crate::common::{Phase, VarInt};
+use crate::wire::{Reader, WireError, WireResult, Writer};
 
 /// A protocol packet.
 pub trait Packet: Sized + Send + Sync + 'static {
@@ -25,16 +25,16 @@ pub trait Packet: Sized + Send + Sync + 'static {
     /// The order is load-bearing and checked at build time
     /// ([`RouterError::UnorderedIds`](crate::router::RouterError::UnorderedIds)): a table written
     /// oldest-first would silently resolve to the wrong ID.
-    const IDS: &'static [(ProtocolVersion, i32)];
+    const IDS: &'static [(ProtocolVersion, VarInt)];
 
     /// Decodes the packet payload (without length prefix).
     ///
     /// The caller checks that the whole payload was consumed, so a decoder does not call
     /// [`Reader::finish`] itself.
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> WireResult<Self>;
+    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError>;
 
     /// Encodes the packet payload (without length prefix).
-    fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> WireResult<()>;
+    fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> Result<(), WireError>;
 
     /// The packet ID in `version`, or [`None`] if the packet does not exist there.
     ///
@@ -76,7 +76,7 @@ pub fn check_ids_unordered(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::version::versions;
+    use crate::versions;
 
     #[test]
     fn ids_pick_the_newest_matching_entry() {

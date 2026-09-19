@@ -286,9 +286,9 @@ pub fn make_with<F>(make: F) -> MakeDispatcherFn<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::Phase;
+    use crate::common::{ProtocolVersion, versions};
     use crate::connection::ConnectionHandle;
-    use crate::phase::Phase;
-    use crate::version::{ProtocolVersion, versions};
     use crate::wire::Options;
     use anyhow::anyhow;
     use std::sync::{Arc, Mutex};

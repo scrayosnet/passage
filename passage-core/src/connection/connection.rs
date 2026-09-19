@@ -1,7 +1,7 @@
 use crate::codec::{Frame, FrameCodec};
+use crate::common::Phase;
+use crate::common::ProtocolVersion;
 use crate::connection::{ConnectionError, ConnectionHandle, Ctx, Dispatcher, Op, Result};
-use crate::phase::Phase;
-use crate::version::ProtocolVersion;
 use crate::wire::Options as WireOptions;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
@@ -539,7 +539,7 @@ mod tests {
         // A client knows both before it says anything; a server learns them from the handshake.
         let options = Options {
             initial_phase: Phase::Status,
-            initial_version: crate::version::versions::V26_2,
+            initial_version: crate::versions::V26_2,
             tick_interval: Some(Duration::from_secs(16)),
             ..Options::default()
         };
@@ -548,7 +548,7 @@ mod tests {
             .build();
 
         assert_eq!(connection.phase, Phase::Status);
-        assert_eq!(connection.version, crate::version::versions::V26_2);
+        assert_eq!(connection.version, crate::versions::V26_2);
         assert!(connection.ticker.is_some());
         assert!(connection.lifetime.is_some());
     }

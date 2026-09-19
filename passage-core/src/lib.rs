@@ -28,17 +28,16 @@
 // oversight.
 #![allow(clippy::module_inception)]
 
-mod packet;
-mod phase;
-mod version;
-
 pub mod client;
 pub mod codec;
+pub mod common;
 pub mod connection;
+pub mod metrics;
+pub mod packet;
 pub mod router;
 pub mod server;
 pub mod wire;
 
-pub use packet::{Packet, check_ids_unordered, ids};
-pub use phase::Phase;
-pub use version::{ProtocolVersion, versions};
+pub use common::Phase;
+pub use common::{ProtocolVersion, versions};
+pub use packet::packet::{Packet, check_ids_unordered, ids};

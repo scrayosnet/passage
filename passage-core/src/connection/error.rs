@@ -1,7 +1,7 @@
 use crate::codec::CodecError;
+use crate::common::Phase;
+use crate::common::ProtocolVersion;
 use crate::connection::DispatchError;
-use crate::phase::Phase;
-use crate::version::ProtocolVersion;
 use thiserror::Error;
 
 /// The connection result type, defaulting to [`ConnectionError`].
@@ -155,8 +155,8 @@ impl ConnectionError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::versions;
     use crate::connection::Class;
-    use crate::version::versions;
     use anyhow::anyhow;
 
     fn every_error() -> Vec<ConnectionError> {

@@ -1,5 +1,7 @@
+use crate::ProtocolVersion;
 use crate::wire::error::{Result, WireError};
 use crate::wire::options::Options;
+use crate::wire::property::Property;
 use uuid::Uuid;
 
 /// A bounds-checked reader over a packet payload.
@@ -314,6 +316,14 @@ impl<'a> Reader<'a> {
             values.push(read(self)?);
         }
         Ok(values)
+    }
+
+    pub fn property<T: Property>(
+        &mut self,
+        version: ProtocolVersion,
+        field: &'static str,
+    ) -> Result<T> {
+        T::decode(self, version, field)
     }
 
     /// Reads a value that only exists once `condition` holds, and [`None`] otherwise. This is

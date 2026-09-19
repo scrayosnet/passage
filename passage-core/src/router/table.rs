@@ -1,6 +1,6 @@
+use crate::common::Phase;
+use crate::common::ProtocolVersion;
 use crate::connection::{ConnectionError, Ctx, DispatchError};
-use crate::phase::Phase;
-use crate::version::ProtocolVersion;
 use std::sync::Arc;
 use tracing::warn;
 
@@ -77,7 +77,7 @@ impl Table {
     pub fn new<S>(entries: &[Entry<S>], version: ProtocolVersion) -> Self {
         let mut by_phase: [Vec<Option<u16>>; Phase::COUNT] = Default::default();
         for (index, entry) in entries.iter().enumerate() {
-            let Some(id) = crate::packet::ids(version, entry.ids) else {
+            let Some(id) = crate::packet::packet::ids(version, entry.ids) else {
                 continue;
             };
 
@@ -127,7 +127,7 @@ impl Table {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::version::versions;
+    use crate::common::versions;
 
     fn entry<S>(
         name: &'static str,

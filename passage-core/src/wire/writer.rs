@@ -1,5 +1,7 @@
+use crate::ProtocolVersion;
 use crate::wire::error::{Result, WireError};
 use crate::wire::options::Options;
+use crate::wire::property::Property;
 use bytes::{BufMut, BytesMut};
 use uuid::Uuid;
 
@@ -199,6 +201,15 @@ impl<'a> Writer<'a> {
             write(self, value)?;
         }
         Ok(())
+    }
+
+    pub fn property<T: Property>(
+        &mut self,
+        version: ProtocolVersion,
+        field: &'static str,
+        value: &T,
+    ) -> Result<()> {
+        value.encode(self, version, field)
     }
 
     /// Writes raw bytes without a length prefix.

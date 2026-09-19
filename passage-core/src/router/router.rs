@@ -1,9 +1,9 @@
+use crate::common::ProtocolVersion;
 use crate::connection::{ConnectionError, Ctx, DispatchError};
-use crate::packet::{Packet, check_ids_unordered};
+use crate::packet::packet::{Packet, check_ids_unordered};
 use crate::router::{
     Entry, ErasedHandler, ErrorHandler, OpenHandler, RouterError, Table, TickHandler,
 };
-use crate::version::ProtocolVersion;
 use crate::wire::Reader;
 use anyhow::anyhow;
 use std::sync::Arc;
@@ -237,8 +237,8 @@ impl<S: 'static> Router<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::phase::Phase;
-    use crate::version::versions;
+    use crate::common::Phase;
+    use crate::common::versions;
     use crate::wire::{Reader, WireResult, Writer};
 
     /// A packet anchored at the floor: the kind that answers a status ping from any client.

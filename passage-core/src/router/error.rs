@@ -1,4 +1,4 @@
-use crate::version::ProtocolVersion;
+use crate::common::ProtocolVersion;
 use thiserror::Error;
 
 /// A result type that can be returned from a [`Router`](crate::router::Router) handler.
@@ -35,7 +35,7 @@ pub enum RouterError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::version::versions;
+    use crate::common::versions;
 
     #[test]
     fn an_unordered_table_names_the_pair_that_is_the_wrong_way_round() {

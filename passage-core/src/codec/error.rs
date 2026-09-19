@@ -1,4 +1,4 @@
-use crate::version::ProtocolVersion;
+use crate::common::ProtocolVersion;
 use crate::wire::WireError;
 use thiserror::Error;
 
@@ -44,7 +44,7 @@ pub enum CodecError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::version::versions;
+    use crate::common::versions;
 
     #[test]
     fn a_wire_failure_reads_as_itself() {

@@ -1,6 +1,6 @@
+use crate::common::ProtocolVersion;
 use crate::connection::{ConnectionError, Ctx, DispatchError, Dispatcher, MakeDispatcher};
 use crate::router::{Router, UnknownPolicy};
-use crate::version::ProtocolVersion;
 use anyhow::anyhow;
 use std::sync::Arc;
 use tracing::trace;
@@ -118,11 +118,11 @@ impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::Phase;
+    use crate::common::versions;
     use crate::connection::{ConnectionHandle, Op};
-    use crate::packet::Packet;
-    use crate::phase::Phase;
+    use crate::packet::packet::Packet;
     use crate::router::Router;
-    use crate::version::versions;
     use crate::wire::{Options, Reader, WireResult, Writer};
     use bytes::BytesMut;
     use std::sync::Mutex;

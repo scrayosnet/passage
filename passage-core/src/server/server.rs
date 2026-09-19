@@ -1,8 +1,8 @@
+use crate::common::Phase;
+use crate::common::ProtocolVersion;
 use crate::connection::{Connection, Dispatcher, MakeDispatcher, Options as ConnectionConfig};
-use crate::phase::Phase;
 use crate::router::{Layer, Stack};
 use crate::server::listener::Listener;
-use crate::version::ProtocolVersion;
 use crate::wire::Options as WireOptions;
 use futures::FutureExt;
 use futures::future::BoxFuture;

@@ -12,9 +12,11 @@
 
 mod error;
 mod options;
+mod property;
 mod reader;
 mod writer;
 
 pub use self::{
-    error::Result as WireResult, error::WireError, options::Options, reader::Reader, writer::Writer,
+    error::Result as WireResult, error::WireError, options::Options, property::Property,
+    reader::Reader, writer::Writer,
 };

@@ -68,6 +68,15 @@ pub enum WireError {
         field: &'static str,
     },
 
+    /// An enum value was invalid.
+    #[error("{kind} field `{field}` got invalid representation")]
+    IllegalEnumValue {
+        /// The field being read.
+        field: &'static str,
+        /// The enum kind being read.
+        kind: &'static str,
+    },
+
     /// The packet was longer than its fields. Either we are misreading it or the peer is trying to
     /// smuggle data past us; both are worth failing on.
     #[error("{remaining} trailing byte(s) after decoding `{packet}`")]

@@ -1,7 +1,7 @@
 use crate::codec::cipher::Cipher;
 use crate::codec::error::{CodecError, Result};
-use crate::packet::Packet;
-use crate::version::ProtocolVersion;
+use crate::common::ProtocolVersion;
+use crate::packet::packet::Packet;
 use crate::wire::{Options, Reader, WireError, Writer};
 use bytes::{Bytes, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
@@ -192,8 +192,8 @@ impl<C: Cipher> Encoder<Frame> for FrameCodec<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::phase::Phase;
-    use crate::version::versions;
+    use crate::common::Phase;
+    use crate::common::versions;
     use crate::wire::WireResult;
 
     /// A trivially reversible stand-in for AES-CFB8 that is *stateful*, so a mistake in the

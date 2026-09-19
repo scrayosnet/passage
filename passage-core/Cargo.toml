@@ -15,7 +15,12 @@ anyhow = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true, features = ["rt", "time", "macros", "net", "io-util"] }
 tokio-util = { workspace = true, features = ["codec", "rt"] }
-tracing = { workspace = true, features = ["default"] }
+tracing = { workspace = true, features = ["std", "attributes"] }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+num-bigint = { workspace = true }
+sha1 = { workspace = true }
+opentelemetry = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util", "sync"] }

@@ -1,8 +1,8 @@
 use crate::codec::{Cipher, Frame};
+use crate::common::Phase;
+use crate::common::ProtocolVersion;
 use crate::connection::error::{ConnectionError, Result};
-use crate::packet::Packet;
-use crate::phase::Phase;
-use crate::version::ProtocolVersion;
+use crate::packet::packet::Packet;
 use crate::wire::Options;
 use futures::future::BoxFuture;
 use tokio::sync::{mpsc, oneshot};
@@ -394,8 +394,8 @@ impl<'a, S> Ctx<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::versions;
     use crate::connection::CloseReason;
-    use crate::version::versions;
     use crate::wire::{Reader, WireResult, Writer};
 
     /// A packet that exists only from 26.2 on, so sending it at an older version is a mistake the
