@@ -6,7 +6,7 @@
 //! where both directions claim the same ID.
 
 use passage_core::wire::{Reader, WireResult, Writer};
-use passage_core::{Direction, Packet, Phase, ProtocolVersion, versions};
+use passage_core::{Packet, Phase, ProtocolVersion, versions};
 use uuid::Uuid;
 
 /// What the peer connected for, chosen by the handshake.
@@ -48,7 +48,6 @@ impl Handshake {
 impl Packet for Handshake {
     const NAME: &'static str = "Handshake";
     const PHASE: Phase = Phase::Handshake;
-    const DIRECTION: Direction = Direction::Serverbound;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
@@ -83,7 +82,6 @@ pub struct StatusRequest;
 impl Packet for StatusRequest {
     const NAME: &'static str = "StatusRequest";
     const PHASE: Phase = Phase::Status;
-    const DIRECTION: Direction = Direction::Serverbound;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
     fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
@@ -112,7 +110,6 @@ impl StatusResponse {
 impl Packet for StatusResponse {
     const NAME: &'static str = "StatusResponse";
     const PHASE: Phase = Phase::Status;
-    const DIRECTION: Direction = Direction::Clientbound;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
@@ -135,7 +132,6 @@ pub struct Ping {
 impl Packet for Ping {
     const NAME: &'static str = "Ping";
     const PHASE: Phase = Phase::Status;
-    const DIRECTION: Direction = Direction::Serverbound;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x01)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
@@ -159,7 +155,6 @@ pub struct Pong {
 impl Packet for Pong {
     const NAME: &'static str = "Pong";
     const PHASE: Phase = Phase::Status;
-    const DIRECTION: Direction = Direction::Clientbound;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x01)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
@@ -193,7 +188,6 @@ impl LoginStart {
 impl Packet for LoginStart {
     const NAME: &'static str = "LoginStart";
     const PHASE: Phase = Phase::Login;
-    const DIRECTION: Direction = Direction::Serverbound;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
@@ -221,7 +215,6 @@ pub struct LoginSuccess {
 impl Packet for LoginSuccess {
     const NAME: &'static str = "LoginSuccess";
     const PHASE: Phase = Phase::Login;
-    const DIRECTION: Direction = Direction::Clientbound;
     const IDS: &'static [(ProtocolVersion, i32)] =
         &[(versions::V26_2, 0x02), (ProtocolVersion::UNKNOWN, 0x01)];
 
@@ -249,7 +242,6 @@ pub struct LoginAcknowledged;
 impl Packet for LoginAcknowledged {
     const NAME: &'static str = "LoginAcknowledged";
     const PHASE: Phase = Phase::Login;
-    const DIRECTION: Direction = Direction::Serverbound;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x03)];
 
     fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
@@ -279,7 +271,6 @@ impl Disconnect {
 impl Packet for Disconnect {
     const NAME: &'static str = "Disconnect";
     const PHASE: Phase = Phase::Login;
-    const DIRECTION: Direction = Direction::Clientbound;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
@@ -304,7 +295,6 @@ pub struct Transfer {
 impl Packet for Transfer {
     const NAME: &'static str = "Transfer";
     const PHASE: Phase = Phase::Configuration;
-    const DIRECTION: Direction = Direction::Clientbound;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V1_20_5, 0x0B)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
@@ -330,7 +320,6 @@ pub struct KeepAlive {
 impl Packet for KeepAlive {
     const NAME: &'static str = "KeepAlive";
     const PHASE: Phase = Phase::Configuration;
-    const DIRECTION: Direction = Direction::Clientbound;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x04)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
@@ -352,7 +341,6 @@ pub struct KeepAliveResponse {
 impl Packet for KeepAliveResponse {
     const NAME: &'static str = "KeepAliveResponse";
     const PHASE: Phase = Phase::Configuration;
-    const DIRECTION: Direction = Direction::Serverbound;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x04)];
 
     fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {

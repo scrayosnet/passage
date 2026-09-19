@@ -237,7 +237,6 @@ impl<S: 'static> Router<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::direction::Direction;
     use crate::phase::Phase;
     use crate::version::versions;
     use crate::wire::{Reader, WireResult, Writer};
@@ -248,7 +247,6 @@ mod tests {
     impl Packet for Anchored {
         const NAME: &'static str = "Anchored";
         const PHASE: Phase = Phase::Status;
-        const DIRECTION: Direction = Direction::Serverbound;
         const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
         fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
@@ -266,7 +264,6 @@ mod tests {
     impl Packet for Moved {
         const NAME: &'static str = "Moved";
         const PHASE: Phase = Phase::Login;
-        const DIRECTION: Direction = Direction::Serverbound;
         const IDS: &'static [(ProtocolVersion, i32)] =
             &[(versions::V26_2, 0x05), (versions::V1_20_5, 0x02)];
 
@@ -285,7 +282,6 @@ mod tests {
     impl Packet for Backwards {
         const NAME: &'static str = "Backwards";
         const PHASE: Phase = Phase::Login;
-        const DIRECTION: Direction = Direction::Serverbound;
         const IDS: &'static [(ProtocolVersion, i32)] =
             &[(versions::V1_20_5, 0x40), (versions::V26_2, 0x41)];
 
@@ -372,17 +368,6 @@ mod tests {
             ),
             "{err}",
         );
-    }
-
-    #[test]
-    fn a_router_is_not_bound_to_one_direction() {
-        // A client's router receives exactly the packets a server's sends. The table is keyed by
-        // phase and ID, so building one is the same job either way.
-        let router = Router::<()>::builder()
-            .on::<Anchored>(|_ctx, _packet| Ok(()))
-            .expect("a clientbound router is a router")
-            .build();
-        assert_eq!(router.entries.len(), 1);
     }
 
     #[test]

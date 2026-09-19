@@ -12,9 +12,6 @@
 //!   the one place that knows whether a failure matters.
 //! * The dialling side speaks first, which is what [`Dispatcher::on_open`](crate::connection::Dispatcher::on_open)
 //!   exists for. A client with no open hook sends nothing and waits forever.
-//! * A client registers the packets it *receives*, so a router built for a client holds
-//!   [`Clientbound`](crate::Direction::Clientbound) packets. Nothing checks this -- the router has
-//!   no side -- but a router built for the wrong one dispatches nothing.
 //!
 //! # Testing
 //!

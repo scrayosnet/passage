@@ -14,7 +14,7 @@
 //! | [`client`]          | the dialling half, and the in-process harness the tests use       |
 //!
 //! Packet identity lives at the crate root rather than in a module of its own, because a packet is
-//! named by all four of [`Packet`], [`Phase`], [`Direction`] and [`ProtocolVersion`] at once.
+//! named by all four of [`Packet`], [`Phase`], and [`ProtocolVersion`] at once.
 //!
 //! Two halves are worth keeping apart while reading. A [`Router`](router::Router) is built once at
 //! startup and shared by every connection behind an [`Arc`](std::sync::Arc); a
@@ -28,7 +28,6 @@
 // oversight.
 #![allow(clippy::module_inception)]
 
-mod direction;
 mod packet;
 mod phase;
 mod version;
@@ -40,7 +39,6 @@ pub mod router;
 pub mod server;
 pub mod wire;
 
-pub use direction::Direction;
 pub use packet::{Packet, check_ids_unordered, ids};
 pub use phase::Phase;
 pub use version::{ProtocolVersion, versions};

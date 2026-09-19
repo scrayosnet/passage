@@ -1,4 +1,3 @@
-use crate::direction::Direction;
 use crate::phase::Phase;
 use crate::version::ProtocolVersion;
 use crate::wire::{Reader, WireResult, Writer};
@@ -10,9 +9,6 @@ pub trait Packet: Sized + Send + Sync + 'static {
 
     /// The phase this packet belongs to.
     const PHASE: Phase;
-
-    /// The direction this packet travels in.
-    const DIRECTION: Direction;
 
     /// The ID of this packet in each version that changed it, **ordered newest to oldest**:
     ///

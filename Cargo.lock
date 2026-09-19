@@ -3074,20 +3074,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "passage-driver"
-version = "1.0.0"
-dependencies = [
- "bytes",
- "futures",
- "thiserror",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "passage-packets"
 version = "1.0.0"
 dependencies = [

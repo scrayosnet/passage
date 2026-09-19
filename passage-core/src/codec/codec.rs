@@ -192,7 +192,6 @@ impl<C: Cipher> Encoder<Frame> for FrameCodec<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::direction::Direction;
     use crate::phase::Phase;
     use crate::version::versions;
     use crate::wire::WireResult;
@@ -229,7 +228,6 @@ mod tests {
     impl Packet for Greeting {
         const NAME: &'static str = "Greeting";
         const PHASE: Phase = Phase::Login;
-        const DIRECTION: Direction = Direction::Serverbound;
         const IDS: &'static [(ProtocolVersion, i32)] =
             &[(versions::V26_2, 0x42), (versions::V1_20_5, 0x07)];
 

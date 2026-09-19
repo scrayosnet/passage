@@ -75,7 +75,7 @@ Fixed and verified; the analysis that produced them is not repeated.
 |---|---------|------------|
 | 3.1 | The frame codec wrote no packet ID, and left the ID in the inbound payload | `Frame::of` writes the ID varint ahead of the payload; `decode` leaves it in. The payload has the same shape in both directions and the router reads the ID once more before `P::decode`. No packet writes its own ID. |
 | 3.2 | `Server::default().listener(..)` did not compile | `Server::default` removed; `Server::new(listener)` requires the listener up front, so the bounded impl block is satisfiable from the first call. |
-| 3.3 | `Packet`, `Phase`, `Direction`, `ProtocolVersion` were unreachable from outside | Re-exported at the crate root, independent of the file layout. |
+| 3.3 | `Packet`, `Phase`, `ProtocolVersion` were unreachable from outside | Re-exported at the crate root, independent of the file layout. |
 | 3.4 | `Box<dyn Dispatcher>` did not forward `on_version` | Forwarded through `Box` and `Option`. The `Arc<D>` impl was removed: `&mut self` cannot be forwarded through an `Arc`, so it could only ever have been the same silent bug. |
 | 3.5 | ID collisions logged a warning while `RouterError` advertised checks that no longer ran | Overwrite-with-warning documented on `Table::new` and in `RouterError`; the dead `IdCollision` and `IdOutOfRange` variants removed. |
 | 3.6 | `id as usize` reached `Vec::resize` unbounded | `MAX_PACKET_ID = 1023`. An out-of-range ID is warned and **skipped**, so it cannot size the table. |

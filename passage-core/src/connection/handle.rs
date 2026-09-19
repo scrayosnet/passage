@@ -395,7 +395,6 @@ impl<'a, S> Ctx<'a, S> {
 mod tests {
     use super::*;
     use crate::connection::CloseReason;
-    use crate::direction::Direction;
     use crate::version::versions;
     use crate::wire::{Reader, WireResult, Writer};
 
@@ -406,7 +405,6 @@ mod tests {
     impl Packet for Recent {
         const NAME: &'static str = "Recent";
         const PHASE: Phase = Phase::Configuration;
-        const DIRECTION: Direction = Direction::Clientbound;
         const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V26_2, 0x0B)];
 
         fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {

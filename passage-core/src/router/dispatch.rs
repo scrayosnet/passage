@@ -119,7 +119,6 @@ impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
 mod tests {
     use super::*;
     use crate::connection::{ConnectionHandle, Op};
-    use crate::direction::Direction;
     use crate::packet::Packet;
     use crate::phase::Phase;
     use crate::router::Router;
@@ -141,7 +140,6 @@ mod tests {
     impl Packet for Moved {
         const NAME: &'static str = "Moved";
         const PHASE: Phase = Phase::Login;
-        const DIRECTION: Direction = Direction::Serverbound;
         const IDS: &'static [(ProtocolVersion, i32)] =
             &[(versions::V26_2, 0x05), (versions::V1_20_5, 0x02)];
 
