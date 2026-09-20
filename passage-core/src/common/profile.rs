@@ -1,3 +1,6 @@
+use crate::ProtocolVersion;
+use crate::common::{MAX_PROPERTY_NAME_LEN, MAX_PROPERTY_SIGNATURE_LEN, MAX_PROPERTY_VALUE_LEN};
+use crate::wire::{Property, Reader, WireError, Writer};
 use num_bigint::BigInt;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
@@ -46,6 +49,36 @@ pub struct ProfileProperty {
     /// The base64 encoded signature of the profile property.
     /// Only provided if `?unsigned=false` is appended to url
     pub signature: Option<String>,
+}
+
+/// On the wire a property is its name, its value, and the signature the session server put on it --
+/// which the client only gets if it was asked for one, hence the optional.
+impl Property for ProfileProperty {
+    const NAME: &'static str = "profile_property";
+
+    fn decode(r: &mut Reader<'_>, _: ProtocolVersion, _: &'static str) -> Result<Self, WireError> {
+        Ok(Self {
+            name: r.string("name", MAX_PROPERTY_NAME_LEN)?,
+            value: r.string("value", MAX_PROPERTY_VALUE_LEN)?,
+            signature: r.optional("signature", |r| {
+                r.string("signature", MAX_PROPERTY_SIGNATURE_LEN)
+            })?,
+        })
+    }
+
+    fn encode(
+        &self,
+        w: &mut Writer<'_>,
+        _: ProtocolVersion,
+        _: &'static str,
+    ) -> Result<(), WireError> {
+        w.string("name", self.name.as_str())?;
+        w.string("value", self.value.as_str())?;
+        w.optional(self.signature.as_deref(), |w, signature| {
+            w.string("signature", signature)
+        })?;
+        Ok(())
+    }
 }
 
 /// Computes the Minecraft session server hash from the server ID, shared secret, and encoded

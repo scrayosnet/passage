@@ -21,6 +21,29 @@ pub(crate) const MAX_COOKIE_LEN: usize = 5_120;
 /// The maximum length of a code of conduct.
 pub(crate) const MAX_CODE_OF_CONDUCT_LEN: usize = 32_767;
 
+/// The maximum length of a chat component sent as JSON rather than as NBT, which is the shape the
+/// login phase still uses.
+pub(crate) const MAX_COMPONENT_JSON_LEN: usize = 262_144;
+
+/// The maximum length of a player name.
+pub(crate) const MAX_USERNAME_LEN: usize = 16;
+
+/// The maximum length of the server ID of the encryption handshake, which is empty in practice.
+pub(crate) const MAX_SERVER_ID_LEN: usize = 20;
+
+/// The maximum length of the blobs of the encryption handshake: the encoded public key, and the
+/// shared secret and verify token encrypted under it. All three are bounded by the RSA block size,
+/// with room for a key larger than the 1024 bits vanilla uses.
+pub(crate) const MAX_CRYPTO_BLOB_LEN: usize = 1_024;
+
+/// The maximum number of properties of a game profile, which carries one (`textures`) today.
+pub(crate) const MAX_PROFILE_PROPERTIES: usize = 16;
+
+/// The maximum length of a profile property's name, of its value, and of its signature.
+pub(crate) const MAX_PROPERTY_NAME_LEN: usize = 64;
+pub(crate) const MAX_PROPERTY_VALUE_LEN: usize = 32_767;
+pub(crate) const MAX_PROPERTY_SIGNATURE_LEN: usize = 32_767;
+
 /// The maximum length of a report detail title, and of its description.
 pub(crate) const MAX_REPORT_TITLE_LEN: usize = 128;
 pub(crate) const MAX_REPORT_DESCRIPTION_LEN: usize = 4_096;
