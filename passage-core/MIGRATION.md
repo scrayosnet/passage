@@ -37,7 +37,7 @@ is what was decided against. Nothing on the list is open.
    in need of splitting, and both split along honest seams.
 
 2. **Per-module error types.** `wire::WireError` knows nothing about phases, versions or packets --
-   it is a pure parsing error. The driver's single `Error` forced `ProtocolError` to carry
+   it is a pure parsing error. The driver's single `PassageError` forced `ProtocolError` to carry
    `UnknownPacket { phase, version, id }` next to `Utf8 { field }`.
 
 3. **Field names in every wire error.** The driver's `Eof`, `VarIntTooLong` and `VarIntNotCanonical`
@@ -229,7 +229,7 @@ again (§4). Porting them found three more defects, which is the argument for ha
 ## 7. New in `passage-core`: the client half
 
 The driver had no client. `Client` is `Server` with the arrow turned around: the same builder, the
-same `Layer` stack, the same state factory, the same `Router` -- only the socket comes from a
+same `Layer` stack, the same state factory, the same `Passage` -- only the socket comes from a
 `Connector` rather than a `Listener`, and there is exactly one of it.
 
 ```rust

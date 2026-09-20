@@ -1,6 +1,6 @@
 [package]
-name = "passage-protocol"
-description = "Minecraft Server Transfer Protocol"
+name = "passage-router"
+description = "Passage Router"
 authors = [
     "Joshua Dean Küpper <admin@joshua-kuepper.de>",
     "Paul Wagner <contact@paulwagner.dev>",
@@ -17,10 +17,11 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-passage-packets = { workspace = true }
+passage-core = { workspace = true }
 passage-adapters = { workspace = true }
 
 thiserror = { workspace = true }
+anyhow = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net"] }
 tokio-util = { workspace = true, features = ["rt", "codec"] }
 proxy-header = { workspace = true }

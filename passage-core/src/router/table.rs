@@ -18,7 +18,7 @@ pub type TickHandler<S> =
 
 /// The error handler type.
 pub type ErrorHandler<S> =
-    Arc<dyn for<'c> Fn(Ctx<'c, S>, &ConnectionError) -> Result<(), DispatchError> + Send + Sync>;
+    Arc<dyn for<'c> Fn(Ctx<'c, S>, &mut ConnectionError) -> Result<(), DispatchError> + Send + Sync>;
 
 /// A packet handler entry. It contains the packet meta and dispatch handler.
 pub struct Entry<S> {

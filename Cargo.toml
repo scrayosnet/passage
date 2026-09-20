@@ -1,5 +1,5 @@
 [workspace]
-members = ["passage-adapters", "passage-protocol", "passage-packets", "passage-adapters/grpc", "passage-adapters/agones", "passage-adapters/http", "passage-adapters/dns", "passage-core"]
+members = ["passage-adapters", "passage-router", "passage-adapters/grpc", "passage-adapters/agones", "passage-adapters/http", "passage-adapters/dns", "passage-core"]
 
 [workspace.package]
 version = "1.0.0"
@@ -11,13 +11,13 @@ rust-version = "1.88.0"
 
 [workspace.dependencies]
 # workspace
-passage-packets = { path = "passage-packets" }
 passage-adapters = { path = "passage-adapters" }
 passage-adapters-grpc = { path = "passage-adapters/grpc" }
 passage-adapters-agones = { path = "passage-adapters/agones" }
 passage-adapters-http = { path = "passage-adapters/http" }
 passage-adapters-dns = { path = "passage-adapters/dns" }
-passage-protocol = { path = "passage-protocol" }
+passage-core = { path = "passage-core" }
+passage-router = { path = "passage-router" }
 
 # external
 tokio = { version = "1.52" }
@@ -93,7 +93,7 @@ passage-adapters-grpc = { workspace = true, optional = true }
 passage-adapters-agones = { workspace = true, optional = true }
 passage-adapters-http = { workspace = true, optional = true }
 passage-adapters-dns = { workspace = true, optional = true }
-passage-protocol = { workspace = true }
+passage-router = { workspace = true }
 
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal", "test-util"] }
 tokio-util = { workspace = true, features = ["rt"] }

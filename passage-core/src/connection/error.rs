@@ -5,7 +5,7 @@ use crate::connection::DispatchError;
 use thiserror::Error;
 
 /// The connection result type, defaulting to [`ConnectionError`].
-pub type Result<T> = std::result::Result<T, ConnectionError>;
+pub type Result<T, E = ConnectionError> = std::result::Result<T, E>;
 
 /// The reason for why the connection was closed.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]

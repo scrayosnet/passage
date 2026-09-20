@@ -6,8 +6,8 @@
 //!
 //! The [`listener`] accepts TCP connections and hands each one to a [`connection::Connection`], which
 //! drives the protocol state machine `Handshake → Status | Login → Configuration → Transfer`. The
-//! hostname from the handshake is matched against the configured [`routes::Routes`]; the matching
-//! [`routes::Route`] supplies the adapters that answer status pings, authenticate the player, localize
+//! hostname from the handshake is matched against the configured [`adapter::Routes`]; the matching
+//! [`adapter::Route`] supplies the adapters that answer status pings, authenticate the player, localize
 //! disconnect messages and discover the transfer target. After the transfer packet has been sent, the
 //! connection is dropped -- no state about the player is retained.
 //!
@@ -19,16 +19,15 @@
 //! - [`crypto`] -- RSA key generation, AES-CFB8 encryption and the Minecraft SHA-1 variant
 //! - [`listener`] -- the TCP listener, including PROXY protocol support
 //! - [`rate_limiter`] -- per-IP connection rate limiting
-//! - [`routes`] -- hostname matching and the per-route adapter set
+//! - [`adapter`] -- hostname matching and the per-route adapter set
 
 pub mod config;
-pub mod connection;
 pub mod cookie;
 pub mod crypto;
 pub mod error;
-pub mod listener;
 pub mod metrics;
 pub mod rate_limiter;
-pub mod routes;
+pub mod router;
+pub mod adapter;
 
 pub use error::*;

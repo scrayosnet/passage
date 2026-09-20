@@ -1,10 +1,10 @@
+use crate::adapter::adapter::{Route, Routes};
 use crate::config::Config;
 use crate::cookie::{
     AUTH_COOKIE_KEY, AuthCookie, CookieDecodeExt, CookieEncodeExt, SESSION_COOKIE_KEY,
     SessionCookie,
 };
-pub(crate) use crate::error::Error;
-use crate::routes::{Route, Routes};
+pub(crate) use crate::error::PassageError;
 use crate::{crypto, metrics};
 use futures::{SinkExt, StreamExt};
 use opentelemetry::global;
@@ -108,14 +108,14 @@ where
     }
 
     /// Gets the server status from the [`StatusAdapter`]. If the status is not found, then the
-    /// [`Error::ConnectionClosed`] error is returned. If the adapter errors, the connection is closed.
+    /// [`PassageError::ConnectionClosed`] error is returned. If the adapter errors, the connection is closed.
     /// If the adapter gives no status, then a default status is sent.
     #[instrument(skip_all)]
     async fn get_status(
         &self,
         route: &Route<Stat, Disc, Auth, Loca>,
         client: &Client,
-    ) -> Result<ServerStatus, Error> {
+    ) -> Result<ServerStatus, PassageError> {
         // Build a new status request future.
         let status_future = async { route.status(client).await };
 
@@ -124,7 +124,7 @@ where
         let shutdown = self.shutdown.clone();
         let status = tokio::select! {
             status = status_future => status?,
-            _ = shutdown.cancelled() => return Err(Error::ConnectionClosed),
+            _ = shutdown.cancelled() => return Err(PassageError::ConnectionClosed),
         };
 
         // Handle status not found.
@@ -141,7 +141,7 @@ where
         client: &Client,
         player: &Player,
         shared_secret: &[u8],
-    ) -> Result<Profile, Error> {
+    ) -> Result<Profile, PassageError> {
         // Build a new status request future.
         let profile_future = async {
             route
@@ -170,7 +170,7 @@ where
                     .await?;
                 self.send_packet(login_out::DisconnectPacket { reason })
                     .await?;
-                Err(Error::ConnectionClosed)
+                Err(PassageError::ConnectionClosed)
             }
             Err(err) => Err(err.into()),
         }
@@ -179,17 +179,17 @@ where
     /// Awaits the next packet from the stream or for the cancellation token to be canceled. If the
     /// cancellation token is canceled, then the connection is closed.
     #[instrument(skip_all, fields(packet_length = field::Empty, packet_id = field::Empty))]
-    async fn next_packet(&mut self) -> Result<PacketFrame, Error> {
+    async fn next_packet(&mut self) -> Result<PacketFrame, PassageError> {
         // Wait for the next packet to arrive. Stop if the connection is shutdown.
         let shutdown = self.shutdown.clone();
         let frame = tokio::select! {
             frame = self.stream.next().instrument(tracing::info_span!("read_packet", otel.kind = "server")) => frame,
             // TODO could send a disconnect packet in the login and configuration phase.
-            _ = shutdown.cancelled() => return Err(Error::ConnectionClosed),
+            _ = shutdown.cancelled() => return Err(PassageError::ConnectionClosed),
         };
 
         // Check if a packet was received, otherwise close the connection.
-        let frame = frame.ok_or_else(|| Error::ConnectionClosed)??;
+        let frame = frame.ok_or_else(|| PassageError::ConnectionClosed)??;
         tracing::Span::current().record("packet_length", frame.length);
         tracing::Span::current().record("packet_id", frame.id);
         Ok(frame)
@@ -199,7 +199,7 @@ where
     async fn send_packet<T: WritePacket + Send + Sync + Debug>(
         &mut self,
         packet: T,
-    ) -> Result<(), Error> {
+    ) -> Result<(), PassageError> {
         self.stream
             .send(packet)
             .instrument(tracing::info_span!("write_packet", otel.kind = "server"))
@@ -211,7 +211,7 @@ where
     async fn send_keep_alive(
         &mut self,
         route: &Route<Stat, Disc, Auth, Loca>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), PassageError> {
         debug!("checking that keep-alive packet was received");
         if self.keep_alive_id.is_some() {
             info!("keep-alive missed, disconnecting");
@@ -220,7 +220,7 @@ where
                 .await?;
             self.send_packet(conf_out::DisconnectPacket { reason })
                 .await?;
-            return Err(Error::ConnectionClosed);
+            return Err(PassageError::ConnectionClosed);
         }
         debug!("sending next keep-alive packet");
         let id = crypto::generate_keep_alive();
@@ -248,7 +248,7 @@ where
     }
 
     #[instrument(skip_all)]
-    pub async fn listen(&mut self) -> Result<(), Error> {
+    pub async fn listen(&mut self) -> Result<(), PassageError> {
         // The Minecraft (Java) protocol starts with the client sending a handshake packet to the server.
         // The handshake packet, most notably, contains the `next_state` field which indicates whether
         // the client intends to ask for the server `status`, want to `login` or `transfer`.
@@ -278,7 +278,7 @@ where
             .routes
             .iter()
             .find(|route| route.hostname.is_match(&client.server_address))
-            .ok_or_else(|| Error::NoRouteFound)?
+            .ok_or_else(|| PassageError::NoRouteFound)?
             .clone();
         debug!(name = route.to_string(), "found matching route");
 
@@ -500,7 +500,7 @@ where
         debug!("verifying verify token");
         if !crypto::verify_token(verify_token, &decrypted_verify_token) {
             info!("received invalid verify token, closing connection");
-            return Err(Error::ConnectionClosed);
+            return Err(PassageError::ConnectionClosed);
         }
 
         // If necessary, we now also make an authentication request using the authentication adapter.
@@ -651,7 +651,7 @@ where
                     .await?;
                 self.send_packet(conf_out::DisconnectPacket { reason })
                     .await?;
-                return Err(Error::ConnectionClosed);
+                return Err(PassageError::ConnectionClosed);
             }
             Err(err) => return Err(err.into()),
         };

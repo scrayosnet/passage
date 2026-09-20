@@ -11,12 +11,12 @@
 //! Run the reporting profile (ignored by default, takes a while) with:
 //!
 //! ```text
-//! cargo test --release -p passage-protocol --test connection_lifecycle -- --ignored --nocapture
+//! cargo test --release -p passage-router --test connection_lifecycle -- --ignored --nocapture
 //! ```
 
 mod support;
 
-use passage_protocol::config::Config;
+use passage_router::config::Config;
 use std::time::{Duration, Instant};
 use support::{Harness, alive_tasks, connect_only, resident_kb, status_ping};
 

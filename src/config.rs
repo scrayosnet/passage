@@ -49,8 +49,8 @@ use config::{ConfigError, Environment, File, FileStoredFormat, Format, Map, Valu
 use passage_adapters::authentication::Profile;
 use passage_adapters::backoff::ExponentialBackoff;
 use passage_adapters::{Protocol, Target};
-use passage_protocol::config::DEFAULT_CONNECTION_TIMEOUT;
-use passage_protocol::connection::{DEFAULT_AUTH_COOKIE_EXPIRY, DEFAULT_MAX_PACKET_LENGTH};
+use passage_router::config::DEFAULT_CONNECTION_TIMEOUT;
+use passage_router::connection::{DEFAULT_AUTH_COOKIE_EXPIRY, DEFAULT_MAX_PACKET_LENGTH};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;

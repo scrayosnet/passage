@@ -185,7 +185,7 @@ pub(crate) mod handshake_states {
     use crate::metrics::METER;
     use opentelemetry::KeyValue;
     use opentelemetry::metrics::Counter;
-    use passage_packets::State;
+    use passage_core::common::State;
     use std::sync::LazyLock;
 
     static INSTRUMENT: LazyLock<Counter<u64>> = LazyLock::new(|| {

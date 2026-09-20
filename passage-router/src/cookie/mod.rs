@@ -1,6 +1,6 @@
 use hmac::{Hmac, KeyInit, Mac};
-use passage_packets::configuration::clientbound::StoreCookiePacket;
-use passage_packets::login::serverbound::CookieResponsePacket;
+use passage_core::packet::configuration::ServerStoreCookiePacket;
+use passage_core::packet::login::ClientCookieResponsePacket;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 

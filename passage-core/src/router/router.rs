@@ -143,7 +143,7 @@ impl<S: 'static> RouterBuilder<S> {
     #[must_use]
     pub fn on_error(
         mut self,
-        handler: impl Fn(Ctx<'_, S>, &ConnectionError) -> Result<(), DispatchError>
+        handler: impl Fn(Ctx<'_, S>, &mut ConnectionError) -> Result<(), DispatchError>
         + Send
         + Sync
         + 'static,

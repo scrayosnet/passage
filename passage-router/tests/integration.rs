@@ -15,13 +15,13 @@ use passage_packets::reader::ReadPacket;
 use passage_packets::status::clientbound as status_out;
 use passage_packets::status::serverbound as status_in;
 use passage_packets::{ChatMode, DisplayedSkinParts, MainHand, ParticleStatus, State, VarInt};
-use passage_protocol::Error;
-use passage_protocol::config::Config;
-use passage_protocol::connection::{Connection, KEEP_ALIVE_INTERVAL, MIN_PROTOCOL_VERSION};
-use passage_protocol::cookie::{
+use passage_router::PassageError;
+use passage_router::adapter::adapter::Route;
+use passage_router::config::Config;
+use passage_router::connection::{Connection, KEEP_ALIVE_INTERVAL, MIN_PROTOCOL_VERSION};
+use passage_router::cookie::{
     AUTH_COOKIE_KEY, AuthCookie, SESSION_COOKIE_KEY, SessionCookie, sign,
 };
-use passage_protocol::routes::Route;
 use proxy_header::ParseConfig;
 use proxy_header::io::ProxiedStream;
 use rand::rngs::SysRng;
@@ -44,15 +44,15 @@ use uuid::uuid;
 const PROTOCOL_VERSION: VarInt = 770;
 
 trait PacketStreamExt {
-    async fn next_packet<T: ReadPacket>(&mut self) -> Result<T, Error>;
+    async fn next_packet<T: ReadPacket>(&mut self) -> Result<T, PassageError>;
 }
 
 impl<S: AsyncRead + Unpin> PacketStreamExt for Framed<S, PacketCodec> {
-    async fn next_packet<T: ReadPacket>(&mut self) -> Result<T, Error> {
+    async fn next_packet<T: ReadPacket>(&mut self) -> Result<T, PassageError> {
         let packet = self
             .next()
             .await
-            .ok_or(Error::ConnectionClosed)??
+            .ok_or(PassageError::ConnectionClosed)??
             .try_into()?;
         Ok(packet)
     }
@@ -113,7 +113,7 @@ async fn simulate_handshake() {
     let server = tokio::spawn(async move {
         let res = server.listen().await;
         match res {
-            Err(Error::ConnectionClosed) => {}
+            Err(PassageError::ConnectionClosed) => {}
             other => panic!("expected connection closed, got {:?}", other),
         }
     });
@@ -242,7 +242,7 @@ async fn simulate_transfer_no_configuration() {
     let server = tokio::spawn(async move {
         let result = server.listen().await;
         match result {
-            Err(Error::ConnectionClosed) => {}
+            Err(PassageError::ConnectionClosed) => {}
             other => panic!("expected no target found, got {:?}", other),
         }
     });
@@ -412,7 +412,7 @@ async fn simulate_slow_transfer_no_configuration() {
     let server = tokio::spawn(async move {
         let result = server.listen().await;
         match result {
-            Err(Error::ConnectionClosed) => {}
+            Err(PassageError::ConnectionClosed) => {}
             other => panic!("expected no target found, got {:?}", other),
         }
     });
@@ -604,7 +604,7 @@ async fn simulate_login_no_configuration() {
     let server = tokio::spawn(async move {
         let result = server.listen().await;
         match result {
-            Err(Error::ConnectionClosed) => {}
+            Err(PassageError::ConnectionClosed) => {}
             other => panic!("expected no target found, got {:?}", other),
         }
     });
@@ -837,7 +837,7 @@ async fn simulate_login_minimum_version() {
     let server = tokio::spawn(async move {
         let result = server.listen().await;
         match result {
-            Err(Error::ConnectionClosed) => {}
+            Err(PassageError::ConnectionClosed) => {}
             other => panic!("expected connection closed, got {:?}", other),
         }
     });
@@ -910,7 +910,7 @@ async fn sends_keep_alive() {
     let server = tokio::spawn(async move {
         let result = server.listen().await;
         match result {
-            Err(Error::ConnectionClosed) => {}
+            Err(PassageError::ConnectionClosed) => {}
             other => panic!("expected no target found, got {:?}", other),
         }
     });
@@ -1086,7 +1086,7 @@ async fn no_respond_keep_alive() {
     let server = tokio::spawn(async move {
         let res = server.listen().await;
         match res {
-            Err(Error::ConnectionClosed) => {}
+            Err(PassageError::ConnectionClosed) => {}
             other => panic!("expected missed keep alive, got {:?}", other),
         }
     });

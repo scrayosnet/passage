@@ -10,11 +10,11 @@
 //! deployment is dominated by whatever the configured adapters do.
 //!
 //! ```text
-//! cargo bench -p passage-protocol --bench status_ping
+//! cargo bench -p passage-router --bench status_ping
 //! ```
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use passage_protocol::config::Config;
+use passage_router::config::Config;
 use std::time::Duration;
 use tokio::runtime::Runtime;
 

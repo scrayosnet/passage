@@ -1,7 +1,7 @@
 pub mod error;
 
 pub(crate) use crate::crypto::error::Error;
-use passage_packets::VerifyToken;
+use passage_core::common::VerifyToken;
 use rand::TryRng;
 use rand::rand_core::UnwrapErr;
 use rand::rngs::SysRng;

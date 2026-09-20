@@ -1,7 +1,7 @@
 use crate::codec::{Frame, FrameCodec};
 use crate::common::Phase;
 use crate::common::ProtocolVersion;
-use crate::connection::{ConnectionError, ConnectionHandle, Ctx, Dispatcher, Op, Result};
+use crate::connection::{ConnectionError, ConnectionHandle, Ctx, DispatchError, Dispatcher, Op, Result};
 use crate::wire::Options as WireOptions;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
@@ -154,7 +154,7 @@ pub struct Connection<T, S = (), D = ()> {
     state: S,
 
     /// The list of tasks that have been queued by the dispatcher.
-    tasks: FuturesUnordered<BoxFuture<'static, (bool, Result<()>)>>,
+    tasks: FuturesUnordered<BoxFuture<'static, (bool, Result<(), DispatchError>)>>,
 
     /// The number of tasks that are running exclusively. No new frames and ticks are handled while
     /// at least one task is exclusive.

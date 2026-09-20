@@ -7,6 +7,7 @@ use crate::wire::Options;
 use futures::future::BoxFuture;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
+use crate::connection::DispatchError;
 
 /// An operation is used to mutate the connection state asynchronously without exclusive locks. Handlers
 /// get an (unbounded) channel sender to pass operations on.
@@ -38,7 +39,7 @@ pub enum Op<S> {
     /// This is *not* a `tokio::spawn` but instead runs in the connection scope.
     Spawn {
         /// The closure to run.
-        future: BoxFuture<'static, Result<()>>,
+        future: BoxFuture<'static, Result<(), DispatchError>>,
 
         /// Whether the peer may transmit packets before the future resolves. Setting it to `true`
         /// while the client sends packets results in an error and the connection being closed.
@@ -269,7 +270,7 @@ impl<S> ConnectionHandle<S> {
     /// # Errors
     ///
     /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn spawn(&self, future: impl Future<Output = Result<()>> + Send + 'static) -> Result<()> {
+    pub fn spawn(&self, future: impl Future<Output = Result<(), DispatchError>> + Send + 'static) -> Result<()> {
         self.queue(Op::Spawn {
             future: Box::pin(future),
             exclusive: false,
@@ -283,7 +284,7 @@ impl<S> ConnectionHandle<S> {
     /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
     pub fn exclusive(
         &self,
-        future: impl Future<Output = Result<()>> + Send + 'static,
+        future: impl Future<Output = Result<(), DispatchError>> + Send + 'static,
     ) -> Result<()> {
         self.queue(Op::Spawn {
             future: Box::pin(future),
@@ -296,14 +297,14 @@ impl<S> ConnectionHandle<S> {
     /// # Errors
     ///
     /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn detach(&self, future: impl Future<Output = Result<()>> + Send + 'static)
+    pub fn detach(&self, future: impl Future<Output = Result<(), DispatchError>> + Send + 'static)
     where
         S: Send + 'static,
     {
         let conn = self.clone();
         tokio::spawn(async move {
             if let Err(err) = future.await {
-                let _ = conn.fail(err);
+                let _ = conn.fail(err.into());
             }
         });
     }
