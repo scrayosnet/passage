@@ -1,24 +1,27 @@
 use crate::common::Phase;
 use crate::common::ProtocolVersion;
-use crate::connection::{ConnectionError, Ctx, DispatchError};
+use crate::connection::{ConnRef, ConnectionError, DispatchError};
+use futures::future::BoxFuture;
 use std::sync::Arc;
 use tracing::warn;
 
 /// The dispatch handler type with an erased packet type.
-pub type ErasedHandler<S> =
-    Box<dyn for<'c> Fn(Ctx<'c, S>, &[u8]) -> Result<(), DispatchError> + Send + Sync>;
+pub type ErasedHandler<S> = Box<
+    dyn for<'a> Fn(ConnRef<'a, S>, &[u8]) -> BoxFuture<'a, Result<(), DispatchError>> + Send + Sync,
+>;
 
 /// The open handler type, called once before the connection reads or writes anything.
 pub type OpenHandler<S> =
-    Arc<dyn for<'c> Fn(Ctx<'c, S>) -> Result<(), DispatchError> + Send + Sync>;
+    Arc<dyn for<'a> Fn(ConnRef<'a, S>) -> Result<(), DispatchError> + Send + Sync>;
 
 /// The tick handler type.
 pub type TickHandler<S> =
-    Arc<dyn for<'c> Fn(Ctx<'c, S>) -> Result<(), DispatchError> + Send + Sync>;
+    Arc<dyn for<'a> Fn(ConnRef<'a, S>) -> BoxFuture<'a, Result<(), DispatchError>> + Send + Sync>;
 
 /// The error handler type.
-pub type ErrorHandler<S> =
-    Arc<dyn for<'c> Fn(Ctx<'c, S>, &mut ConnectionError) -> Result<(), DispatchError> + Send + Sync>;
+pub type ErrorHandler<S> = Arc<
+    dyn for<'a> Fn(ConnRef<'a, S>, &mut ConnectionError) -> Result<(), DispatchError> + Send + Sync,
+>;
 
 /// A packet handler entry. It contains the packet meta and dispatch handler.
 pub struct Entry<S> {
@@ -138,7 +141,7 @@ mod tests {
             name,
             phase,
             ids,
-            dispatch: Box::new(|_, _| Ok(())),
+            dispatch: Box::new(|_, _| Box::pin(std::future::ready(Ok(())))),
         }
     }
 

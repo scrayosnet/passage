@@ -1,8 +1,9 @@
 //! Typed packet registration with erased dispatch.
 //!
-//! Registration is generic (`.on::<LoginStart>(on_login_start)`), so the handler receives a decoded
-//! packet and a wrong pairing does not compile. Storage is erased, so dispatch is a table lookup and
-//! one virtual call -- and adding a packet does not widen any trait.
+//! Registration is generic (`.on(on_login_start)`), so the handler receives a decoded packet, the
+//! packet type is inferred from its signature, and a wrong pairing does not compile. Storage is
+//! erased, so dispatch is a table lookup and one virtual call -- and adding a packet does not widen
+//! any trait.
 //!
 //! # Tables are built once, one per *change*
 //!

@@ -15,9 +15,8 @@ use std::time::Duration;
 fn server() -> passage_core::router::Router<Notes> {
     router()
         .handle::<Handshake>(on_handshake)
-        .handle::<StatusRequest>(|ctx, _packet| {
-            ctx.handle
-                .send(ctx.version, StatusResponse::text("mc.justchunks.net"))?;
+        .handle::<StatusRequest>(|conn, _packet| {
+            conn.send(StatusResponse::text("mc.justchunks.net"))?;
             Ok(())
         })
         .build()
@@ -167,9 +166,8 @@ async fn a_peer_that_stops_reading_does_not_outlast_its_deadline() {
     // any shutdown.
     let big = router()
         .handle::<Handshake>(on_handshake)
-        .handle::<StatusRequest>(|ctx, _packet| {
-            ctx.handle
-                .send(ctx.version, StatusResponse::text(&"x".repeat(4000)))?;
+        .handle::<StatusRequest>(|conn, _packet| {
+            conn.send(StatusResponse::text(&"x".repeat(4000)))?;
             Ok(())
         })
         .build();

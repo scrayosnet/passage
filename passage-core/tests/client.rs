@@ -21,13 +21,10 @@ use tokio_util::sync::CancellationToken;
 fn status_server() -> Router<Notes> {
     router()
         .handle::<Handshake>(on_handshake)
-        .handle::<StatusRequest>(|ctx, _packet| {
-            ctx.state.push("status requested");
-            ctx.handle.batch(|batch| {
-                batch.send(ctx.version, StatusResponse::text("mc.justchunks.net"))?;
-                batch.close();
-                Ok(())
-            })?;
+        .handle::<StatusRequest>(|conn, _packet| {
+            conn.state.push("status requested");
+            conn.send(StatusResponse::text("mc.justchunks.net"))?;
+            conn.close();
             Ok(())
         })
         .build()
@@ -36,11 +33,11 @@ fn status_server() -> Router<Notes> {
 /// A client that asks for the status and closes when it has it.
 fn status_client() -> Router<Notes> {
     router()
-        .on_open(|ctx| {
-            greet(&ctx, Intent::Status)?;
-            ctx.handle.send(ctx.version, StatusRequest)?;
+        .on_open(opens(|conn| {
+            greet(conn, Intent::Status)?;
+            conn.send(StatusRequest)?;
             Ok(())
-        })
+        }))
         .note_and_close::<StatusResponse>()
         .build()
 }

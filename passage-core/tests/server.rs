@@ -8,7 +8,8 @@ mod common;
 
 use common::packets::*;
 use common::*;
-use passage_core::connection::{Ctx, DispatchError, Dispatcher, make_with};
+use futures::future::BoxFuture;
+use passage_core::connection::{ConnRef, DispatchError, Dispatcher, make_with};
 use passage_core::router::{Layer, Router};
 use passage_core::server::Server;
 use passage_core::versions;
@@ -23,13 +24,10 @@ use tracing::Level;
 fn status_server() -> Router<Notes> {
     router()
         .handle::<Handshake>(on_handshake)
-        .handle::<StatusRequest>(|ctx, _packet| {
-            ctx.state.push("status requested");
-            ctx.handle.batch(|batch| {
-                batch.send(ctx.version, StatusResponse::text("mc.justchunks.net"))?;
-                batch.close();
-                Ok(())
-            })?;
+        .handle::<StatusRequest>(|conn, _packet| {
+            conn.state.push("status requested");
+            conn.send(StatusResponse::text("mc.justchunks.net"))?;
+            conn.close();
             Ok(())
         })
         .build()
@@ -38,11 +36,11 @@ fn status_server() -> Router<Notes> {
 /// A client that asks for the status and closes when it has it.
 fn status_client() -> Router<Notes> {
     router()
-        .on_open(|ctx| {
-            greet(&ctx, Intent::Status)?;
-            ctx.handle.send(ctx.version, StatusRequest)?;
+        .on_open(opens(|conn| {
+            greet(conn, Intent::Status)?;
+            conn.send(StatusRequest)?;
             Ok(())
-        })
+        }))
         .note_and_close::<StatusResponse>()
         .build()
 }
@@ -270,12 +268,12 @@ async fn a_refused_peer_costs_the_next_one_nothing() {
 struct Panicking;
 
 impl Dispatcher<Notes> for Panicking {
-    fn on_frame(
+    fn on_frame<'a>(
         &self,
-        _ctx: Ctx<'_, Notes>,
+        _conn: ConnRef<'a, Notes>,
         _id: i32,
         _payload: &[u8],
-    ) -> Result<(), DispatchError> {
+    ) -> BoxFuture<'a, Result<(), DispatchError>> {
         panic!("a handler bug");
     }
 }
@@ -348,19 +346,20 @@ async fn shutdown_stops_accepting_and_ends_the_connections_it_already_has() {
         .expect("the accept loop does not panic");
 }
 
+/// Accepts the handshake and then never finishes, so the connection cannot end on its own.
+///
+/// A named `async fn` rather than a closure: a closure whose future captures the connection cannot
+/// be inferred as higher-ranked over its lifetime.
+async fn never_finishes(conn: ConnRef<'_, Notes>, packet: Handshake) -> Result<(), DispatchError> {
+    conn.with(|c| accept(c, &packet))?;
+    std::future::pending::<()>().await;
+    Ok(())
+}
+
 #[tokio::test(start_paused = true)]
 async fn the_drain_timeout_bounds_how_long_the_server_waits() {
     // A connection that will not end, and a server that has to come back anyway.
-    let slow = router()
-        .handle::<Handshake>(|ctx, packet| {
-            accept(&ctx, &packet)?;
-            ctx.handle.exclusive(async {
-                std::future::pending::<()>().await;
-                Ok(())
-            })?;
-            Ok(())
-        })
-        .build();
+    let slow = router().handle_async(never_finishes).build();
 
     let harness = Harness::new(slow);
     let incoming = harness.incoming;

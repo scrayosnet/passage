@@ -1,10 +1,10 @@
 use crate::common::ProtocolVersion;
-use crate::connection::{ConnectionError, Ctx, DispatchError};
+use crate::connection::{ConnRef, ConnectionError, DispatchError};
 use crate::packet::packet::{Packet, check_ids_unordered};
 use crate::router::{
     Entry, ErasedHandler, ErrorHandler, OpenHandler, RouterError, Table, TickHandler,
 };
-use crate::wire::Reader;
+use crate::wire::{Options, Reader};
 use anyhow::anyhow;
 use std::sync::Arc;
 
@@ -17,6 +17,76 @@ const MALFORMED: &str = "malformed_packet";
 /// Raises a failure for a payload the peer sent that the packet cannot account for.
 fn malformed(packet: &'static str, what: &str, cause: &dyn std::fmt::Display) -> DispatchError {
     DispatchError::peer(MALFORMED, anyhow!("packet `{packet}` {what}: {cause}"))
+}
+
+/// Decodes one packet from a frame payload, which leads with the ID varint it was routed by.
+///
+/// This runs before the handler's future is built, so the borrow of the connection's read buffer
+/// ends here and nothing that outlives the dispatch call can be holding it.
+fn decode<P: Packet>(
+    payload: &[u8],
+    version: ProtocolVersion,
+    options: Options,
+) -> Result<P, DispatchError> {
+    let mut reader = Reader::new(payload).with_options(options);
+    reader
+        .var_int("packet_id")
+        .map_err(|err| malformed(P::NAME, "has no ID", &err))?;
+    let packet = P::decode(&mut reader, version)
+        .map_err(|err| malformed(P::NAME, "failed to decode", &err))?;
+    reader
+        .finish(P::NAME)
+        .map_err(|err| malformed(P::NAME, "was not fully consumed", &err))?;
+    Ok(packet)
+}
+
+/// Nothing to do, for a dispatch that resolved before it had to wait for anything.
+fn ready<'a>(
+    result: Result<(), DispatchError>,
+) -> futures::future::BoxFuture<'a, Result<(), DispatchError>> {
+    Box::pin(std::future::ready(result))
+}
+
+/// The handler type used to register handlers on the router, allowing async function to be used.
+pub trait Handler<'a, S: 'a, P>: Send + Sync + 'static {
+    /// The future this handler returns.
+    type Future: Future<Output = Result<(), DispatchError>> + Send + 'a;
+
+    /// Handles one packet.
+    fn call(&self, conn: ConnRef<'a, S>, packet: P) -> Self::Future;
+}
+
+impl<'a, S: 'a, P, F, Fut> Handler<'a, S, P> for F
+where
+    F: Fn(ConnRef<'a, S>, P) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), DispatchError>> + Send + 'a,
+{
+    type Future = Fut;
+
+    fn call(&self, conn: ConnRef<'a, S>, packet: P) -> Fut {
+        self(conn, packet)
+    }
+}
+
+/// The same bridge for the tick hook, which has no packet to hand over.
+pub trait TickHandlerFn<'a, S: 'a>: Send + Sync + 'static {
+    /// The future this handler returns.
+    type Future: Future<Output = Result<(), DispatchError>> + Send + 'a;
+
+    /// Handles one tick.
+    fn call(&self, conn: ConnRef<'a, S>) -> Self::Future;
+}
+
+impl<'a, S: 'a, F, Fut> TickHandlerFn<'a, S> for F
+where
+    F: Fn(ConnRef<'a, S>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), DispatchError>> + Send + 'a,
+{
+    type Future = Fut;
+
+    fn call(&self, conn: ConnRef<'a, S>) -> Fut {
+        self(conn)
+    }
 }
 
 /// The [`UnknownPolicy`] configures how unknown packets are handled. By default, unknown packets
@@ -74,10 +144,10 @@ impl<S: 'static> RouterBuilder<S> {
     /// # Errors
     ///
     /// Returns an error if the router is already saturated or the packet IDs are misconfigured.
-    pub fn on<P: Packet>(
-        mut self,
-        handler: impl Fn(Ctx<'_, S>, P) -> Result<(), DispatchError> + Send + Sync + 'static,
-    ) -> Result<Self, RouterError> {
+    pub fn on<P: Packet, H>(mut self, handler: H) -> Result<Self, RouterError>
+    where
+        H: for<'a> Handler<'a, S, P>,
+    {
         // Ensure that the packet may be registered to the router. The router can store at most
         // `MAX_PACKETS` packets. The packet IDs must also be ordered ascending by their protocol version.
         if self.entries.len() >= MAX_PACKETS {
@@ -95,20 +165,15 @@ impl<S: 'static> RouterBuilder<S> {
             });
         }
 
-        // Creates the erased handler from the given handler. It tries to decode the packet from the
-        // buffer and passes it to the handler. Packets are generally defined together with the
-        // handlers. As such, handler errors are wrapped as dispatch errors (i.e., anyhow).
-        let dispatch: ErasedHandler<S> = Box::new(move |ctx: Ctx<'_, S>, payload: &[u8]| {
-            let mut reader = Reader::new(payload).with_options(ctx.handle.options());
-            reader
-                .var_int("packet_id")
-                .map_err(|err| malformed(P::NAME, "has no ID", &err))?;
-            let packet = P::decode(&mut reader, ctx.version)
-                .map_err(|err| malformed(P::NAME, "failed to decode", &err))?;
-            reader
-                .finish(P::NAME)
-                .map_err(|err| malformed(P::NAME, "was not fully consumed", &err))?;
-            handler(ctx, packet)
+        // Creates the erased handler from the given handler. It decodes the packet from the buffer
+        // and passes it to the handler. Packets are generally defined together with the handlers.
+        // As such, handler errors are wrapped as dispatch errors (i.e., anyhow).
+        let dispatch: ErasedHandler<S> = Box::new(move |conn, payload| {
+            let (version, options) = conn.with(|c| (c.version(), c.options()));
+            match decode::<P>(payload, version, options) {
+                Ok(packet) => Box::pin(handler.call(conn, packet)),
+                Err(error) => ready(Err(error)),
+            }
         });
         self.entries.push(Entry {
             name: P::NAME,
@@ -120,10 +185,13 @@ impl<S: 'static> RouterBuilder<S> {
     }
 
     /// Registers the open handler, used by client implementations to send the initial packet.
+    ///
+    /// It is synchronous: it runs before the connection reads or writes anything, so there is
+    /// nothing for it to overlap with.
     #[must_use]
     pub fn on_open(
         mut self,
-        handler: impl Fn(Ctx<'_, S>) -> Result<(), DispatchError> + Send + Sync + 'static,
+        handler: impl for<'a> Fn(ConnRef<'a, S>) -> Result<(), DispatchError> + Send + Sync + 'static,
     ) -> Self {
         self.on_open = Some(Arc::new(handler));
         self
@@ -131,19 +199,22 @@ impl<S: 'static> RouterBuilder<S> {
 
     /// Registers the tick handler, used for keep alive packets and deadlines.
     #[must_use]
-    pub fn on_tick(
-        mut self,
-        handler: impl Fn(Ctx<'_, S>) -> Result<(), DispatchError> + Send + Sync + 'static,
-    ) -> Self {
-        self.tick = Some(Arc::new(handler));
+    pub fn on_tick<H>(mut self, handler: H) -> Self
+    where
+        H: for<'a> TickHandlerFn<'a, S>,
+    {
+        self.tick = Some(Arc::new(move |conn| Box::pin(handler.call(conn))));
         self
     }
 
     /// Registers the error handler, used to track errors and send (unexpected) disconnect packets.
+    ///
+    /// It is synchronous: by the time it runs every other writer has been dropped, and a last word
+    /// that had to wait for something could not be bounded.
     #[must_use]
     pub fn on_error(
         mut self,
-        handler: impl Fn(Ctx<'_, S>, &mut ConnectionError) -> Result<(), DispatchError>
+        handler: impl for<'a> Fn(ConnRef<'a, S>, &mut ConnectionError) -> Result<(), DispatchError>
         + Send
         + Sync
         + 'static,
@@ -294,11 +365,29 @@ mod tests {
         }
     }
 
+    /// Handlers that do nothing, for tests that only care where a packet lands. Written as named
+    /// `async fn`s so the registration below infers `P` from the signature and needs no turbofish.
+    async fn anchored(_conn: ConnRef<'_, ()>, _packet: Anchored) -> Result<(), DispatchError> {
+        Ok(())
+    }
+
+    async fn moved(_conn: ConnRef<'_, ()>, _packet: Moved) -> Result<(), DispatchError> {
+        Ok(())
+    }
+
+    async fn backwards(_conn: ConnRef<'_, ()>, _packet: Backwards) -> Result<(), DispatchError> {
+        Ok(())
+    }
+
+    async fn ticks(_conn: ConnRef<'_, ()>) -> Result<(), DispatchError> {
+        Ok(())
+    }
+
     fn router() -> Router<()> {
         Router::<()>::builder()
-            .on::<Anchored>(|_ctx, _packet| Ok(()))
+            .on(anchored)
             .expect("registers")
-            .on::<Moved>(|_ctx, _packet| Ok(()))
+            .on(moved)
             .expect("registers")
             .build()
     }
@@ -355,7 +444,7 @@ mod tests {
     fn an_id_table_written_the_wrong_way_round_is_refused_at_registration() {
         // It must surface at startup, not on the first client that happens to send one of them.
         let err = Router::<()>::builder()
-            .on::<Backwards>(|_ctx, _packet| Ok(()))
+            .on(backwards)
             .expect_err("must reject");
         assert!(
             matches!(
@@ -385,9 +474,9 @@ mod tests {
 
         let full = Router::<()>::builder()
             .unknown(UnknownPolicy::Ignore)
-            .on_open(|_ctx| Ok(()))
-            .on_tick(|_ctx| Ok(()))
-            .on_error(|_ctx, _error| Ok(()))
+            .on_open(|_conn: ConnRef<'_, ()>| Ok(()))
+            .on_tick(ticks)
+            .on_error(|_conn: ConnRef<'_, ()>, _error: &mut ConnectionError| Ok(()))
             .build();
         assert!(full.on_open.is_some());
         assert!(full.tick.is_some());

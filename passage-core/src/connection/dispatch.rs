@@ -1,4 +1,5 @@
-use crate::connection::{ConnectionError, Ctx};
+use crate::connection::{ConnRef, ConnectionError};
+use futures::future::BoxFuture;
 use std::fmt;
 
 /// Who caused a handler failure.
@@ -92,9 +93,10 @@ impl From<anyhow::Error> for DispatchError {
     }
 }
 
-/// So that a handler can `?` the queue operations on its own [`Ctx`] -- `ctx.handle.close()?` and
-/// friends return a [`ConnectionError`]. The classification the connection already made is carried
-/// across rather than flattened to the default.
+// TODO remove this if possible
+/// So that a handler can `?` what it does to its own connection -- `conn.send(..)` and friends
+/// return a [`ConnectionError`]. The classification the connection already made is carried across
+/// rather than flattened to the default.
 impl From<ConnectionError> for DispatchError {
     fn from(error: ConnectionError) -> Self {
         Self {
@@ -113,6 +115,11 @@ impl From<ConnectionError> for DispatchError {
 /// exported `Result` alias ([`ConnectionError`]'s) rather than two that shadow each other.
 type Result<T, E = DispatchError> = std::result::Result<T, E>;
 
+/// Returns a completed future with `Ok(())`.
+fn done<'a>() -> BoxFuture<'a, Result<()>> {
+    Box::pin(std::future::ready(Ok(())))
+}
+
 /// A [`Dispatcher`] is used by the connection to handle incoming packets. It is implemented for
 /// [`Box`] and [`Option`].
 ///
@@ -125,8 +132,8 @@ pub trait Dispatcher<S> {
     ///
     /// Returns whatever the implementation raises. An error here fails the connection before the
     /// first frame, and [`on_error`](Dispatcher::on_error) still gets the last word.
-    fn on_open(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
-        let _ = ctx;
+    fn on_open(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
+        let _ = conn;
         Ok(())
     }
 
@@ -137,8 +144,8 @@ pub trait Dispatcher<S> {
     ///
     /// Returns whatever the implementation raises while rebinding. An error here fails the
     /// connection.
-    fn on_version(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
-        let _ = ctx;
+    fn on_version(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
+        let _ = conn;
         Ok(())
     }
 
@@ -148,9 +155,14 @@ pub trait Dispatcher<S> {
     ///
     /// Returns whatever the handler raises. An error here fails the connection, and
     /// [`on_error`](Dispatcher::on_error) gets the last word before the socket goes away.
-    fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
-        let _ = (ctx, id, payload);
-        Ok(())
+    fn on_frame<'a>(
+        &self,
+        conn: ConnRef<'a, S>,
+        id: i32,
+        payload: &[u8],
+    ) -> BoxFuture<'a, Result<()>> {
+        let _ = (conn, id, payload);
+        done()
     }
 
     /// Handles a tick event.
@@ -158,9 +170,9 @@ pub trait Dispatcher<S> {
     /// # Errors
     ///
     /// Returns whatever the tick handler raises. An error here fails the connection.
-    fn on_tick(&self, ctx: Ctx<'_, S>) -> Result<()> {
-        let _ = ctx;
-        Ok(())
+    fn on_tick<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<()>> {
+        let _ = conn;
+        done()
     }
 
     /// Handles a connection error. It is called before the connection is closed and should be used
@@ -176,8 +188,8 @@ pub trait Dispatcher<S> {
     ///
     /// Returns whatever the hook raises. The failure is logged and does not replace the ending the
     /// connection already had.
-    fn on_error(&self, ctx: Ctx<'_, S>, error: &mut ConnectionError) -> Result<()> {
-        let _ = (ctx, error);
+    fn on_error(&self, conn: ConnRef<'_, S>, error: &mut ConnectionError) -> Result<()> {
+        let _ = (conn, error);
         Ok(())
     }
 }
@@ -185,24 +197,29 @@ pub trait Dispatcher<S> {
 impl<S> Dispatcher<S> for () {}
 
 impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
-    fn on_open(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
-        (**self).on_open(ctx)
+    fn on_open(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
+        (**self).on_open(conn)
     }
 
-    fn on_version(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
-        (**self).on_version(ctx)
+    fn on_version(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
+        (**self).on_version(conn)
     }
 
-    fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
-        (**self).on_frame(ctx, id, payload)
+    fn on_frame<'a>(
+        &self,
+        conn: ConnRef<'a, S>,
+        id: i32,
+        payload: &[u8],
+    ) -> BoxFuture<'a, Result<()>> {
+        (**self).on_frame(conn, id, payload)
     }
 
-    fn on_tick(&self, ctx: Ctx<'_, S>) -> Result<()> {
-        (**self).on_tick(ctx)
+    fn on_tick<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<()>> {
+        (**self).on_tick(conn)
     }
 
-    fn on_error(&self, ctx: Ctx<'_, S>, error: &mut ConnectionError) -> Result<()> {
-        (**self).on_error(ctx, error)
+    fn on_error(&self, conn: ConnRef<'_, S>, error: &mut ConnectionError) -> Result<()> {
+        (**self).on_error(conn, error)
     }
 }
 
@@ -211,39 +228,44 @@ impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
 // started on, which is exactly the bug the connection calls `on_version` to prevent.
 
 impl<S, D: Dispatcher<S>> Dispatcher<S> for Option<D> {
-    fn on_open(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
+    fn on_open(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
         let Some(this) = self else {
             return Ok(());
         };
-        this.on_open(ctx)
+        this.on_open(conn)
     }
 
-    fn on_version(&mut self, ctx: Ctx<'_, S>) -> Result<()> {
+    fn on_version(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
         let Some(this) = self else {
             return Ok(());
         };
-        this.on_version(ctx)
+        this.on_version(conn)
     }
 
-    fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<()> {
+    fn on_frame<'a>(
+        &self,
+        conn: ConnRef<'a, S>,
+        id: i32,
+        payload: &[u8],
+    ) -> BoxFuture<'a, Result<()>> {
         let Some(this) = self else {
-            return Ok(());
+            return done();
         };
-        this.on_frame(ctx, id, payload)
+        this.on_frame(conn, id, payload)
     }
 
-    fn on_tick(&self, ctx: Ctx<'_, S>) -> Result<()> {
+    fn on_tick<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<()>> {
         let Some(this) = self else {
-            return Ok(());
+            return done();
         };
-        this.on_tick(ctx)
+        this.on_tick(conn)
     }
 
-    fn on_error(&self, ctx: Ctx<'_, S>, error: &mut ConnectionError) -> Result<()> {
+    fn on_error(&self, conn: ConnRef<'_, S>, error: &mut ConnectionError) -> Result<()> {
         let Some(this) = self else {
             return Ok(());
         };
-        this.on_error(ctx, error)
+        this.on_error(conn, error)
     }
 }
 
@@ -288,11 +310,10 @@ mod tests {
     use super::*;
     use crate::common::Phase;
     use crate::common::{ProtocolVersion, versions};
-    use crate::connection::ConnectionHandle;
+    use crate::connection::ConnCell;
     use crate::wire::Options;
     use anyhow::anyhow;
     use std::sync::{Arc, Mutex};
-    use tokio_util::sync::CancellationToken;
 
     /// Which hooks a dispatcher was asked to run, in order.
     #[derive(Default)]
@@ -300,82 +321,95 @@ mod tests {
         seen: Arc<Mutex<Vec<&'static str>>>,
     }
 
+    impl Recorder {
+        fn note(&self, what: &'static str) {
+            self.seen.lock().expect("not poisoned").push(what);
+        }
+    }
+
     impl Dispatcher<()> for Recorder {
-        fn on_open(&mut self, _ctx: Ctx<'_, ()>) -> Result<()> {
-            self.seen.lock().expect("not poisoned").push("open");
+        fn on_open(&mut self, _conn: ConnRef<'_, ()>) -> Result<()> {
+            self.note("open");
             Ok(())
         }
 
-        fn on_version(&mut self, _ctx: Ctx<'_, ()>) -> Result<()> {
-            self.seen.lock().expect("not poisoned").push("version");
+        fn on_version(&mut self, _conn: ConnRef<'_, ()>) -> Result<()> {
+            self.note("version");
             Ok(())
         }
 
-        fn on_frame(&self, _ctx: Ctx<'_, ()>, _id: i32, _payload: &[u8]) -> Result<()> {
-            self.seen.lock().expect("not poisoned").push("frame");
-            Ok(())
+        fn on_frame<'a>(
+            &self,
+            _conn: ConnRef<'a, ()>,
+            _id: i32,
+            _payload: &[u8],
+        ) -> BoxFuture<'a, Result<()>> {
+            self.note("frame");
+            done()
         }
 
-        fn on_tick(&self, _ctx: Ctx<'_, ()>) -> Result<()> {
-            self.seen.lock().expect("not poisoned").push("tick");
-            Ok(())
+        fn on_tick<'a>(&self, _conn: ConnRef<'a, ()>) -> BoxFuture<'a, Result<()>> {
+            self.note("tick");
+            done()
         }
 
-        fn on_error(&self, _ctx: Ctx<'_, ()>, _error: &mut ConnectionError) -> Result<()> {
-            self.seen.lock().expect("not poisoned").push("error");
+        fn on_error(&self, _conn: ConnRef<'_, ()>, _error: &mut ConnectionError) -> Result<()> {
+            self.note("error");
             Ok(())
         }
     }
 
     /// Runs every hook on `dispatcher`, so a test only has to say what it expects to be recorded.
-    fn run_every_hook(mut dispatcher: impl Dispatcher<()>) {
-        let state = ();
-        let (handle, _ops) =
-            ConnectionHandle::<()>::new(CancellationToken::new(), Options::default());
-        let ctx = || Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
+    async fn run_every_hook(mut dispatcher: impl Dispatcher<()>) {
+        let cell = ConnCell::new((), versions::V26_1, Phase::Login, Options::default());
+        let conn = cell.as_ref();
 
-        dispatcher.on_open(ctx()).expect("opens");
-        dispatcher.on_version(ctx()).expect("rebinds");
-        dispatcher.on_frame(ctx(), 0x00, &[]).expect("dispatches");
-        dispatcher.on_tick(ctx()).expect("ticks");
+        dispatcher.on_open(conn).expect("opens");
+        dispatcher.on_version(conn).expect("rebinds");
+        dispatcher
+            .on_frame(conn, 0x00, &[])
+            .await
+            .expect("dispatches");
+        dispatcher.on_tick(conn).await.expect("ticks");
         let mut error = ConnectionError::shutdown();
-        dispatcher.on_error(ctx(), &mut error).expect("reports");
+        dispatcher.on_error(conn, &mut error).expect("reports");
     }
 
-    #[test]
-    fn a_dispatcher_that_implements_nothing_does_nothing() {
+    #[tokio::test]
+    async fn a_dispatcher_that_implements_nothing_does_nothing() {
         // Every method has a default that returns `Ok`, so an implementation only writes the hooks
         // it cares about -- and the call itself is the assertion.
-        run_every_hook(());
+        run_every_hook(()).await;
     }
 
-    #[test]
-    fn a_boxed_dispatcher_forwards_every_hook() {
+    #[tokio::test]
+    async fn a_boxed_dispatcher_forwards_every_hook() {
         // Which dispatcher runs is a value, not a type -- and a `Box` that dropped a hook would be
         // a silent bug in exactly the case the hook exists to prevent.
         let seen = Arc::new(Mutex::new(Vec::new()));
         let dispatcher: Box<dyn Dispatcher<()>> = Box::new(Recorder {
             seen: Arc::clone(&seen),
         });
-        run_every_hook(dispatcher);
+        run_every_hook(dispatcher).await;
         assert_eq!(
             *seen.lock().expect("not poisoned"),
             vec!["open", "version", "frame", "tick", "error"],
         );
     }
 
-    #[test]
-    fn an_optional_dispatcher_forwards_every_hook_it_has() {
+    #[tokio::test]
+    async fn an_optional_dispatcher_forwards_every_hook_it_has() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         run_every_hook(Some(Recorder {
             seen: Arc::clone(&seen),
-        }));
+        }))
+        .await;
         assert_eq!(
             *seen.lock().expect("not poisoned"),
             vec!["open", "version", "frame", "tick", "error"],
         );
 
-        run_every_hook(None::<Recorder>);
+        run_every_hook(None::<Recorder>).await;
         assert_eq!(
             seen.lock().expect("not poisoned").len(),
             5,
@@ -437,17 +471,13 @@ mod tests {
         let mut dispatcher = Recorder {
             seen: Arc::clone(&seen),
         };
-        let state = ();
-        let (handle, _ops) =
-            ConnectionHandle::<()>::new(CancellationToken::new(), Options::default());
-        dispatcher
-            .on_open(Ctx::new(
-                &state,
-                Phase::Handshake,
-                ProtocolVersion::UNKNOWN,
-                &handle,
-            ))
-            .expect("opens");
+        let cell = ConnCell::new(
+            (),
+            ProtocolVersion::UNKNOWN,
+            Phase::Handshake,
+            Options::default(),
+        );
+        dispatcher.on_open(cell.as_ref()).expect("opens");
         assert_eq!(*seen.lock().expect("not poisoned"), vec!["open"]);
     }
 }

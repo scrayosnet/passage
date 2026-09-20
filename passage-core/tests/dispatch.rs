@@ -8,9 +8,11 @@
 mod common;
 
 use common::*;
+use futures::future::BoxFuture;
 use passage_core::client::{Client, Connected};
 use passage_core::connection::{
-    ConnectionError, Ctx, DispatchError, Dispatcher, MakeDispatcher, Options, Outcome, make_with,
+    ConnRef, ConnectionError, DispatchError, Dispatcher, MakeDispatcher, Options, Outcome,
+    make_with,
 };
 use passage_core::{Phase, ProtocolVersion, versions};
 use std::sync::{Arc, Mutex};
@@ -43,51 +45,59 @@ impl Recorder {
 }
 
 impl Dispatcher<()> for Recorder {
-    fn on_open(&mut self, ctx: Ctx<'_, ()>) -> Result<(), DispatchError> {
+    fn on_open(&mut self, conn: ConnRef<'_, ()>) -> Result<(), DispatchError> {
         self.log
             .lock()
             .expect("not poisoned")
             .opened
-            .push(ctx.version);
+            .push(conn.version());
         Ok(())
     }
 
-    fn on_version(&mut self, ctx: Ctx<'_, ()>) -> Result<(), DispatchError> {
+    fn on_version(&mut self, conn: ConnRef<'_, ()>) -> Result<(), DispatchError> {
         self.log
             .lock()
             .expect("not poisoned")
             .versions
-            .push(ctx.version);
+            .push(conn.version());
         Ok(())
     }
 
-    fn on_frame(&self, ctx: Ctx<'_, ()>, id: i32, payload: &[u8]) -> Result<(), DispatchError> {
+    fn on_frame<'a>(
+        &self,
+        conn: ConnRef<'a, ()>,
+        id: i32,
+        payload: &[u8],
+    ) -> BoxFuture<'a, Result<(), DispatchError>> {
         let seen = {
             let mut log = self.log.lock().expect("not poisoned");
             log.frames.push((id, payload.len()));
             log.frames.len()
         };
+        let close_after = self.close_after;
 
-        // Proves the ordinary operation vocabulary is available to any dispatcher, not only to
+        // Proves the ordinary connection vocabulary is available to any dispatcher, not only to
         // handlers a router happens to hold.
-        if seen == 1 {
-            ctx.handle.set_version(versions::V26_1)?;
-            ctx.handle.set_phase(Phase::Status)?;
-        }
-        if seen >= self.close_after {
-            ctx.handle.close()?;
-        }
-        Ok(())
+        conn.with(|c| {
+            if seen == 1 {
+                c.set_version(versions::V26_1);
+                c.set_phase(Phase::Status);
+            }
+            if seen >= close_after {
+                c.close();
+            }
+        });
+        Box::pin(std::future::ready(Ok(())))
     }
 
-    fn on_tick(&self, _ctx: Ctx<'_, ()>) -> Result<(), DispatchError> {
+    fn on_tick<'a>(&self, _conn: ConnRef<'a, ()>) -> BoxFuture<'a, Result<(), DispatchError>> {
         self.log.lock().expect("not poisoned").ticks += 1;
-        Ok(())
+        Box::pin(std::future::ready(Ok(())))
     }
 
     fn on_error(
         &self,
-        _ctx: Ctx<'_, ()>,
+        _conn: ConnRef<'_, ()>,
         error: &mut ConnectionError,
     ) -> Result<(), DispatchError> {
         self.log
@@ -250,21 +260,21 @@ async fn a_failure_the_hook_cannot_answer_still_reports_what_it_was() {
     struct Unhelpful;
 
     impl Dispatcher<()> for Unhelpful {
-        fn on_frame(
+        fn on_frame<'a>(
             &self,
-            _ctx: Ctx<'_, ()>,
+            _conn: ConnRef<'a, ()>,
             _id: i32,
             _payload: &[u8],
-        ) -> Result<(), DispatchError> {
-            Err(DispatchError::peer(
+        ) -> BoxFuture<'a, Result<(), DispatchError>> {
+            Box::pin(std::future::ready(Err(DispatchError::peer(
                 "the_real_reason",
                 anyhow::anyhow!("what actually went wrong"),
-            ))
+            ))))
         }
 
         fn on_error(
             &self,
-            _ctx: Ctx<'_, ()>,
+            _conn: ConnRef<'_, ()>,
             _error: &mut ConnectionError,
         ) -> Result<(), DispatchError> {
             Err(DispatchError::internal(

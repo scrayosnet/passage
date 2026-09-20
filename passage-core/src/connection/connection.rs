@@ -1,20 +1,26 @@
 use crate::codec::{Frame, FrameCodec};
 use crate::common::Phase;
 use crate::common::ProtocolVersion;
-use crate::connection::{ConnectionError, ConnectionHandle, Ctx, DispatchError, Dispatcher, Op, Result};
+use crate::connection::{
+    Conn, ConnCell, ConnRef, ConnectionError, DispatchError, Dispatcher, Out, Result,
+};
 use crate::wire::Options as WireOptions;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use futures::{SinkExt, StreamExt, TryFutureExt};
-use std::ops::ControlFlow;
+
 use std::pin::Pin;
+use std::task::Poll;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::mpsc;
 use tokio::time::{Instant, Sleep, sleep_until};
 use tokio_util::codec::Framed;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace};
+
+/// The (uncompleted) dispatch tasks for a connection. They borrow a [`ConnCell`] to interact with the
+/// peer.
+type Tasks<'a> = FuturesUnordered<BoxFuture<'a, std::result::Result<(), DispatchError>>>;
 
 /// The default timeout for the `on_error` dispatcher hook.
 const DEFAULT_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -150,21 +156,13 @@ pub struct Connection<T, S = (), D = ()> {
     /// The dispatcher that handles the incoming frames, ticks, and errors.
     dispatcher: D,
 
-    /// The custom connection scoped state.
-    state: S,
+    /// The custom connection scoped state. It is taken by [`run`](Connection::run) and shared with
+    /// the dispatch tasks.
+    state: Option<S>,
 
-    /// The list of tasks that have been queued by the dispatcher.
-    tasks: FuturesUnordered<BoxFuture<'static, (bool, Result<(), DispatchError>)>>,
-
-    /// The number of tasks that are running exclusively. No new frames and ticks are handled while
-    /// at least one task is exclusive.
-    exclusive: usize,
-
-    /// The current protocol version.
+    /// The protocol version the codec and the dispatch table are currently bound to. It is used to
+    /// detect a version change.
     version: ProtocolVersion,
-
-    /// The current phase.
-    phase: Phase,
 
     /// The timer for ticks.
     ticker: Option<tokio::time::Interval>,
@@ -210,11 +208,8 @@ where
         Self {
             framed: Framed::new(io, FrameCodec::new(config.wire_options)),
             dispatcher,
-            state,
-            tasks: FuturesUnordered::new(),
-            exclusive: 0,
+            state: Some(state),
             version: config.initial_version,
-            phase: config.initial_phase,
             ticker,
             lifetime,
             shutdown,
@@ -224,69 +219,67 @@ where
 
     /// Runs the connection to completion.
     pub async fn run(mut self) -> Outcome<S> {
-        let result = self.serve().await;
+        // Creates a run-scoped connection cell with the connection state. The state is only ever
+        // taken here. This cell will be used by the dispatch handlers.
+        let cell = ConnCell::new(
+            self.state.take().expect("a connection is run once"),
+            self.config.initial_version,
+            self.config.initial_phase,
+            self.config.wire_options,
+        );
 
-        // Close the socket under a token of its own. The connection's token is already cancelled by
-        // the time the error path reaches here, and a cancelled token would abandon the close on its
-        // first `Poll::Pending`. What still bounds it is the lifetime, which the error path has
-        // already switched to `close_timeout`.
+        let result = self.serve(&cell).await;
+
+        // Close the socket under a token of its own. This requires a new cancellation token as the
+        // connection cancellation token might already be canceled at this point (i.e., shutdown).
         let closing = CancellationToken::new();
         let close = self.framed.close().map_err(Into::into);
         if let Err(error) = guarded(&closing, &mut self.lifetime, close).await {
             debug!(%error, "failed to close the socket");
         }
 
+        // Unwrap the connection data from the run-scoped connection. At this point, all dispatch
+        // handlers have completed (or dropped).
+        let conn = cell.into_inner();
         Outcome {
             error: result.err(),
-            state: self.state,
-            version: self.version,
-            phase: self.phase,
+            version: conn.version(),
+            phase: conn.phase(),
+            state: conn.state,
         }
     }
 
     /// Runs the connection loop. On error, it stops all handlers and starts the graceful shutdown.
-    async fn serve(&mut self) -> Result<()> {
+    async fn serve(&mut self, cell: &ConnCell<S>) -> Result<()> {
+        let conn = cell.as_ref();
+        let mut tasks = Tasks::new();
+        let mut spare = Vec::new();
+
         // Run the handlers until they complete or raise an error. `on_open` runs before the loop so
         // that a peer which speaks first (e.g., a client) is able to.
-        let (handle, mut ops) =
-            ConnectionHandle::new(self.shutdown.clone(), self.config.wire_options);
-        let opened =
-            self.dispatcher
-                .on_open(Ctx::new(&self.state, self.phase, self.version, &handle));
-        let result = match opened {
-            Ok(()) => self.drive(&handle, &mut ops).await,
+        let result = match self.dispatcher.on_open(conn) {
+            Ok(()) => self.drive(conn, &mut tasks, &mut spare).await,
             Err(error) => Err(error.into()),
         };
         let Err(mut error) = result else {
             return Ok(());
         };
 
-        // Stop everything the connection started and cut off any detached task that still holds a
-        // handle. Together with the fresh queue below, this makes the error hook the only writer
-        // from here on. Nothing can interleave with the last thing we say to the peer.
-        self.tasks.clear();
-        self.shutdown.cancel();
+        // Drop every (dispatch) handler. They will never be called again, ensuring that noone except
+        // the error hook writes to the connection. Everything already scheduled for the peer is kept
+        // in the queue to ensure consistency between what the peer gets and the connection state.
+        tasks.clear();
 
-        // The error hook gets its own clock. An expired lifetime and a canceled token are two of
-        // the reasons there is something left to say, so neither may bound the answer.
+        // The error hook gets its own timeout.
         self.shutdown = CancellationToken::new();
         self.lifetime = self
             .config
             .close_timeout
             .map(|d| Box::pin(sleep_until(Instant::now() + d)));
-        let (handle, mut ops) =
-            ConnectionHandle::new(self.shutdown.clone(), self.config.wire_options);
-
-        // Run the error hook and write whatever it queued.
-        let ctx = Ctx::new(&self.state, self.phase, self.version, &handle);
-        if let Err(error) = self.dispatcher.on_error(ctx, &mut error) {
+        if let Err(error) = self.dispatcher.on_error(conn, &mut error) {
             debug!(%error, "failed to complete error handling");
         }
-        self.settle(&handle, &mut ops).await;
-
-        // Notify any detached task of the error hook to complete.
-        self.tasks.clear();
-        self.shutdown.cancel();
+        self.settle(conn, &mut spare).await;
 
         Err(error)
     }
@@ -296,172 +289,98 @@ where
     /// Failures here are logged and stop the drain. The reason the connection is ending was decided
     /// before this ran, and losing it to a broken socket on the way out would replace the diagnosis
     /// with the symptom.
-    async fn settle(
-        &mut self,
-        handle: &ConnectionHandle<S>,
-        ops: &mut mpsc::UnboundedReceiver<Op<S>>,
-    ) {
-        while let Ok(op) = ops.try_recv() {
-            match self.handle_op(handle, op).await {
-                // The hook asked to end; there is nothing after it to write.
-                Ok(ControlFlow::Break(())) => return,
-                Ok(ControlFlow::Continue(())) => {}
-                Err(error) => {
-                    debug!(%error, "gave up on what the error handler queued");
-                    return;
-                }
-            }
-        }
-        if let Err(error) = self.flush().await {
-            debug!(%error, "gave up flushing what the error handler queued");
+    async fn settle(&mut self, conn: ConnRef<'_, S>, spare: &mut Vec<Out>) {
+        if let Err(error) = self.transmit(conn, spare).await {
+            debug!(%error, "gave up on what the error handler queued");
         }
     }
 
-    /// Drive the connection, using the provided handle and operations channel pair to schedule operations.
-    async fn drive(
+    /// Drives the connection until it ends.
+    async fn drive<'a>(
         &mut self,
-        handle: &ConnectionHandle<S>,
-        ops: &mut mpsc::UnboundedReceiver<Op<S>>,
+        conn: ConnRef<'a, S>,
+        tasks: &mut Tasks<'a>,
+        spare: &mut Vec<Out>,
     ) -> Result<()> {
         loop {
+            // Update the connection and dispatcher version to match the version set by the dispatch
+            // handlers.
+            self.rebind(conn)?;
+
+            // Transmit all packets (and transmission options) to the peer. After flushing, close the
+            // connection if requested.
+            self.transmit(conn, spare).await?;
+            if conn.with(|c| c.closing()) {
+                return Ok(());
+            }
+
             tokio::select! {
                 biased;
 
-                // 1. Everything handlers asked for, before anything else.
-                op = ops.recv() => {
-                    let op = op.expect("the drive holds a handle, so the queue cannot close");
-                    if self.handle_op(handle, op).await?.is_break() {
-                        return Ok(());
-                    }
-                    // One 'write' for a batch of packets rather than one per packet.
-                    if ops.is_empty() {
-                        self.flush().await?;
-                    }
+                // 1. Finished handler tasks.
+                done = tasks.next(), if !tasks.is_empty() => {
+                    done.expect("the set is not empty")?;
                 },
 
-                // 2. Finished handler tasks.
-                done = self.tasks.next(), if !self.tasks.is_empty() => {
-                    let (exclusive, result) = done.expect("the set is not empty");
-                    if exclusive {
-                        self.exclusive = self.exclusive.saturating_sub(1);
-                    }
-                    result?;
-                },
-
-                // 3. Cancellation.
+                // 2. Cancellation.
                 () = self.shutdown.cancelled() => {
                     return Err(ConnectionError::shutdown());
                 },
 
-                // 4. The deadline.
+                // 3. The deadline, if configured.
                 () = expire(&mut self.lifetime), if self.lifetime.is_some() => {
                     return Err(ConnectionError::timeout());
                 },
 
-                // 5. Ticks -- but never while the peer must stay quiet. A keep-alive sent into a
-                //    gated window would invite the very packet the gate rejects.
-                () = tick(&mut self.ticker), if self.exclusive == 0 => {
-                    self.handle_tick(handle)?;
+                // 4. Ticks, if allowed.
+                () = tick(&mut self.ticker), if !conn.with(|c| c.gated()) => {
+                    let ticked = self.dispatcher.on_tick(conn);
+                    start(ticked, tasks).await?;
                 },
 
-                // 6. Input. Polled even while gated: see the module docs.
-                frame = self.framed.next() => {
-                    let Some(frame) = frame else {
+                // 5. Next packet, if allowed.
+                frame = self.framed.next(), if !conn.with(|c| c.gated()) => {
+                    let Some(frame) = frame.transpose()? else {
                         return Err(ConnectionError::peer());
                     };
-                    self.handle_frame(handle, frame?)?;
+                    let handled = self.dispatcher.on_frame(conn, frame.id, &frame.payload);
+                    start(handled, tasks).await?
                 },
             }
         }
     }
 
-    /// Handles a single operation. It returns [`ControlFlow::Break`] if the connection should be
-    /// closed (without raising an error). On error, it returns without handing partially finished
-    /// operations.
-    async fn handle_op(
-        &mut self,
-        handle: &ConnectionHandle<S>,
-        op: Op<S>,
-    ) -> Result<ControlFlow<()>> {
-        match op {
-            Op::Send { encoded, version } => {
-                // The bytes were encoded against a snapshot of the version. Refuse them if the
-                // connection has moved on since, rather than writing an id the peer resolves in
-                // another table.
-                if version != self.version {
-                    return Err(ConnectionError::StaleEncoding {
-                        packet: encoded.name,
-                        encoded_version: version,
-                        version: self.version,
-                    });
-                }
-                trace!(packet = encoded.name, "writing packet");
-                self.write(encoded).await?;
-            }
-            Op::Encrypt(cipher) => {
-                debug!("enabling encryption");
-                // The codec only encrypts what it encodes from here on, so bytes already buffered
-                // stay plaintext, and no flush is needed to get the switchover point right.
-                self.framed.codec_mut().set_cipher(cipher);
-            }
-            Op::SetVersion(version) => {
-                debug!(%version, "updating version");
-                self.version = version;
-                let ctx = Ctx::new(&self.state, self.phase, self.version, handle);
-                self.dispatcher.on_version(ctx)?;
-            }
-            Op::SetPhase(phase) => {
-                trace!(?phase, "entering phase");
-                self.phase = phase;
-            }
-            Op::With(change) => change(&mut self.state),
-            Op::Spawn { future, exclusive } => {
-                if exclusive {
-                    self.exclusive += 1;
-                }
-                self.tasks
-                    .push(Box::pin(async move { (exclusive, future.await) }));
-            }
-            Op::Flush(waiter) => {
-                self.flush().await?;
-                // The waiter having gone away is fine: it only means nobody is listening anymore.
-                let _ = waiter.send(());
-            }
-            // Boxed because an operation may hold operations. Only batches pay for it.
-            Op::Batch(ops) => {
-                for op in ops {
-                    if Box::pin(self.handle_op(handle, op)).await?.is_break() {
-                        return Ok(ControlFlow::Break(()));
-                    }
-                }
-            }
-            Op::Fail(err) => return Err(err),
-            Op::Close => {
-                self.flush().await?;
-                return Ok(ControlFlow::Break(()));
-            }
-        }
-        Ok(ControlFlow::Continue(()))
-    }
-
-    /// Handles a tick.
-    fn handle_tick(&mut self, handle: &ConnectionHandle<S>) -> Result<()> {
-        Ok(self
-            .dispatcher
-            .on_tick(Ctx::new(&self.state, self.phase, self.version, handle))?)
-    }
-
-    /// Handles a frame (i.e., incoming packet). It checks whether the exclusive guard is violated.
-    fn handle_frame(&mut self, handle: &ConnectionHandle<S>, frame: Frame) -> Result<()> {
-        if self.exclusive > 0 {
-            return Err(ConnectionError::EarlyPacket {
-                phase: self.phase,
-                id: frame.id,
-            });
+    /// Writes everything the handlers queued, in the order they queued it.
+    async fn transmit(&mut self, conn: ConnRef<'_, S>, spare: &mut Vec<Out>) -> Result<()> {
+        conn.with(|c| c.swap_out(spare));
+        if spare.is_empty() {
+            return Ok(());
         }
 
-        let ctx = Ctx::new(&self.state, self.phase, self.version, handle);
-        Ok(self.dispatcher.on_frame(ctx, frame.id, &frame.payload)?)
+        for out in spare.drain(..) {
+            match out {
+                Out::Frame(frame) => {
+                    trace!(packet = frame.name, "writing packet");
+                    self.write(frame).await?;
+                }
+                Out::Cipher(cipher) => {
+                    debug!("enabling encryption");
+                    self.framed.codec_mut().set_cipher(cipher);
+                }
+            }
+        }
+        self.flush().await
+    }
+
+    /// Tells the dispatcher to rebind if a handler moved the protocol version.
+    fn rebind(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
+        let version = conn.with(|c| c.version());
+        if version == self.version {
+            return Ok(());
+        }
+        debug!(%version, "updating version");
+        self.version = version;
+        Ok(self.dispatcher.on_version(conn)?)
     }
 
     /// Writes a packet to the socket, guarded by the connection lifetime.
@@ -477,6 +396,24 @@ where
         }
         let flush = self.framed.flush().map_err(Into::into);
         guarded(&self.shutdown, &mut self.lifetime, flush).await
+    }
+}
+
+/// Polls a future once, pushing it to the task queue if it is not ready.
+///
+/// It is polled through [`poll_fn`](std::future::poll_fn) rather than a no-op waker, because a
+/// future that parks has to register the *real* waker or nothing would ever wake it again.
+async fn start<'a>(
+    mut future: BoxFuture<'a, std::result::Result<(), DispatchError>>,
+    tasks: &mut Tasks<'a>,
+) -> Result<()> {
+    let polled = std::future::poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx))).await;
+    match polled {
+        Poll::Ready(result) => Ok(result?),
+        Poll::Pending => {
+            tasks.push(future);
+            Ok(())
+        }
     }
 }
 
@@ -547,10 +484,16 @@ mod tests {
             .config(options)
             .build();
 
-        assert_eq!(connection.phase, Phase::Status);
+        // The phase is not the connection's to hold any more -- it lives in the cell handlers are
+        // lent, so it is read back from the outcome rather than from a field.
+        assert_eq!(connection.config.initial_phase, Phase::Status);
         assert_eq!(connection.version, crate::versions::V26_1);
         assert!(connection.ticker.is_some());
         assert!(connection.lifetime.is_some());
+
+        let outcome = connection.run().await;
+        assert_eq!(outcome.phase, Phase::Status, "and nothing moved it");
+        assert_eq!(outcome.version, crate::versions::V26_1);
     }
 
     #[tokio::test]

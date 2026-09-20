@@ -1,394 +1,265 @@
 use crate::codec::{Cipher, Frame};
 use crate::common::Phase;
 use crate::common::ProtocolVersion;
-use crate::connection::error::{ConnectionError, Result};
+use crate::connection::error::Result;
 use crate::packet::packet::Packet;
 use crate::wire::Options;
-use futures::future::BoxFuture;
-use tokio::sync::{mpsc, oneshot};
-use tokio_util::sync::CancellationToken;
-use crate::connection::DispatchError;
+use std::sync::{Mutex, TryLockError};
 
-/// An operation is used to mutate the connection state asynchronously without exclusive locks. Handlers
-/// get an (unbounded) channel sender to pass operations on.
-pub enum Op<S> {
-    /// Sends a packet to the peer. The packet is pre-encoded for the specified version.
-    Send {
-        /// The encoded packet.
-        encoded: Frame,
+/// An operation that should be applied to the outgoing socket in order. This only applies to socket
+/// operations which are order-sensitive (e.g., send before encrypt).
+pub enum Out {
+    /// An encoded packet.
+    Frame(Frame),
 
-        /// The protocol version, the packet was encoded for.
-        version: ProtocolVersion,
-    },
-
-    /// Enable encryption for the connection. Can only be applied once.
-    Encrypt(Box<dyn Cipher>),
-
-    /// Set the protocol version for the connection. This affects the incoming packet routing.
-    SetVersion(ProtocolVersion),
-
-    /// Set the phase for the connection. This affects the incoming packet routing.
-    SetPhase(Phase),
-
-    /// Run a closure against the connection state. Using an operation instead of a shared mutex
-    /// ensures that the state update is applied in order with the other operations. A shared mutex
-    /// state may still be used with its respective tradeoffs (namely out-of-order updates).
-    With(Box<dyn FnOnce(&mut S) + Send>),
-
-    /// Run a closure alongside the connection. The future is dropped as soon as the connection ends.
-    /// This is *not* a `tokio::spawn` but instead runs in the connection scope.
-    Spawn {
-        /// The closure to run.
-        future: BoxFuture<'static, Result<(), DispatchError>>,
-
-        /// Whether the peer may transmit packets before the future resolves. Setting it to `true`
-        /// while the client sends packets results in an error and the connection being closed.
-        exclusive: bool,
-    },
-
-    /// Flush the socket and every operation queued before it, notifying the channel once this operation
-    /// is reached. A similar pattern may be implemented using the [`Op::With`] operation but this is
-    /// more explicit.
-    Flush(oneshot::Sender<()>),
-
-    /// Execute a batch of operations in order, ensuring that nothing can land between them.
-    Batch(Vec<Op<S>>),
-
-    /// Fail the connection with an error, after writing everything queued before it. The error travels
-    /// as an operation so that it lands *after* the packets a handler queued rather than instead of them.
-    ///
-    /// Prefer using the [`Op::Close`] if the error was already handled.
-    Fail(ConnectionError),
-
-    /// Finish the connection after writing everything queued before. This does not trigger an error.
-    /// It should be used when the connection close was already handled.
-    Close,
+    /// Enable encryption.
+    Cipher(Box<dyn Cipher>),
 }
 
-impl<S> std::fmt::Debug for Op<S> {
+impl std::fmt::Debug for Out {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Op::Send { encoded, .. } => write!(f, "Send({})", encoded.name),
-            Op::Encrypt(_) => f.write_str("Encrypt"),
-            Op::SetVersion(version) => write!(f, "SetVersion({version})"),
-            Op::SetPhase(phase) => write!(f, "SetPhase({phase:?})"),
-            Op::With(_) => f.write_str("With"),
-            Op::Spawn { exclusive, .. } => write!(f, "Spawn {{ exclusive: {exclusive} }}"),
-            Op::Flush(_) => f.write_str("Flush"),
-            Op::Batch(ops) => write!(f, "Batch({ops:?})"),
-            Op::Fail(err) => write!(f, "Fail({err})"),
-            Op::Close => f.write_str("Close"),
+            Out::Frame(frame) => write!(f, "Frame({})", frame.name),
+            Out::Cipher(_) => f.write_str("Cipher"),
         }
     }
 }
 
-/// A batch of operations that should be executed in order without interleaving other operations.
+/// The connection handle. It is used by the dispatch handlers to interact with the connection,
+/// representing the partial, mutable state of the connection.
 ///
-/// This is helpful if multiple (background) handlers are running at the same time and may interleave
-/// their operations. The batch has to be sent with the connection handle, constructing does not send
-/// it.
-pub struct Batch<S> {
-    /// The (ordered) operations to execute.
-    ops: Vec<Op<S>>,
+/// A single handle is shared between all dispatch handlers as a [`ConnRef`] (i.e., a mutex reference
+/// of this). This represents the actual connection state.
+pub struct Conn<S> {
+    /// The current per-connection state.
+    pub state: S,
 
-    /// The connection's options, used for encoding packets.
+    /// Queued outgoing operations. They are applied concurrently to the handlers.
+    out: Vec<Out>,
+
+    /// The current protocol version. Packets are encoded against this as of the moment they are
+    /// queued, which is why there is no such thing as a stale encoding.
+    version: ProtocolVersion,
+
+    /// The current phase, which decides how incoming frames are routed.
+    phase: Phase,
+
+    /// The wire options used for encoding.
     options: Options,
+
+    /// Whether the peer is expected to stay quiet. A frame arriving while this is set is a protocol
+    /// break rather than input to be handled later.
+    gated: bool,
+
+    /// Whether the connection should end once the queue has been cleared.
+    closing: bool,
 }
 
-impl<S> Batch<S> {
-    /// Adds a [`Op::Send`] to the batch, returning itself.
-    pub fn send<P: Packet>(&mut self, version: ProtocolVersion, packet: P) -> Result<&mut Self> {
-        let encoded = Frame::of(&packet, version, self.options)?;
-        Ok(self.push(Op::Send { encoded, version }))
+impl<S> Conn<S> {
+    /// The protocol version the connection is in.
+    #[must_use]
+    pub fn version(&self) -> ProtocolVersion {
+        self.version
     }
 
-    /// Adds a [`Op::Encrypt`] to the batch, returning itself.
-    pub fn encrypt(&mut self, cipher: Box<dyn Cipher>) -> &mut Self {
-        self.push(Op::Encrypt(cipher))
+    /// The phase the connection is in.
+    #[must_use]
+    pub fn phase(&self) -> Phase {
+        self.phase
     }
 
-    /// Adds a [`Op::SetVersion`] to the batch, returning itself.
-    ///
-    /// Pairing this with [`set_phase`](Batch::set_phase) is what a handshake handler wants: the two
-    /// describe one change, and a packet landing between them would be encoded against half of it.
-    pub fn set_version(&mut self, version: ProtocolVersion) -> &mut Self {
-        self.push(Op::SetVersion(version))
-    }
-
-    /// Adds a [`Op::SetPhase`] to the batch, returning itself.
-    pub fn set_phase(&mut self, phase: Phase) -> &mut Self {
-        self.push(Op::SetPhase(phase))
-    }
-
-    /// Adds a [`Op::With`] to the batch, returning itself.
-    pub fn update(&mut self, change: impl FnOnce(&mut S) + Send + 'static) -> &mut Self {
-        self.push(Op::With(Box::new(change)))
-    }
-
-    /// Adds a [`Op::Close`] to the batch, returning iself.
-    pub fn close(&mut self) -> &mut Self {
-        self.push(Op::Close)
-    }
-
-    /// Pushes an operation to the batch, returning iself.
-    pub fn push(&mut self, op: Op<S>) -> &mut Self {
-        self.ops.push(op);
-        self
-    }
-}
-
-/// An inexpensive, cloneable handle to a live connection. It is used to interact with the connection
-/// (sync/async). Interactions are queued to the connection using a shared channel. This channel
-/// is shared by all handlers and should be cloned and shared.
-#[derive(Debug)]
-pub struct ConnectionHandle<S> {
-    ops: mpsc::UnboundedSender<Op<S>>,
-    shutdown: CancellationToken,
-    options: Options,
-}
-
-impl<S> Clone for ConnectionHandle<S> {
-    fn clone(&self) -> Self {
-        Self {
-            ops: self.ops.clone(),
-            shutdown: self.shutdown.clone(),
-            options: self.options,
-        }
-    }
-}
-
-impl<S> ConnectionHandle<S> {
-    /// Creates a new connection handle with its own (unbounded) channel.
-    pub(crate) fn new(
-        shutdown: CancellationToken,
-        options: Options,
-    ) -> (Self, mpsc::UnboundedReceiver<Op<S>>) {
-        let (tx, rx) = mpsc::unbounded_channel();
-        (
-            Self {
-                ops: tx,
-                shutdown,
-                options,
-            },
-            rx,
-        )
-    }
-
-    /// The wire options of this connection (handle).
+    /// The wire options this connection encodes with.
     #[must_use]
     pub fn options(&self) -> Options {
         self.options
     }
 
-    /// Queues a [`Op::Send`] to the connection.
+    /// Sets the protocol version. This affects how packets are encoded from here on, and how
+    /// incoming frames are routed.
+    pub fn set_version(&mut self, version: ProtocolVersion) {
+        self.version = version;
+    }
+
+    /// Sets the phase. This affects how packets are encoded from here on, and how
+    /// incoming frames are routed.
+    pub fn set_phase(&mut self, phase: Phase) {
+        self.phase = phase;
+    }
+
+    /// Encodes a packet against the current version and queues it for the wire.
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn send<P: Packet>(&self, version: ProtocolVersion, packet: P) -> Result<()> {
-        let encoded = Frame::of(&packet, version, self.options)?;
-        self.queue(Op::Send { encoded, version })
+    /// Returns a [`ConnectionError::Codec`](crate::connection::ConnectionError::Codec) if the packet
+    /// does not exist in the connection's version, or if its own encoder fails.
+    pub fn send<P: Packet>(&mut self, packet: P) -> Result<()> {
+        let frame = Frame::of(&packet, self.version, self.options)?;
+        self.out.push(Out::Frame(frame));
+        Ok(())
     }
 
-    /// Queues a [`Op::Encrypt`] to the connection.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn encrypt(&self, cipher: Box<dyn Cipher>) -> Result<()> {
-        self.queue(Op::Encrypt(cipher))
+    /// Enables encryption from this point on the wire.
+    pub fn encrypt(&mut self, cipher: Box<dyn Cipher>) {
+        self.out.push(Out::Cipher(cipher));
     }
 
-    /// Queues a [`Op::SetVersion`] to the connection.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn set_version(&self, version: ProtocolVersion) -> Result<()> {
-        self.queue(Op::SetVersion(version))
+    /// Disables reading new packet frames until [`release`](Conn::release) is called.
+    pub fn gate(&mut self) {
+        self.gated = true;
     }
 
-    /// Queues a [`Op::SetPhase`] to the connection.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn set_phase(&self, phase: Phase) -> Result<()> {
-        self.queue(Op::SetPhase(phase))
+    /// Enables reading new packet frames after [`gate`](Conn::gate) was called.
+    pub fn release(&mut self) {
+        self.gated = false;
     }
 
-    /// Queues a [`Op::With`] to the connection.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn update(&self, change: impl FnOnce(&mut S) + Send + 'static) -> Result<()> {
-        self.queue(Op::With(Box::new(change)))
-    }
-
-    /// Queues a [`Op::With`] to the connection and waits until the operation completes.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub async fn with<R: Send + 'static>(
-        &self,
-        f: impl FnOnce(&mut S) -> R + Send + 'static,
-    ) -> Result<R> {
-        let (tx, rx) = oneshot::channel();
-        self.queue(Op::With(Box::new(move |state| {
-            // The receiver having gone away only means nobody is listening anymore.
-            let _ = tx.send(f(state));
-        })))?;
-        rx.await.map_err(|_| ConnectionError::shutdown())
-    }
-
-    /// Queues a [`Op::Batch`] to the connection.
-    ///
-    /// ```ignore
-    /// ctx.batch(|batch| {
-    ///     batch.send(Disconnect { reason })?;
-    ///     batch.close();
-    ///     Ok(())
-    /// })
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn batch(&self, build: impl FnOnce(&mut Batch<S>) -> Result<()>) -> Result<()> {
-        let mut batch = Batch {
-            ops: Vec::new(),
-            options: self.options,
-        };
-        build(&mut batch)?;
-        self.queue(Op::Batch(batch.ops))
-    }
-
-    /// Queues a [`Op::Spawn`] to the connection without exclusive.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn spawn(&self, future: impl Future<Output = Result<(), DispatchError>> + Send + 'static) -> Result<()> {
-        self.queue(Op::Spawn {
-            future: Box::pin(future),
-            exclusive: false,
-        })
-    }
-
-    /// Queues a [`Op::Spawn`] to the connection with exclusive.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn exclusive(
-        &self,
-        future: impl Future<Output = Result<(), DispatchError>> + Send + 'static,
-    ) -> Result<()> {
-        self.queue(Op::Spawn {
-            future: Box::pin(future),
-            exclusive: true,
-        })
-    }
-
-    /// Queues a [`Op::Spawn`] to the connection with the future running in its own `tokio::spawn`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn detach(&self, future: impl Future<Output = Result<(), DispatchError>> + Send + 'static)
-    where
-        S: Send + 'static,
-    {
-        let conn = self.clone();
-        tokio::spawn(async move {
-            if let Err(err) = future.await {
-                let _ = conn.fail(err.into());
-            }
-        });
-    }
-
-    /// Queues a [`Op::Flush`] to the connection.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub async fn flush(&self) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.queue(Op::Flush(tx))?;
-        rx.await.map_err(|_| ConnectionError::shutdown())
-    }
-
-    /// Queues a [`Op::Fail`] to the connection.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn fail(&self, error: ConnectionError) -> Result<()> {
-        self.queue(Op::Fail(error))
-    }
-
-    /// Queues a [`Op::Close`] to the connection.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn close(&self) -> Result<()> {
-        self.queue(Op::Close)
-    }
-
-    /// Gets the cancellation token for the connection handle (and connection). This should be used
-    /// for detached jobs to ensure that they complete.
+    /// Whether new packet frames will currently be read.
     #[must_use]
-    pub fn shutdown(&self) -> &CancellationToken {
-        &self.shutdown
+    pub fn gated(&self) -> bool {
+        self.gated
     }
 
-    /// Queues an [`Op`] to the connection.
+    /// Schedules the connection to end after the queue has been cleared.
+    pub fn close(&mut self) {
+        self.closing = true;
+    }
+
+    /// Whether the connection is scheduled to end.
+    #[must_use]
+    pub fn closing(&self) -> bool {
+        self.closing
+    }
+
+    /// Swaps the outbox to the loop, leaving `spare`'s allocation behind.
+    pub(crate) fn swap_out(&mut self, spare: &mut Vec<Out>) {
+        std::mem::swap(&mut self.out, spare);
+    }
+}
+
+/// A cell to a [connection handle](Conn).
+pub struct ConnCell<S> {
+    inner: Mutex<Conn<S>>,
+}
+
+impl<S> ConnCell<S> {
+    /// Creates a cell holding `state`, starting in `version` and `phase`.
+    pub(crate) fn new(state: S, version: ProtocolVersion, phase: Phase, options: Options) -> Self {
+        Self {
+            inner: Mutex::new(Conn {
+                state,
+                out: Vec::new(),
+                version,
+                phase,
+                options,
+                gated: false,
+                closing: false,
+            }),
+        }
+    }
+
+    /// Takes the connection back once nothing can be holding it.
+    pub(crate) fn into_inner(self) -> Conn<S> {
+        // A poisoned lock means a handler panicked while holding it. The connection is ending
+        // either way, and the state is what the outcome reports, so it is recovered rather than
+        // re-raised.
+        self.inner
+            .into_inner()
+            .unwrap_or_else(|err| err.into_inner())
+    }
+
+    /// Borrows the cell for handlers.
+    #[must_use]
+    pub fn as_ref(&self) -> ConnRef<'_, S> {
+        ConnRef(self)
+    }
+}
+
+/// A locally scoped reference shared connection handle. This construction ensures that the handle
+/// stays in the concurrency model managed by the connection.
+///
+/// The following code is illegal:
+///
+/// ```ignore
+/// async fn handler(conn: ConnRef<'_, S>) {
+///     tokio::spawn(async move {
+///         // This will NOT compile, as `conn` is not `'static` and instead bound to the function
+///         // lifetime. By binding `conn` we can make assumtions about who is able to mutate the
+///         // connection.
+///         conn.do_something();
+///     })
+/// }
+/// ```
+pub struct ConnRef<'a, S>(&'a ConnCell<S>);
+
+impl<S> Clone for ConnRef<'_, S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for ConnRef<'_, S> {}
+
+impl<S> std::fmt::Debug for ConnRef<'_, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ConnRef")
+    }
+}
+
+impl<'a, S> ConnRef<'a, S> {
+    /// Runs a closure with exclusive access to the connection and state. The closure is deliberately
+    /// synchronous such that nothing can interleave it while keeping performance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called from inside another `with` on the same connection. Nothing else can
+    /// contend for the lock: every handler is polled by the connection's own task, and a
+    /// [`ConnRef`] cannot leave it. This cannot happen under normal circumstances.
+    pub fn with<R>(self, f: impl FnOnce(&mut Conn<S>) -> R) -> R {
+        let mut conn = match self.0.inner.try_lock() {
+            Ok(conn) => conn,
+            Err(TryLockError::Poisoned(err)) => err.into_inner(),
+            Err(TryLockError::WouldBlock) => {
+                // The public-facing API does not allow this to happen.
+                panic!("ConnRef::with was called from inside another ConnRef::with")
+            }
+        };
+        f(&mut conn)
+    }
+
+    /// The protocol version the connection is in.
+    #[must_use]
+    pub fn version(self) -> ProtocolVersion {
+        self.with(|conn| conn.version())
+    }
+
+    /// The phase the connection is in.
+    #[must_use]
+    pub fn phase(self) -> Phase {
+        self.with(|conn| conn.phase())
+    }
+
+    /// The wire options this connection encodes with.
+    #[must_use]
+    pub fn options(self) -> Options {
+        self.with(|conn| conn.options())
+    }
+
+    /// Encodes a packet against the current version and queues it for the wire.
+    ///
+    /// Shorthand for a `with` that only sends. Anything that has to be indivisible with this
+    /// belongs in one [`with`](ConnRef::with) instead.
     ///
     /// # Errors
     ///
-    /// Returns a [`ConnectionError::Closed`] in case the connection was already closed.
-    pub fn queue(&self, op: Op<S>) -> Result<()> {
-        self.ops.send(op).map_err(|_| ConnectionError::shutdown())
+    /// Returns a [`ConnectionError::Codec`](crate::connection::ConnectionError::Codec) if the packet
+    /// does not exist in the connection's version, or if its own encoder fails.
+    pub fn send<P: Packet>(self, packet: P) -> Result<()> {
+        self.with(|conn| conn.send(packet))
     }
-}
 
-/// The handler context, used to interact with the connection. It contains the connection state (i.e.,
-/// state, phase, and version) as of the start of the called handler. For synchronous handlers, this
-/// state will not be updated (externally) by other handlers. For asynchronous handlers, this state
-/// may be updated by other handlers. Use the connection handle to queue closures that get the current
-/// state.
-pub struct Ctx<'a, S> {
-    /// The per-connection state, as of the start of this handler.
-    pub state: &'a S,
-
-    /// The per-connection phase, as of the start of this handler.
-    pub phase: Phase,
-
-    /// The per-connection version, as of the start of this handler.
-    pub version: ProtocolVersion,
-
-    /// The connection handle. This is used to interact with the connection. Clone to use in async
-    /// contexts. Actions are handled asynchronously. As such, they are applied after the synchronous
-    /// part of the handler completes.
-    pub handle: &'a ConnectionHandle<S>,
-}
-
-impl<'a, S> Ctx<'a, S> {
-    pub(crate) fn new(
-        state: &'a S,
-        phase: Phase,
-        version: ProtocolVersion,
-        handle: &'a ConnectionHandle<S>,
-    ) -> Self {
-        Self {
-            state,
-            phase,
-            version,
-            handle,
-        }
+    /// Schedules the connection to end after the queue has been cleared.
+    pub fn close(self) {
+        self.with(Conn::close);
     }
 }
 
@@ -396,7 +267,7 @@ impl<'a, S> Ctx<'a, S> {
 mod tests {
     use super::*;
     use crate::common::versions;
-    use crate::connection::CloseReason;
+    use crate::connection::ConnectionError;
     use crate::wire::{Reader, WireResult, Writer};
 
     /// A packet that exists only from 26.1 on, so sending it at an older version is a mistake the
@@ -417,192 +288,162 @@ mod tests {
         }
     }
 
-    fn handle() -> (
-        ConnectionHandle<Vec<&'static str>>,
-        mpsc::UnboundedReceiver<Op<Vec<&'static str>>>,
-    ) {
-        ConnectionHandle::new(CancellationToken::new(), Options::default())
+    fn cell() -> ConnCell<Vec<&'static str>> {
+        ConnCell::new(
+            Vec::new(),
+            versions::V26_1,
+            Phase::Handshake,
+            Options::default(),
+        )
     }
 
-    /// Everything currently queued, described the way `Op`'s own `Debug` does.
-    fn drain(ops: &mut mpsc::UnboundedReceiver<Op<Vec<&'static str>>>) -> Vec<String> {
-        let mut queued = Vec::new();
-        while let Ok(op) = ops.try_recv() {
-            queued.push(format!("{op:?}"));
-        }
-        queued
+    /// Everything currently queued, described the way `Out`'s own `Debug` does.
+    fn drained(conn: ConnRef<'_, Vec<&'static str>>) -> Vec<String> {
+        conn.with(|c| {
+            let mut spare = Vec::new();
+            c.swap_out(&mut spare);
+            spare.iter().map(|out| format!("{out:?}")).collect()
+        })
     }
 
     #[test]
-    fn everything_a_handler_does_is_queued_in_the_order_it_asked() {
-        // A handler holds nothing and mutates nothing: it queues, and the connection drains in
-        // order with exclusive access. "Record the profile, then announce it" means what it says.
-        let (handle, mut ops) = handle();
-        handle.set_version(versions::V26_1).expect("queues");
-        handle.set_phase(Phase::Login).expect("queues");
-        handle.send(versions::V26_1, Recent).expect("queues");
-        handle
-            .update(|state| state.push("recorded"))
-            .expect("queues");
-        handle.close().expect("queues");
+    fn a_handler_applies_what_it_writes_where_it_writes_it() {
+        // The difference from the queue this replaces: state, phase and version are not queued at
+        // all. The handler holds the connection, so they are already true when the closure ends.
+        let cell = cell();
+        let conn = cell.as_ref();
+
+        conn.with(|c| {
+            c.set_version(versions::V26_1);
+            c.set_phase(Phase::Login);
+            c.state.push("recorded");
+        });
+
+        assert_eq!(conn.version(), versions::V26_1);
+        assert_eq!(conn.phase(), Phase::Login);
+        conn.with(|c| assert_eq!(c.state, vec!["recorded"]));
+    }
+
+    #[test]
+    fn only_the_wire_waits_for_the_loop() {
+        // Sends and cipher switches are the two things a handler cannot apply itself, so they are
+        // the only two the outbox carries -- in the order they were written.
+        let cell = cell();
+        let conn = cell.as_ref();
+
+        conn.with(|c| {
+            c.send(Recent)?;
+            c.encrypt(Box::new(NoCipher));
+            c.send(Recent)
+        })
+        .expect("queues");
 
         assert_eq!(
-            drain(&mut ops),
-            vec![
-                "SetVersion(775)",
-                "SetPhase(Login)",
-                "Send(Recent)",
-                "With",
-                "Close",
-            ],
+            drained(conn),
+            vec!["Frame(Recent)", "Cipher", "Frame(Recent)"]
         );
     }
 
     #[test]
-    fn a_packet_is_encoded_where_it_is_queued_not_where_it_is_written() {
-        // The version travels with the bytes, so a connection that moved on can refuse them rather
-        // than writing an ID the peer resolves in another table.
-        let (handle, mut ops) = handle();
-        let error = handle
-            .send(versions::V1_20_5, Recent)
+    fn a_packet_is_encoded_against_the_version_the_connection_is_in() {
+        // The reason `StaleEncoding` no longer exists: encoding happens while the connection is
+        // held, so the version cannot have moved on between choosing it and using it.
+        let cell = ConnCell::new(
+            Vec::<&'static str>::new(),
+            versions::V1_20_5,
+            Phase::Handshake,
+            Options::default(),
+        );
+        let conn = cell.as_ref();
+
+        let error = conn
+            .send(Recent)
             .expect_err("the packet does not exist that far back");
         assert!(matches!(error, ConnectionError::Codec(_)), "{error}");
-        assert!(drain(&mut ops).is_empty(), "nothing may be queued");
+        assert!(drained(conn).is_empty(), "nothing may be queued");
+
+        conn.with(|c| c.set_version(versions::V26_1));
+        conn.send(Recent).expect("it exists here");
+        assert_eq!(drained(conn), vec!["Frame(Recent)"]);
     }
 
     #[test]
-    fn a_batch_reaches_the_connection_with_nothing_in_between() {
-        // Two operations queued separately can be split by anything else holding a handle. A batch
-        // cannot -- which is what a disconnect depends on: a keep-alive landing between the message
-        // and the close would be written after the peer had already been told to go.
-        let (handle, mut ops) = handle();
-        handle
-            .batch(|batch| {
-                batch.send(versions::V26_1, Recent)?;
-                batch.set_phase(Phase::Configuration);
-                batch.close();
-                Ok(())
-            })
-            .expect("queues");
+    fn one_closure_is_one_indivisible_change() {
+        // What `Batch` used to be for. A tick handler cannot land a keep-alive between the
+        // disconnect message and the close, because it cannot run until this closure returns.
+        let cell = cell();
+        let conn = cell.as_ref();
 
-        assert_eq!(
-            drain(&mut ops),
-            vec!["Batch([Send(Recent), SetPhase(Configuration), Close])"],
-        );
+        conn.with(|c| {
+            c.send(Recent)?;
+            c.set_phase(Phase::Configuration);
+            c.close();
+            Ok::<_, ConnectionError>(())
+        })
+        .expect("queues");
+
+        assert_eq!(drained(conn), vec!["Frame(Recent)"]);
+        assert_eq!(conn.phase(), Phase::Configuration);
+        assert!(conn.with(|c| c.closing()));
     }
 
     #[test]
-    fn a_batch_that_cannot_be_built_queues_nothing() {
-        // All or nothing, which is what lets an error handler try to speak without risking a
-        // half-sent answer.
-        let (handle, mut ops) = handle();
-        let error = handle
-            .batch(|batch| {
-                batch.send(versions::V26_1, Recent)?;
-                batch.send(versions::V1_20_5, Recent)?;
-                Ok(())
-            })
-            .expect_err("the second packet does not exist");
-        assert!(matches!(error, ConnectionError::Codec(_)), "{error}");
-        assert!(drain(&mut ops).is_empty(), "not even the first one");
-    }
+    fn the_gate_is_a_flag_the_loop_reads_not_a_lock() {
+        let cell = cell();
+        let conn = cell.as_ref();
 
-    #[tokio::test]
-    async fn waiting_on_the_state_gives_the_answer_the_connection_applied() {
-        // The other half of "a handler cannot observe its own effects": when it needs to, it waits
-        // for the connection to run the closure rather than reading a snapshot.
-        let (handle, mut ops) = handle();
-        let waiting = tokio::spawn({
-            let handle = handle.clone();
-            async move {
-                handle
-                    .with(|state: &mut Vec<&'static str>| state.len())
-                    .await
-            }
-        });
-
-        // Stand in for the connection: run what was queued against the real state.
-        let mut state = vec!["first"];
-        let Some(Op::With(change)) = ops.recv().await else {
-            panic!("the closure was not queued");
-        };
-        change(&mut state);
-
-        assert_eq!(waiting.await.expect("no panic").expect("answered"), 1);
-    }
-
-    #[tokio::test]
-    async fn a_flush_is_an_operation_like_any_other_so_it_lands_in_order() {
-        let (handle, mut ops) = handle();
-        let flushing = tokio::spawn({
-            let handle = handle.clone();
-            async move { handle.flush().await }
-        });
-
-        let Some(Op::Flush(waiter)) = ops.recv().await else {
-            panic!("the flush was not queued");
-        };
-        waiter.send(()).expect("somebody is waiting");
-        flushing.await.expect("no panic").expect("flushed");
+        assert!(!conn.with(|c| c.gated()));
+        conn.with(Conn::gate);
+        assert!(conn.with(|c| c.gated()));
+        conn.with(Conn::release);
+        assert!(!conn.with(|c| c.gated()));
     }
 
     #[test]
-    fn a_queue_nobody_is_draining_is_a_closed_connection() {
-        // The one error every queueing method can raise, and the reason they all return a result:
-        // a handler may still be holding a handle after the connection has gone.
-        let (handle, ops) = handle();
-        drop(ops);
+    fn the_outbox_keeps_its_allocation_across_rounds() {
+        // The loop hands its emptied `Vec` over and takes the full one back, so the two buffers
+        // cycle between them instead of one being allocated per round.
+        let cell = cell();
+        let conn = cell.as_ref();
+        let mut spare = Vec::new();
 
-        let error = handle.close().expect_err("nothing is listening");
+        conn.send(Recent).expect("queues");
+        conn.with(|c| c.swap_out(&mut spare));
+        assert_eq!(spare.len(), 1, "the loop got what was queued");
+        spare.clear();
+
+        // The buffer the loop just emptied is what the connection queues into next.
+        conn.send(Recent).expect("queues");
+        conn.with(|c| c.swap_out(&mut spare));
+        assert_eq!(spare.len(), 1);
         assert!(
-            matches!(
-                error,
-                ConnectionError::Closed {
-                    reason: CloseReason::Shutdown
-                }
-            ),
-            "{error}",
-        );
-        assert!(handle.set_phase(Phase::Login).is_err());
-        assert!(handle.update(|_| {}).is_err());
-        assert!(handle.fail(ConnectionError::timeout()).is_err());
-        assert!(handle.spawn(async { Ok(()) }).is_err());
-    }
-
-    #[test]
-    fn a_handle_is_cheap_to_clone_and_shares_one_queue() {
-        let (handle, mut ops) = handle();
-        let second = handle.clone();
-        handle.close().expect("queues");
-        second.close().expect("queues");
-        assert_eq!(drain(&mut ops).len(), 2);
-        assert_eq!(handle.options(), Options::default());
-        assert!(!handle.shutdown().is_cancelled());
-    }
-
-    #[test]
-    fn exclusive_work_is_marked_as_such_where_it_is_queued() {
-        // The read gate: work the peer is expected to wait for says so here, and a frame that
-        // arrives anyway is a protocol break rather than input to be replayed later.
-        let (handle, mut ops) = handle();
-        handle.spawn(async { Ok(()) }).expect("queues");
-        handle.exclusive(async { Ok(()) }).expect("queues");
-        assert_eq!(
-            drain(&mut ops),
-            vec!["Spawn { exclusive: false }", "Spawn { exclusive: true }",],
+            conn.with(|c| c.out.capacity()) > 0,
+            "the emptied buffer went back to the connection rather than being dropped",
         );
     }
 
     #[test]
-    fn a_context_is_a_borrow_plus_a_snapshot() {
-        let state = vec!["recorded"];
-        let (handle, _ops) = handle();
-        let ctx = Ctx::new(&state, Phase::Status, versions::V26_1, &handle);
-        assert_eq!(ctx.state, &vec!["recorded"]);
-        assert_eq!(ctx.phase, Phase::Status);
-        assert_eq!(ctx.version, versions::V26_1);
-        // `ctx.send(p)` is deliberately absent: the explicit version reminds the caller that this
-        // snapshot may not match the connection by the time the packet is written.
-        ctx.handle.close().expect("queues");
+    #[should_panic(expected = "inside another ConnRef::with")]
+    fn holding_the_connection_twice_is_a_bug_that_says_so() {
+        // Nothing else can contend for the lock, so a failure to take it can only be this. It
+        // panics rather than deadlocking, which is the reason for `try_lock`.
+        let cell = cell();
+        let conn = cell.as_ref();
+        conn.with(|_| conn.with(|_| ()));
+    }
+
+    #[test]
+    fn a_connection_hands_its_state_back_when_nothing_can_hold_it() {
+        let cell = cell();
+        cell.as_ref().with(|c| c.state.push("recorded"));
+        assert_eq!(cell.into_inner().state, vec!["recorded"]);
+    }
+
+    /// A cipher that does nothing, for tests that only care that the switch was queued.
+    struct NoCipher;
+
+    impl Cipher for NoCipher {
+        fn encrypt(&mut self, _buf: &mut [u8]) {}
+        fn decrypt(&mut self, _buf: &mut [u8]) {}
     }
 }

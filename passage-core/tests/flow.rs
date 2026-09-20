@@ -7,7 +7,7 @@ mod common;
 
 use common::packets::*;
 use common::*;
-use passage_core::connection::{DispatchError, Options};
+use passage_core::connection::{Conn, ConnRef, ConnectionError, DispatchError, Options};
 use passage_core::router::UnknownPolicy;
 use passage_core::{Phase, ProtocolVersion, versions};
 use std::time::Duration;
@@ -17,24 +17,17 @@ use tokio_util::sync::CancellationToken;
 fn status_server() -> passage_core::router::Router<Notes> {
     router()
         .handle::<Handshake>(on_handshake)
-        .handle::<StatusRequest>(|ctx, _packet| {
-            ctx.state.push("status requested");
-            ctx.handle
-                .send(ctx.version, StatusResponse::text("mc.justchunks.net"))?;
+        .handle::<StatusRequest>(|conn, _packet| {
+            conn.state.push("status requested");
+            conn.send(StatusResponse::text("mc.justchunks.net"))?;
             Ok(())
         })
-        .handle::<Ping>(|ctx, packet| {
-            ctx.state.push(format!("ping {}", packet.payload));
-            ctx.handle.batch(|batch| {
-                batch.send(
-                    ctx.version,
-                    Pong {
-                        payload: packet.payload,
-                    },
-                )?;
-                batch.close();
-                Ok(())
+        .handle::<Ping>(|conn, packet| {
+            conn.state.push(format!("ping {}", packet.payload));
+            conn.send(Pong {
+                payload: packet.payload,
             })?;
+            conn.close();
             Ok(())
         })
         .build()
@@ -43,14 +36,14 @@ fn status_server() -> passage_core::router::Router<Notes> {
 /// A client that asks for the status, pings, and closes when the pong arrives.
 fn status_client() -> passage_core::router::Router<Notes> {
     router()
-        .on_open(|ctx| {
-            greet(&ctx, Intent::Status)?;
-            ctx.handle.send(ctx.version, StatusRequest)?;
+        .on_open(opens(|conn| {
+            greet(conn, Intent::Status)?;
+            conn.send(StatusRequest)?;
             Ok(())
-        })
-        .handle::<StatusResponse>(|ctx, packet| {
-            ctx.state.push(format!("status {}", packet.body));
-            ctx.handle.send(ctx.version, Ping { payload: 0x1234 })?;
+        }))
+        .handle::<StatusResponse>(|conn, packet| {
+            conn.state.push(format!("status {}", packet.body));
+            conn.send(Ping { payload: 0x1234 })?;
             Ok(())
         })
         .note_and_close::<Pong>()
@@ -124,23 +117,73 @@ async fn a_release_nobody_wrote_down_is_dispatched_like_the_one_below_it() {
     );
 }
 
+/// Shuts the gate, waits long enough for the peer to speak out of turn, and opens it again.
+///
+/// Written as a named `async fn` rather than a closure: a closure whose future captures the
+/// connection cannot be inferred as higher-ranked over its lifetime, which is the one piece of
+/// friction in this design. Real handlers are named functions anyway.
+async fn gated_for_a_moment(
+    conn: ConnRef<'_, Notes>,
+    _packet: LoginStart,
+) -> Result<(), DispatchError> {
+    conn.with(Conn::gate);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    conn.with(Conn::release);
+    Ok(())
+}
+
+/// The same, but long enough that the peer hangs up first.
+async fn gated_for_a_while(
+    conn: ConnRef<'_, Notes>,
+    _packet: LoginStart,
+) -> Result<(), DispatchError> {
+    conn.with(Conn::gate);
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    conn.with(Conn::release);
+    Ok(())
+}
+
+/// Answers the login, then takes its time finding somewhere to send the player.
+///
+/// The gate is never shut, so this is the handler that has to overlap with further traffic: the
+/// loop keeps reading frames and firing ticks for the whole forty seconds it waits.
+async fn slow_transfer(conn: ConnRef<'_, Notes>, packet: LoginStart) -> Result<(), DispatchError> {
+    // Answering and moving both sides on happens before the first await, so the client is already
+    // in the configuration phase by the time the next frame is routed.
+    conn.with(|c| {
+        c.send(LoginSuccess {
+            user_name: packet.user_name,
+            session_id: None,
+        })?;
+        c.set_phase(Phase::Configuration);
+        Ok::<_, ConnectionError>(())
+    })?;
+
+    tokio::time::sleep(Duration::from_secs(40)).await;
+
+    // One closure, so a keep-alive cannot land between the transfer and the close.
+    conn.with(|c| {
+        c.send(Transfer {
+            host: "backend-1".to_owned(),
+            port: 25_565,
+        })?;
+        c.close();
+        Ok::<_, ConnectionError>(())
+    })?;
+    Ok(())
+}
+
 /// A server that accepts a login and answers it.
 fn login_server() -> passage_core::router::Router<Notes> {
     router()
         .handle::<Handshake>(on_handshake)
-        .handle::<LoginStart>(|ctx, packet| {
-            ctx.state.push(format!("login {}", packet.user_name));
-            ctx.handle.batch(|batch| {
-                batch.send(
-                    ctx.version,
-                    LoginSuccess {
-                        user_name: packet.user_name,
-                        session_id: Some(uuid::Uuid::from_u128(7)),
-                    },
-                )?;
-                batch.close();
-                Ok(())
+        .handle::<LoginStart>(|conn, packet| {
+            conn.state.push(format!("login {}", packet.user_name));
+            conn.send(LoginSuccess {
+                user_name: packet.user_name,
+                session_id: Some(uuid::Uuid::from_u128(7)),
             })?;
+            conn.close();
             Ok(())
         })
         .build()
@@ -149,12 +192,11 @@ fn login_server() -> passage_core::router::Router<Notes> {
 /// A client that logs in and closes when it is told it worked.
 fn login_client() -> passage_core::router::Router<Notes> {
     router()
-        .on_open(|ctx| {
-            greet(&ctx, Intent::Login)?;
-            ctx.handle
-                .send(ctx.version, LoginStart::named("Hydrofin"))?;
+        .on_open(opens(|conn| {
+            greet(conn, Intent::Login)?;
+            conn.send(LoginStart::named("Hydrofin"))?;
             Ok(())
-        })
+        }))
         .note_and_close::<LoginSuccess>()
         .build()
 }
@@ -192,14 +234,11 @@ async fn a_packet_that_does_not_exist_in_the_peers_version_is_refused() {
     // forever for something we never sent, so it is our error rather than a silent no-op.
     let server = router()
         .handle::<Handshake>(on_handshake)
-        .handle::<LoginStart>(|ctx, _packet| {
-            ctx.handle.send(
-                ctx.version,
-                Transfer {
-                    host: "backend-1".to_owned(),
-                    port: 25_565,
-                },
-            )?;
+        .handle::<LoginStart>(|conn, _packet| {
+            conn.send(Transfer {
+                host: "backend-1".to_owned(),
+                port: 25_565,
+            })?;
             Ok(())
         })
         .build();
@@ -217,35 +256,35 @@ async fn a_packet_that_does_not_exist_in_the_peers_version_is_refused() {
 }
 
 #[tokio::test]
-async fn a_packet_encoded_for_a_superseded_version_is_refused() {
-    // A handler that re-pins the version cannot also answer in it: its own view of the version is
-    // the snapshot from before the change, and writing those bytes would put an ID on the wire that
-    // the peer resolves in another table.
+async fn a_handler_that_re_pins_the_version_answers_in_it() {
+    // There is no such thing as a stale encoding any more. A handler holds the connection while it
+    // writes, so the version it just set is the version the next packet is encoded against -- there
+    // is no window in which the two could disagree.
     let server = router()
         .handle::<Handshake>(on_handshake)
-        .handle::<LoginStart>(|ctx, packet| {
-            ctx.handle.set_version(versions::V26_1)?;
-            ctx.handle.send(
-                ctx.version,
-                LoginSuccess {
-                    user_name: packet.user_name,
-                    session_id: None,
-                },
-            )?;
+        .handle::<LoginStart>(|conn, packet| {
+            conn.set_version(versions::V26_1);
+            conn.send(LoginSuccess {
+                user_name: packet.user_name,
+                session_id: Some(uuid::Uuid::from_u128(7)),
+            })?;
+            conn.close();
             Ok(())
         })
         .build();
 
+    // The client reads at 26.1 too, so it can see the field that only exists there. If the packet
+    // had gone out under the version the handler *started* in, this would not decode.
     let meeting = Scenario::new(server, login_client())
-        .version(versions::V1_20_5)
+        .version(versions::V26_1)
         .run()
         .await;
 
-    assert_eq!(meeting.server_ending(), Some("stale-encoding"));
+    meeting.expect_clean();
     assert!(
-        meeting.server_error().contains("LoginSuccess"),
-        "{}",
-        meeting.server_error()
+        meeting.client_saw()[0].contains("session_id: Some"),
+        "{:?}",
+        meeting.client_saw(),
     );
 }
 
@@ -256,24 +295,22 @@ async fn what_a_handler_queued_before_it_failed_is_discarded() {
     // word -- so "send this, then fail" sends nothing, and the hook below is what the peer hears.
     let server = router()
         .handle::<Handshake>(on_handshake)
-        .handle::<LoginStart>(|ctx, _packet| {
-            ctx.handle.send(ctx.version, Disconnect::text("go away"))?;
+        .handle::<LoginStart>(|conn, _packet| {
+            conn.send(Disconnect::text("go away"))?;
             Err(DispatchError::peer("refused", anyhow::anyhow!("not today")))
         })
-        .on_error(|ctx, error| {
-            ctx.handle
-                .send(ctx.version, Disconnect::text(error.reason()))?;
-            ctx.handle.close()?;
+        .on_error(errors(|conn, error| {
+            conn.send(Disconnect::text(error.reason()))?;
+            conn.close();
             Ok(())
-        })
+        }))
         .build();
     let client = router()
-        .on_open(|ctx| {
-            greet(&ctx, Intent::Login)?;
-            ctx.handle
-                .send(ctx.version, LoginStart::named("Hydrofin"))?;
+        .on_open(opens(|conn| {
+            greet(conn, Intent::Login)?;
+            conn.send(LoginStart::named("Hydrofin"))?;
             Ok(())
-        })
+        }))
         .note_and_close::<Disconnect>()
         .build();
 
@@ -297,23 +334,19 @@ async fn a_handler_that_answers_an_error_itself_closes_rather_than_failing() {
     // then ending the connection instead of raising. Everything queued before the close is written.
     let server = router()
         .handle::<Handshake>(on_handshake)
-        .handle::<LoginStart>(|ctx, _packet| {
-            ctx.state.push("refusing");
-            ctx.handle.batch(|batch| {
-                batch.send(ctx.version, Disconnect::text("go away"))?;
-                batch.close();
-                Ok(())
-            })?;
+        .handle::<LoginStart>(|conn, _packet| {
+            conn.state.push("refusing");
+            conn.send(Disconnect::text("go away"))?;
+            conn.close();
             Ok(())
         })
         .build();
     let client = router()
-        .on_open(|ctx| {
-            greet(&ctx, Intent::Login)?;
-            ctx.handle
-                .send(ctx.version, LoginStart::named("Hydrofin"))?;
+        .on_open(opens(|conn| {
+            greet(conn, Intent::Login)?;
+            conn.send(LoginStart::named("Hydrofin"))?;
             Ok(())
-        })
+        }))
         .note_and_close::<Disconnect>()
         .build();
 
@@ -335,15 +368,14 @@ async fn the_error_hook_gets_the_last_word() {
     // disconnect message comes from. It is a last word, not a veto: the connection ends either way.
     let server = router()
         .handle::<Handshake>(on_handshake)
-        .on_error(|ctx, error| {
-            ctx.state.push(format!("ending {}", error.reason()));
+        .on_error(errors(|conn, error| {
+            conn.state.push(format!("ending {}", error.reason()));
             if error.can_reply() {
-                ctx.handle
-                    .send(ctx.version, Disconnect::text("we are restarting"))?;
-                ctx.handle.close()?;
+                conn.send(Disconnect::text("we are restarting"))?;
+                conn.close();
             }
             Ok(())
-        })
+        }))
         .build();
     let client = router()
         .on_open(opening(Intent::Login))
@@ -376,23 +408,20 @@ async fn an_answer_that_cannot_be_sent_does_not_replace_the_reason() {
     // the handshake never pinned -- the connection still reports what it was ending for. Reporting
     // the failed apology instead would lose the diagnosis exactly when it is most wanted.
     let server = router()
-        .handle::<Handshake>(|_ctx, _packet| {
+        .handle::<Handshake>(|_conn, _packet: Handshake| {
             Err(DispatchError::peer(
                 "the_real_reason",
                 anyhow::anyhow!("what actually went wrong"),
             ))
         })
-        .on_error(|ctx, _error| {
+        .on_error(errors(|conn, _error| {
             // `Transfer` does not exist at the version this connection never got past.
-            ctx.handle.send(
-                ctx.version,
-                Transfer {
-                    host: "nowhere".to_owned(),
-                    port: 1,
-                },
-            )?;
+            conn.send(Transfer {
+                host: "nowhere".to_owned(),
+                port: 1,
+            })?;
             Ok(())
-        })
+        }))
         .build();
 
     let meeting = Scenario::new(server, router().on_open(opening(Intent::Login)).build())
@@ -408,11 +437,11 @@ async fn a_hangup_is_an_ending_but_not_a_failure_worth_reporting() {
     // logged as a problem -- which is why blame is a separate question from whether it failed.
     let server = router().handle::<Handshake>(on_handshake).build();
     let client = router()
-        .on_open(|ctx| {
-            greet(&ctx, Intent::Status)?;
-            ctx.handle.close()?;
+        .on_open(opens(|conn| {
+            greet(conn, Intent::Status)?;
+            conn.close();
             Ok(())
-        })
+        }))
         .build();
 
     let meeting = Scenario::new(server, client).run().await;
@@ -426,25 +455,18 @@ async fn a_hangup_is_an_ending_but_not_a_failure_worth_reporting() {
 
 #[tokio::test]
 async fn state_is_recorded_before_the_packet_that_announces_it() {
-    // A handler queues the update ahead of the packet, and both are operations -- so by the time
-    // the peer has the packet, the connection has already applied the update. That is what a tick
-    // or a later handler would observe.
+    // The state is written where the handler writes it, and the packet only leaves once the round
+    // is drained -- so by the time the peer has the packet, the update is long since applied. That
+    // is what a tick or a later handler would observe.
     let server = router()
         .handle::<Handshake>(on_handshake)
-        .handle::<LoginStart>(|ctx, packet| {
-            let name = packet.user_name.clone();
-            ctx.handle.batch(|batch| {
-                batch.update(move |notes: &mut Notes| notes.push(format!("recorded {name}")));
-                batch.send(
-                    ctx.version,
-                    LoginSuccess {
-                        user_name: packet.user_name,
-                        session_id: None,
-                    },
-                )?;
-                batch.close();
-                Ok(())
+        .handle::<LoginStart>(|conn, packet| {
+            conn.state.push(format!("recorded {}", packet.user_name));
+            conn.send(LoginSuccess {
+                user_name: packet.user_name,
+                session_id: None,
             })?;
+            conn.close();
             Ok(())
         })
         .build();
@@ -465,12 +487,12 @@ async fn state_is_recorded_before_the_packet_that_announces_it() {
 async fn a_packet_nobody_routes_ends_the_connection_as_a_peer_error() {
     let server = router().handle::<Handshake>(on_handshake).build();
     let client = router()
-        .on_open(|ctx| {
-            greet(&ctx, Intent::Status)?;
+        .on_open(opens(|conn| {
+            greet(conn, Intent::Status)?;
             // Registered by nobody in the status phase.
-            ctx.handle.send(ctx.version, Ping { payload: 1 })?;
+            conn.send(Ping { payload: 1 })?;
             Ok(())
-        })
+        }))
         .build();
 
     let meeting = Scenario::new(server, client)
@@ -488,19 +510,19 @@ async fn a_minimal_driver_can_ignore_what_it_does_not_route() {
     let server = router()
         .unknown(UnknownPolicy::Ignore)
         .handle::<Handshake>(on_handshake)
-        .handle::<StatusRequest>(|ctx, _packet| {
-            ctx.state.push("still here");
-            ctx.handle.close()?;
+        .handle::<StatusRequest>(|conn, _packet| {
+            conn.state.push("still here");
+            conn.close();
             Ok(())
         })
         .build();
     let client = router()
-        .on_open(|ctx| {
-            greet(&ctx, Intent::Status)?;
-            ctx.handle.send(ctx.version, Ping { payload: 1 })?;
-            ctx.handle.send(ctx.version, StatusRequest)?;
+        .on_open(opens(|conn| {
+            greet(conn, Intent::Status)?;
+            conn.send(Ping { payload: 1 })?;
+            conn.send(StatusRequest)?;
             Ok(())
-        })
+        }))
         .build();
 
     let meeting = Scenario::new(server, client)
@@ -521,26 +543,19 @@ async fn a_packet_sent_during_an_exclusive_task_is_a_protocol_error() {
     // answer -- it is a protocol break, and reporting it is the whole point of the gate.
     let server = router()
         .handle::<Handshake>(on_handshake)
-        .handle::<LoginStart>(|ctx, _packet| {
-            ctx.handle.exclusive(async {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                Ok(())
-            })?;
-            Ok(())
-        })
-        .handle::<LoginAcknowledged>(|ctx, _packet| {
-            ctx.state.push("acknowledged");
+        .handle_async(gated_for_a_moment)
+        .handle::<LoginAcknowledged>(|conn, _packet| {
+            conn.state.push("acknowledged");
             Ok(())
         })
         .build();
     let client = router()
-        .on_open(|ctx| {
-            greet(&ctx, Intent::Login)?;
-            ctx.handle
-                .send(ctx.version, LoginStart::named("Hydrofin"))?;
-            ctx.handle.send(ctx.version, LoginAcknowledged)?;
+        .on_open(opens(|conn| {
+            greet(conn, Intent::Login)?;
+            conn.send(LoginStart::named("Hydrofin"))?;
+            conn.send(LoginAcknowledged)?;
             Ok(())
-        })
+        }))
         .build();
 
     let meeting = Scenario::new(server, client)
@@ -562,24 +577,15 @@ async fn a_hangup_during_an_exclusive_task_ends_the_connection_at_once() {
     // noticed immediately instead of after the slow call returns.
     let server = router()
         .handle::<Handshake>(on_handshake)
-        .handle::<LoginStart>(|ctx, _packet| {
-            ctx.handle.exclusive(async {
-                tokio::time::sleep(Duration::from_secs(30)).await;
-                Ok(())
-            })?;
-            Ok(())
-        })
+        .handle_async(gated_for_a_while)
         .build();
     let client = router()
-        .on_open(|ctx| {
-            greet(&ctx, Intent::Login)?;
-            ctx.handle.batch(|batch| {
-                batch.send(ctx.version, LoginStart::named("Hydrofin"))?;
-                batch.close();
-                Ok(())
-            })?;
+        .on_open(opens(|conn| {
+            greet(conn, Intent::Login)?;
+            conn.send(LoginStart::named("Hydrofin"))?;
+            conn.close();
             Ok(())
-        })
+        }))
         .build();
 
     let meeting = Scenario::new(server, client)
@@ -597,64 +603,31 @@ async fn spawned_work_runs_while_keep_alives_are_exchanged() {
     // stays open and the tick handler keeps the connection alive while it runs.
     let server = router()
         .handle::<Handshake>(on_handshake)
-        .handle::<LoginStart>(|ctx, packet| {
-            // Answer the login, move both sides on, and start the slow part in the background.
-            ctx.handle.batch(|batch| {
-                batch.send(
-                    ctx.version,
-                    LoginSuccess {
-                        user_name: packet.user_name,
-                        session_id: None,
-                    },
-                )?;
-                batch.set_phase(Phase::Configuration);
-                Ok(())
-            })?;
-
-            let handle = ctx.handle.clone();
-            let version = ctx.version;
-            ctx.handle.spawn(async move {
-                tokio::time::sleep(Duration::from_secs(40)).await;
-                handle.batch(|batch| {
-                    batch.send(
-                        version,
-                        Transfer {
-                            host: "backend-1".to_owned(),
-                            port: 25_565,
-                        },
-                    )?;
-                    batch.close();
-                    Ok(())
-                })
-            })?;
+        .handle_async(slow_transfer)
+        .handle::<KeepAliveResponse>(|conn, packet| {
+            conn.state.push(format!("alive {}", packet.id));
             Ok(())
         })
-        .handle::<KeepAliveResponse>(|ctx, packet| {
-            ctx.state.push(format!("alive {}", packet.id));
-            Ok(())
-        })
-        .on_tick(|ctx| {
+        .on_tick(ticks(|conn| {
             // Only once the connection has something to wait for.
-            if ctx.phase == Phase::Configuration {
-                ctx.handle.send(ctx.version, KeepAlive { id: 1 })?;
+            if conn.phase() == Phase::Configuration {
+                conn.send(KeepAlive { id: 1 })?;
             }
             Ok(())
-        })
+        }))
         .build();
     let client = router()
-        .on_open(|ctx| {
-            greet(&ctx, Intent::Login)?;
-            ctx.handle
-                .send(ctx.version, LoginStart::named("Hydrofin"))?;
+        .on_open(opens(|conn| {
+            greet(conn, Intent::Login)?;
+            conn.send(LoginStart::named("Hydrofin"))?;
+            Ok(())
+        }))
+        .handle::<LoginSuccess>(|conn, _packet| {
+            conn.set_phase(Phase::Configuration);
             Ok(())
         })
-        .handle::<LoginSuccess>(|ctx, _packet| {
-            ctx.handle.set_phase(Phase::Configuration)?;
-            Ok(())
-        })
-        .handle::<KeepAlive>(|ctx, packet| {
-            ctx.handle
-                .send(ctx.version, KeepAliveResponse { id: packet.id })?;
+        .handle::<KeepAlive>(|conn, packet| {
+            conn.send(KeepAliveResponse { id: packet.id })?;
             Ok(())
         })
         .note_and_close::<Transfer>()
@@ -710,8 +683,8 @@ async fn a_connection_nobody_configured_still_has_a_deadline() {
 async fn cancelling_the_shutdown_token_ends_both_sides() {
     let shutdown = CancellationToken::new();
     let server = router()
-        .handle::<Handshake>(|ctx, packet| {
-            on_handshake(ctx, packet)?;
+        .handle::<Handshake>(|conn, packet| {
+            on_handshake(conn, packet)?;
             // Everything is up and running, and then the operator restarts the server.
             Ok(())
         })

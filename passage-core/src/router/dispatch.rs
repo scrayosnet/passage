@@ -1,9 +1,15 @@
 use crate::common::ProtocolVersion;
-use crate::connection::{ConnectionError, Ctx, DispatchError, Dispatcher, MakeDispatcher};
+use crate::connection::{ConnRef, ConnectionError, DispatchError, Dispatcher, MakeDispatcher};
 use crate::router::{Router, UnknownPolicy};
 use anyhow::anyhow;
+use futures::future::BoxFuture;
 use std::sync::Arc;
 use tracing::trace;
+
+/// Creates a future that directly resolves to the result.
+fn ready<'a>(result: Result<(), DispatchError>) -> BoxFuture<'a, Result<(), DispatchError>> {
+    Box::pin(std::future::ready(result))
+}
 
 /// A stateful [`Dispatcher`] based on a [`Router`]. It uses the router's tables to dispatch packets.
 pub struct RouterDispatcher<S> {
@@ -58,76 +64,80 @@ impl<S: 'static> MakeDispatcher<S> for Arc<Router<S>> {
 }
 
 impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
-    fn on_open(&mut self, ctx: Ctx<'_, S>) -> Result<(), DispatchError> {
-        self.table = (ctx.version, self.router.table(ctx.version));
+    fn on_open(&mut self, conn: ConnRef<'_, S>) -> Result<(), DispatchError> {
+        let version = conn.version();
+        self.table = (version, self.router.table(version));
         match &self.router.on_open {
-            Some(handler) => handler(ctx),
+            Some(handler) => handler(conn),
             None => Ok(()),
         }
     }
 
-    fn on_version(&mut self, ctx: Ctx<'_, S>) -> Result<(), DispatchError> {
-        let table = self.router.table(ctx.version);
-        self.table = (ctx.version, table);
+    fn on_version(&mut self, conn: ConnRef<'_, S>) -> Result<(), DispatchError> {
+        let version = conn.version();
+        self.table = (version, self.router.table(version));
         Ok(())
     }
 
-    fn on_frame(&self, ctx: Ctx<'_, S>, id: i32, payload: &[u8]) -> Result<(), DispatchError> {
+    fn on_frame<'a>(
+        &self,
+        conn: ConnRef<'a, S>,
+        id: i32,
+        payload: &[u8],
+    ) -> BoxFuture<'a, Result<(), DispatchError>> {
         let router = &*self.router;
         let table = &router.tables[self.table.1].1;
+        let (phase, version) = conn.with(|c| (c.phase(), c.version()));
 
-        let Some(index) = table.lookup(ctx.phase, id) else {
+        let Some(index) = table.lookup(phase, id) else {
             if router.unknown == UnknownPolicy::Ignore {
-                trace!(id, phase = ?ctx.phase, "ignoring unhandled packet");
-                return Ok(());
+                trace!(id, ?phase, "ignoring unhandled packet");
+                return ready(Ok(()));
             }
-            // A packet nobody registered is the peer's doing -- an unsupported client or someone
-            // probing -- so it is classified as one and does not page anyone.
-            return Err(DispatchError::peer(
+            return ready(Err(DispatchError::peer(
                 "unknown_packet",
                 anyhow!(
-                    "unknown packet ID {id:#04x} received in phase {:?} at version {}",
-                    ctx.phase,
-                    ctx.version
+                    "unknown packet ID {id:#04x} received in phase {phase:?} at version {version}"
                 ),
-            ));
+            )));
         };
 
-        // Tracing lives here rather than on the connection, because this is where the name is
-        // known -- a connection has an ID and a payload and nothing else.
         let entry = &router.entries[index as usize];
-        trace!(packet = entry.name, phase = ?ctx.phase, "dispatching packet");
-        (entry.dispatch)(ctx, payload)
+        trace!(packet = entry.name, ?phase, "dispatching packet");
+        (entry.dispatch)(conn, payload)
     }
 
-    fn on_tick(&self, ctx: Ctx<'_, S>) -> Result<(), DispatchError> {
+    fn on_tick<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<(), DispatchError>> {
         match &self.router.tick {
-            Some(handler) => handler(ctx),
-            None => Ok(()),
+            Some(handler) => handler(conn),
+            None => ready(Ok(())),
         }
     }
 
-    fn on_error(&self, ctx: Ctx<'_, S>, error: &mut ConnectionError) -> Result<(), DispatchError> {
+    fn on_error(
+        &self,
+        conn: ConnRef<'_, S>,
+        error: &mut ConnectionError,
+    ) -> Result<(), DispatchError> {
         match &self.router.on_error {
-            Some(handler) => handler(ctx, error),
+            Some(handler) => handler(conn, error),
             None => Ok(()),
         }
     }
 }
 
 #[cfg(test)]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::common::Phase;
     use crate::common::versions;
-    use crate::connection::{ConnectionHandle, Op};
+    use crate::connection::ConnCell;
     use crate::packet::packet::Packet;
     use crate::router::Router;
     use crate::wire::{Options, Reader, WireResult, Writer};
     use bytes::BytesMut;
     use std::sync::Mutex;
-    use tokio::sync::mpsc;
-    use tokio_util::sync::CancellationToken;
 
     /// What the handlers recorded, in order.
     type Seen = Mutex<Vec<String>>;
@@ -154,14 +164,18 @@ mod tests {
         }
     }
 
+    /// A handler is a plain `async fn`. `P` is inferred from its signature, so the registration
+    /// below needs no turbofish and no `Box::pin`.
+    async fn note(conn: ConnRef<'_, Seen>, packet: Moved) -> Result<(), DispatchError> {
+        conn.with(|c| c.state.lock().expect("not poisoned").push(packet.text));
+        Ok(())
+    }
+
     fn router(unknown: UnknownPolicy) -> Arc<Router<Seen>> {
         Arc::new(
             Router::<Seen>::builder()
                 .unknown(unknown)
-                .on::<Moved>(|ctx, packet| {
-                    ctx.state.lock().expect("not poisoned").push(packet.text);
-                    Ok(())
-                })
+                .on(note)
                 .expect("registers")
                 .build(),
         )
@@ -176,188 +190,224 @@ mod tests {
         buf
     }
 
-    /// A handle and the queue behind it, standing in for the connection that would drain it.
-    fn handle() -> (ConnectionHandle<Seen>, mpsc::UnboundedReceiver<Op<Seen>>) {
-        ConnectionHandle::new(CancellationToken::new(), Options::default())
+    /// A connection standing in for the one that would be driving these handlers.
+    fn cell(version: ProtocolVersion) -> ConnCell<Seen> {
+        ConnCell::new(Seen::default(), version, Phase::Login, Options::default())
     }
 
-    #[test]
-    fn a_registered_packet_reaches_its_handler() {
-        let state = Seen::default();
-        let (handle, _ops) = handle();
+    /// What the handlers recorded on `cell`, in order.
+    fn seen(cell: &ConnCell<Seen>) -> Vec<String> {
+        cell.as_ref()
+            .with(|c| c.state.lock().expect("not poisoned").clone())
+    }
+
+    #[tokio::test]
+    async fn a_registered_packet_reaches_its_handler() {
+        let cell = cell(versions::V26_1);
         let mut dispatcher = router(UnknownPolicy::Reject).make();
 
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
-        dispatcher.on_open(ctx).expect("opens");
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
+        dispatcher.on_open(cell.as_ref()).expect("opens");
         let frame = payload(0x05, |w| w.string("text", "hello").expect("writes"));
-        dispatcher.on_frame(ctx, 0x05, &frame).expect("dispatches");
+        dispatcher
+            .on_frame(cell.as_ref(), 0x05, &frame)
+            .await
+            .expect("dispatches");
 
-        assert_eq!(
-            *state.lock().expect("not poisoned"),
-            vec!["hello".to_owned()]
-        );
+        assert_eq!(seen(&cell), vec!["hello".to_owned()]);
     }
 
-    #[test]
-    fn opening_binds_the_table_to_the_version_the_connection_starts_at() {
-        // A client knows its version before it says anything, so it never queues `SetVersion`. If
+    #[tokio::test]
+    async fn opening_binds_the_table_to_the_version_the_connection_starts_at() {
+        // A client knows its version before it says anything, so nothing ever changes it. If
         // opening did not bind the table, the whole connection would dispatch against the floor --
         // where this packet does not exist at all.
-        let state = Seen::default();
-        let (handle, _ops) = handle();
+        let cell = cell(versions::V26_1);
         let mut dispatcher = router(UnknownPolicy::Reject).make();
         assert_eq!(dispatcher.table, (ProtocolVersion::UNKNOWN, 0));
 
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
-        dispatcher.on_open(ctx).expect("opens");
+        dispatcher.on_open(cell.as_ref()).expect("opens");
         assert_eq!(dispatcher.table.0, versions::V26_1);
 
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
         let frame = payload(0x05, |w| w.string("text", "bound").expect("writes"));
-        dispatcher.on_frame(ctx, 0x05, &frame).expect("dispatches");
-        assert_eq!(
-            *state.lock().expect("not poisoned"),
-            vec!["bound".to_owned()]
-        );
+        dispatcher
+            .on_frame(cell.as_ref(), 0x05, &frame)
+            .await
+            .expect("dispatches");
+        assert_eq!(seen(&cell), vec!["bound".to_owned()]);
     }
 
-    #[test]
-    fn a_version_change_rebinds_the_table() {
-        let state = Seen::default();
-        let (handle, _ops) = handle();
+    #[tokio::test]
+    async fn a_version_change_rebinds_the_table() {
+        let cell = cell(versions::V1_20_5);
         let mut dispatcher = router(UnknownPolicy::Reject).make();
 
         // The same packet, under the ID its older version gives it.
-        let ctx = Ctx::new(&state, Phase::Login, versions::V1_20_5, &handle);
-        dispatcher.on_version(ctx).expect("rebinds");
-        let ctx = Ctx::new(&state, Phase::Login, versions::V1_20_5, &handle);
+        dispatcher.on_version(cell.as_ref()).expect("rebinds");
         let frame = payload(0x02, |w| w.string("text", "older").expect("writes"));
-        dispatcher.on_frame(ctx, 0x02, &frame).expect("dispatches");
+        dispatcher
+            .on_frame(cell.as_ref(), 0x02, &frame)
+            .await
+            .expect("dispatches");
 
         // And the newer ID is not in that table, which is the point of holding more than one.
-        let ctx = Ctx::new(&state, Phase::Login, versions::V1_20_5, &handle);
         let frame = payload(0x05, |w| w.string("text", "newer").expect("writes"));
-        assert!(dispatcher.on_frame(ctx, 0x05, &frame).is_err());
+        assert!(
+            dispatcher
+                .on_frame(cell.as_ref(), 0x05, &frame)
+                .await
+                .is_err()
+        );
     }
 
-    #[test]
-    fn a_packet_nobody_registered_is_the_peers_doing() {
+    #[tokio::test]
+    async fn a_handler_that_suspends_does_not_hold_the_connection() {
+        // The reason `with` takes a synchronous closure: a handler that awaits between two reads
+        // of the state cannot be holding the lock while it waits, so the connection stays usable
+        // by whatever else the loop is driving.
+        async fn slow(conn: ConnRef<'_, Seen>, packet: Moved) -> Result<(), DispatchError> {
+            conn.with(|c| {
+                c.state
+                    .lock()
+                    .expect("not poisoned")
+                    .push("before".to_owned())
+            });
+            tokio::task::yield_now().await;
+            conn.with(|c| c.state.lock().expect("not poisoned").push(packet.text));
+            Ok(())
+        }
+
+        let cell = cell(versions::V26_1);
+        let router = Arc::new(
+            Router::<Seen>::builder()
+                .on(slow)
+                .expect("registers")
+                .build(),
+        );
+        let mut dispatcher = router.make();
+        dispatcher.on_open(cell.as_ref()).expect("opens");
+
+        let frame = payload(0x05, |w| w.string("text", "after").expect("writes"));
+        let mut handled = dispatcher.on_frame(cell.as_ref(), 0x05, &frame);
+
+        // Park it at the await, then reach the connection from outside the handler.
+        let polled = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(std::pin::Pin::new(&mut handled).poll(cx))
+        })
+        .await;
+        assert!(polled.is_pending(), "the handler parked");
+        assert_eq!(seen(&cell), vec!["before".to_owned()], "and let go");
+
+        handled.await.expect("resumes");
+        assert_eq!(seen(&cell), vec!["before".to_owned(), "after".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn a_packet_nobody_registered_is_the_peers_doing() {
         // An unsupported client or someone probing: counted, logged at debug, nobody paged.
-        let state = Seen::default();
-        let (handle, _ops) = handle();
+        let cell = cell(versions::V26_1);
         let dispatcher = router(UnknownPolicy::Reject).make();
 
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
         let error = dispatcher
-            .on_frame(ctx, 0x7F, &payload(0x7F, |_| {}))
+            .on_frame(cell.as_ref(), 0x7F, &payload(0x7F, |_| {}))
+            .await
             .expect_err("must fail the connection");
         assert!(error.is_peer_error());
         assert_eq!(error.label, "unknown_packet");
         assert!(error.to_string().contains("0x7f"), "{error}");
     }
 
-    #[test]
-    fn a_minimal_driver_can_ignore_what_it_does_not_route() {
-        let state = Seen::default();
-        let (handle, _ops) = handle();
+    #[tokio::test]
+    async fn a_minimal_driver_can_ignore_what_it_does_not_route() {
+        let cell = cell(versions::V26_1);
         let dispatcher = router(UnknownPolicy::Ignore).make();
 
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
         dispatcher
-            .on_frame(ctx, 0x7F, &payload(0x7F, |_| {}))
+            .on_frame(cell.as_ref(), 0x7F, &payload(0x7F, |_| {}))
+            .await
             .expect("ignored, not failed");
-        assert!(state.lock().expect("not poisoned").is_empty());
+        assert!(seen(&cell).is_empty());
     }
 
-    #[test]
-    fn a_payload_the_packet_cannot_account_for_fails_the_dispatch() {
+    #[tokio::test]
+    async fn a_payload_the_packet_cannot_account_for_fails_the_dispatch() {
         // Either we are misreading the packet or the peer is smuggling data past us. Both are worth
         // failing on, and the failure names the packet rather than the byte.
-        let state = Seen::default();
-        let (handle, _ops) = handle();
+        let cell = cell(versions::V26_1);
         let mut dispatcher = router(UnknownPolicy::Reject).make();
-        dispatcher
-            .on_open(Ctx::new(&state, Phase::Login, versions::V26_1, &handle))
-            .expect("opens");
+        dispatcher.on_open(cell.as_ref()).expect("opens");
 
         let mut frame = payload(0x05, |w| w.string("text", "hello").expect("writes"));
         frame.extend_from_slice(b"trailing");
-        let ctx = Ctx::new(&state, Phase::Login, versions::V26_1, &handle);
         let error = dispatcher
-            .on_frame(ctx, 0x05, &frame)
+            .on_frame(cell.as_ref(), 0x05, &frame)
+            .await
             .expect_err("must fail the connection");
         assert!(error.to_string().contains("Moved"), "{error}");
     }
 
-    #[test]
-    fn a_router_without_hooks_answers_them_all_with_nothing() {
-        let state = Seen::default();
-        let (handle, _ops) = handle();
+    #[tokio::test]
+    async fn a_router_without_hooks_answers_them_all_with_nothing() {
+        let cell = cell(versions::V26_1);
         let mut dispatcher = RouterDispatcher::new(Arc::new(Router::<Seen>::builder().build()));
 
+        dispatcher.on_open(cell.as_ref()).expect("nothing to do");
         dispatcher
-            .on_open(Ctx::new(&state, Phase::Login, versions::V26_1, &handle))
-            .expect("nothing to do");
-        dispatcher
-            .on_tick(Ctx::new(&state, Phase::Login, versions::V26_1, &handle))
+            .on_tick(cell.as_ref())
+            .await
             .expect("nothing to do");
         let mut error = ConnectionError::shutdown();
         dispatcher
-            .on_error(
-                Ctx::new(&state, Phase::Login, versions::V26_1, &handle),
-                &mut error,
-            )
+            .on_error(cell.as_ref(), &mut error)
             .expect("nothing to do");
     }
 
-    #[test]
-    fn the_hooks_a_router_does_have_are_the_ones_it_runs() {
-        let state = Seen::default();
-        let (handle, _ops) = handle();
+    #[tokio::test]
+    async fn the_hooks_a_router_does_have_are_the_ones_it_runs() {
+        async fn ticked(conn: ConnRef<'_, Seen>) -> Result<(), DispatchError> {
+            conn.with(|c| {
+                c.state
+                    .lock()
+                    .expect("not poisoned")
+                    .push("tick".to_owned())
+            });
+            Ok(())
+        }
+
+        let cell = cell(versions::V26_1);
         let router = Arc::new(
             Router::<Seen>::builder()
-                .on_open(|ctx| {
-                    ctx.state
-                        .lock()
-                        .expect("not poisoned")
-                        .push("open".to_owned());
+                .on_open(|conn: ConnRef<'_, Seen>| {
+                    conn.with(|c| {
+                        c.state
+                            .lock()
+                            .expect("not poisoned")
+                            .push("open".to_owned())
+                    });
                     Ok(())
                 })
-                .on_tick(|ctx| {
-                    ctx.state
-                        .lock()
-                        .expect("not poisoned")
-                        .push("tick".to_owned());
-                    Ok(())
-                })
-                .on_error(|ctx, error| {
-                    ctx.state
-                        .lock()
-                        .expect("not poisoned")
-                        .push(error.reason().to_owned());
+                .on_tick(ticked)
+                .on_error(|conn: ConnRef<'_, Seen>, error: &mut ConnectionError| {
+                    conn.with(|c| {
+                        c.state
+                            .lock()
+                            .expect("not poisoned")
+                            .push(error.reason().to_owned());
+                    });
                     Ok(())
                 })
                 .build(),
         );
         let mut dispatcher = router.make();
 
-        dispatcher
-            .on_open(Ctx::new(&state, Phase::Login, versions::V26_1, &handle))
-            .expect("opens");
-        dispatcher
-            .on_tick(Ctx::new(&state, Phase::Login, versions::V26_1, &handle))
-            .expect("ticks");
+        dispatcher.on_open(cell.as_ref()).expect("opens");
+        dispatcher.on_tick(cell.as_ref()).await.expect("ticks");
         let mut error = ConnectionError::timeout();
         dispatcher
-            .on_error(
-                Ctx::new(&state, Phase::Login, versions::V26_1, &handle),
-                &mut error,
-            )
+            .on_error(cell.as_ref(), &mut error)
             .expect("reports");
 
         assert_eq!(
-            *state.lock().expect("not poisoned"),
+            seen(&cell),
             vec![
                 "open".to_owned(),
                 "tick".to_owned(),

@@ -31,8 +31,8 @@ pub use raw::RawClient;
 pub use scenario::{Meeting, Scenario, Served, Side, TestClient, client};
 
 use packets::{Handshake, Intent};
-use passage_core::connection::{Ctx, DispatchError};
-use passage_core::router::{Router, RouterBuilder};
+use passage_core::connection::{Conn, ConnRef, ConnectionError, DispatchError};
+use passage_core::router::{Handler, Router, RouterBuilder};
 use passage_core::{Packet, Phase};
 use std::fmt::Debug;
 
@@ -47,28 +47,36 @@ pub fn router() -> RouterBuilder<Notes> {
 /// tests that *are* about registration call [`RouterBuilder::on`] directly and everything else
 /// says what it routes and moves on.
 pub trait Routes: Sized {
-    /// Registers a handler for `P`.
+    /// Registers a handler for `P` that has nothing to wait for.
+    ///
+    /// Most handlers are this shape, so the test suite hands them the connection directly rather
+    /// than making every one of them write a `with`.
     fn handle<P: Packet>(
         self,
-        handler: impl Fn(Ctx<'_, Notes>, P) -> Result<(), DispatchError> + Send + Sync + 'static,
+        handler: impl Fn(&mut Conn<Notes>, P) -> Result<(), DispatchError> + Send + Sync + 'static,
     ) -> Self;
+
+    /// Registers a handler for `P` that may await.
+    fn handle_async<P: Packet, H>(self, handler: H) -> Self
+    where
+        H: for<'a> Handler<'a, Notes, P>;
 
     /// Registers a handler that records the packet and does nothing else.
     ///
     /// This is what most client routers want: the test asserts on what arrived, in order, without
     /// a handler body that says the same thing three times.
     fn note<P: Packet + Debug>(self) -> Self {
-        self.handle::<P>(|ctx, packet| {
-            ctx.state.push(format!("{packet:?}"));
+        self.handle::<P>(|conn, packet| {
+            conn.state.push(format!("{packet:?}"));
             Ok(())
         })
     }
 
     /// Registers a handler that records the packet and then ends the connection.
     fn note_and_close<P: Packet + Debug>(self) -> Self {
-        self.handle::<P>(|ctx, packet| {
-            ctx.state.push(format!("{packet:?}"));
-            ctx.handle.close()?;
+        self.handle::<P>(|conn, packet| {
+            conn.state.push(format!("{packet:?}"));
+            conn.close();
             Ok(())
         })
     }
@@ -77,11 +85,53 @@ pub trait Routes: Sized {
 impl Routes for RouterBuilder<Notes> {
     fn handle<P: Packet>(
         self,
-        handler: impl Fn(Ctx<'_, Notes>, P) -> Result<(), DispatchError> + Send + Sync + 'static,
+        handler: impl Fn(&mut Conn<Notes>, P) -> Result<(), DispatchError> + Send + Sync + 'static,
     ) -> Self {
-        self.on::<P>(handler)
+        self.handle_async(move |conn: ConnRef<'_, Notes>, packet: P| {
+            std::future::ready(conn.with(|conn| handler(conn, packet)))
+        })
+    }
+
+    fn handle_async<P: Packet, H>(self, handler: H) -> Self
+    where
+        H: for<'a> Handler<'a, Notes, P>,
+    {
+        self.on(handler)
             .unwrap_or_else(|error| panic!("the test router should build: {error}"))
     }
+}
+
+/// Wraps an open hook written against the connection directly.
+///
+/// The hook itself is handed a [`ConnRef`], because it is free to await; every hook in this suite
+/// is synchronous, so the suite writes the `with` once here instead of in each of them.
+pub fn opens(
+    hook: impl Fn(&mut Conn<Notes>) -> Result<(), DispatchError> + Send + Sync + 'static,
+) -> impl for<'a> Fn(ConnRef<'a, Notes>) -> Result<(), DispatchError> + Send + Sync + 'static {
+    move |conn| conn.with(|conn| hook(conn))
+}
+
+/// Wraps a tick hook written against the connection directly.
+pub fn ticks(
+    hook: impl Fn(&mut Conn<Notes>) -> Result<(), DispatchError> + Send + Sync + 'static,
+) -> impl for<'a> Fn(ConnRef<'a, Notes>) -> std::future::Ready<Result<(), DispatchError>>
++ Send
++ Sync
++ 'static {
+    move |conn: ConnRef<'_, Notes>| std::future::ready(conn.with(|conn| hook(conn)))
+}
+
+/// Wraps an error hook written against the connection directly.
+pub fn errors(
+    hook: impl Fn(&mut Conn<Notes>, &mut ConnectionError) -> Result<(), DispatchError>
+    + Send
+    + Sync
+    + 'static,
+) -> impl for<'a> Fn(ConnRef<'a, Notes>, &mut ConnectionError) -> Result<(), DispatchError>
++ Send
++ Sync
++ 'static {
+    move |conn, error| conn.with(|conn| hook(conn, error))
 }
 
 /// The phase an intent leads to.
@@ -95,21 +145,19 @@ pub fn phase_of(intent: Intent) -> Phase {
 /// What every server router does first: pin the version the peer asked for, and enter the phase its
 /// intent names.
 ///
-/// Both are queued rather than applied, so the packets a handler sends after this are still encoded
-/// against the version the *handler* saw -- which is the guard the connection makes good on.
-pub fn on_handshake(ctx: Ctx<'_, Notes>, packet: Handshake) -> Result<(), DispatchError> {
-    accept(&ctx, &packet)
+/// Both are applied where they are written rather than queued, because the handler holds the
+/// connection while it writes them -- so a packet it sends afterwards is encoded against the
+/// version it just set, and the frame after this one is routed against the phase it just entered.
+pub fn on_handshake(conn: &mut Conn<Notes>, packet: Handshake) -> Result<(), DispatchError> {
+    accept(conn, &packet)
 }
 
 /// The body of [`on_handshake`], for a handler that has something to add to it.
-pub fn accept(ctx: &Ctx<'_, Notes>, packet: &Handshake) -> Result<(), DispatchError> {
-    ctx.state
+pub fn accept(conn: &mut Conn<Notes>, packet: &Handshake) -> Result<(), DispatchError> {
+    conn.state
         .push(format!("handshake {} {:?}", packet.host, packet.intent));
-    ctx.handle.batch(|batch| {
-        batch.set_version(packet.version);
-        batch.set_phase(phase_of(packet.intent));
-        Ok(())
-    })?;
+    conn.set_version(packet.version);
+    conn.set_phase(phase_of(packet.intent));
     Ok(())
 }
 
@@ -117,16 +165,14 @@ pub fn accept(ctx: &Ctx<'_, Notes>, packet: &Handshake) -> Result<(), DispatchEr
 ///
 /// The dialling side speaks first, so this is what a client's open hook is for -- without one it
 /// sends nothing and waits forever.
-pub fn greet(ctx: &Ctx<'_, Notes>, intent: Intent) -> Result<(), DispatchError> {
-    ctx.handle.batch(|batch| {
-        batch.send(ctx.version, Handshake::new(ctx.version, intent))?;
-        batch.set_phase(phase_of(intent));
-        Ok(())
-    })?;
+pub fn greet(conn: &mut Conn<Notes>, intent: Intent) -> Result<(), DispatchError> {
+    let version = conn.version();
+    conn.send(Handshake::new(version, intent))?;
+    conn.set_phase(phase_of(intent));
     Ok(())
 }
 
 /// The open hook for a client that has nothing to add to its greeting.
-pub fn opening(intent: Intent) -> impl Fn(Ctx<'_, Notes>) -> Result<(), DispatchError> {
-    move |ctx| greet(&ctx, intent)
+pub fn opening(intent: Intent) -> impl for<'a> Fn(ConnRef<'a, Notes>) -> Result<(), DispatchError> {
+    move |conn| conn.with(|conn| greet(conn, intent))
 }
