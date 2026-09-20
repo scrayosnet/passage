@@ -21,6 +21,7 @@
 //! - [`rate_limiter`] -- per-IP connection rate limiting
 //! - [`adapter`] -- hostname matching and the per-route adapter set
 
+pub mod adapter;
 pub mod config;
 pub mod cookie;
 pub mod crypto;
@@ -28,6 +29,5 @@ pub mod error;
 pub mod metrics;
 pub mod rate_limiter;
 pub mod router;
-pub mod adapter;
 
 pub use error::*;

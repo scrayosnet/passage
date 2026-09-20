@@ -48,7 +48,7 @@ pub struct Conn<S> {
     options: Options,
 
     /// Whether the peer is expected to stay quiet. A frame arriving while this is set is a protocol
-    /// break rather than input to be handled later.
+    /// break rather than input to be handled later. Enabled by default.
     gated: bool,
 
     /// Whether the connection should end once the queue has been cleared.
@@ -142,7 +142,8 @@ pub struct ConnCell<S> {
 }
 
 impl<S> ConnCell<S> {
-    /// Creates a cell holding `state`, starting in `version` and `phase`.
+    /// Creates a cell holding `state`, starting in `version` and `phase`. The connections starts gated
+    /// by default.
     pub(crate) fn new(state: S, version: ProtocolVersion, phase: Phase, options: Options) -> Self {
         Self {
             inner: Mutex::new(Conn {
@@ -151,7 +152,7 @@ impl<S> ConnCell<S> {
                 version,
                 phase,
                 options,
-                gated: false,
+                gated: true,
                 closing: false,
             }),
         }

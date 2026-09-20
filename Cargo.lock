@@ -2908,6 +2908,7 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "cfb8",
+ "config",
  "criterion",
  "futures",
  "hmac",

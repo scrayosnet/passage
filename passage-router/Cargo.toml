@@ -38,6 +38,7 @@ hmac = { workspace = true }
 cfb8 = { workspace = true }
 futures = { workspace = true }
 regex = { workspace = true }
+config = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "rt-multi-thread", "time", "io-util"] }

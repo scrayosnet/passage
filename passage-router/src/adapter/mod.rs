@@ -1,11 +1,11 @@
 use regex::Regex;
 use uuid::Uuid;
 
+pub mod adapter;
 pub mod authentication;
 pub mod discovery;
 pub mod localization;
 pub mod status;
-pub mod adapter;
 
 pub(crate) fn opt_to_regex(s: Option<String>) -> Result<Option<Regex>, regex::Error> {
     if let Some(s) = s {

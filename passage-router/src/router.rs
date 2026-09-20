@@ -1,22 +1,33 @@
-use crate::adapter::authentication::DynAuthenticationAdapter;
+use tokio::net::TcpListener;
 use crate::adapter::adapter::Route;
+use crate::adapter::authentication::DynAuthenticationAdapter;
 use crate::adapter::discovery::DynDiscoveryActionAdapter;
 use crate::adapter::localization::DynLocalizationAdapter;
 use crate::adapter::status::DynStatusAdapter;
 use crate::error::Result;
 use anyhow::{Context, anyhow};
-use passage_adapters::{Client, StatusAdapter};
-use passage_core::connection::{ConnectionError, Ctx, DispatchError};
+use passage_adapters::{Client, ServerStatus, StatusAdapter};
+use passage_core::connection::{Conn, ConnRef, ConnectionError, DispatchError};
 use passage_core::packet::handshake::ClientIntentionPacket;
-use passage_core::packet::status::{ClientPingRequestPacket, ClientStatusRequestPacket, ServerStatusResponsePacket};
+use passage_core::packet::status::{ClientPingRequestPacket, ClientStatusRequestPacket, ServerPongResponsePacket, ServerStatusResponsePacket};
 use passage_core::router::Router;
 use std::sync::Arc;
+use passage_core::common;
+use passage_core::server::{Listener, Server};
 
 /// This crate uses enum dispatch to select the adapters at runtime.
-type DynRoute = Route<DynStatusAdapter, DynDiscoveryActionAdapter, DynAuthenticationAdapter, DynLocalizationAdapter>;
+type DynRoute = Route<
+    DynStatusAdapter,
+    DynDiscoveryActionAdapter,
+    DynAuthenticationAdapter,
+    DynLocalizationAdapter,
+>;
 
 /// This crate uses enum dispatch to select the adapters at runtime.
-type DynRoutes = Arc<[DynRoute]>;
+///
+/// The inner `Arc` is what lets a handler carry one route into an adapter call: it has to survive
+/// the `.await`, and a borrow of the state cannot.
+type DynRoutes = Arc<[Arc<DynRoute>]>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Step {
@@ -34,40 +45,55 @@ pub struct State {
     route_index: Option<usize>,
 
     /// The client information.
-    client: Client,
+    ///
+    /// Behind an `Arc` because every adapter call needs it and none of them may borrow the state:
+    /// a handler holds the connection only for the body of a closure, never across an `.await`.
+    client: Arc<Client>,
 
     /// The current step of the connection. This binds the client to the server protocol.
     step: Step,
 }
 
 impl State {
-    pub fn new(routes: DynRoutes) -> Self {
+    pub fn new(routes: DynRoutes, address: std::net::SocketAddr) -> Self {
+        let mut client = Client::default();
+        client.address = address;
         Self {
             routes,
             route_index: None,
-            client: Default::default(),
+            client: Arc::new(client),
             step: Step::Intention,
         }
     }
 
     pub fn find_route(&mut self, server_address: &str) {
-        self.route_index =  self.routes
+        self.route_index = self
+            .routes
             .iter()
             .enumerate()
             .find(|(_, route)| route.hostname.is_match(server_address))
             .map(|(index, _)| index);
     }
 
-    pub fn route(&self) -> Option<&DynRoute> {
-        self.route_index.map(|index| &self.routes[index])
+    /// The selected route, as something a handler can carry into an adapter call.
+    pub fn route(&self) -> Option<Arc<DynRoute>> {
+        self.route_index
+            .map(|index| Arc::clone(&self.routes[index]))
+    }
+
+    /// Mutable access to the client information, which is shared with in-flight adapter calls.
+    fn client_mut(&mut self) -> &mut Client {
+        Arc::make_mut(&mut self.client)
     }
 }
 
-pub struct Passage {}
+pub struct Passage {
+    routes: DynRoutes,
+}
 
 impl Passage {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(routes: DynRoutes) -> Self {
+        Self { routes }
     }
 
     // TODO pass adapters or config?
@@ -86,78 +112,101 @@ impl Passage {
         Ok(Arc::new(router))
     }
 
-    pub async fn serve(mut self) -> Result<()> {
-        let router = self.router();
+    pub async fn serve(self) -> Result<()> {
+        let router = self.router()?;
+        let listener = TcpListener::bind("").await?;
+        Server::new(listener)
+            .dispatch(router)
+            .state(move |addr| State::new(self.routes.clone(), addr.clone()))
+            .serve()
+            .await;
         Ok(())
     }
 }
 
 // handlers
 
-fn on_open(ctx: Ctx<'_, State>) -> Result<(), DispatchError> {
+fn on_open(conn: ConnRef<'_, State>) -> Result<(), DispatchError> {
+    let _ = conn;
     Ok(())
 }
 
-fn on_tick(ctx: Ctx<'_, State>) -> Result<(), DispatchError> {
+async fn on_tick(conn: ConnRef<'_, State>) -> Result<(), DispatchError> {
+    let _ = conn;
     Ok(())
 }
 
-fn on_error(ctx: Ctx<'_, State>, error: &mut ConnectionError) -> Result<(), DispatchError> {
+fn on_error(conn: ConnRef<'_, State>, error: &mut ConnectionError) -> Result<(), DispatchError> {
+    let _ = (conn, error);
     Ok(())
 }
 
-fn on_handshake_intention_packet(ctx: Ctx<'_, State>, packet: ClientIntentionPacket) -> Result<(), DispatchError> {
-    // Ensure that the connection is in the `intention` state.
-    if ctx.state.step != Step::Intention {
-        return Err(DispatchError::peer(
-            "unexpected_step",
-            anyhow!("Expected step `intention`, got `{:?}`", ctx.state.step),
-        ));
+/// Fails unless the connection is at the step this handler answers.
+///
+/// The step and the route are written together and read together, which is the reason they are
+/// plain fields under one lend rather than separately shared: a caller must never see the step
+/// advanced while the route it implies is still missing.
+fn expect_step(conn: &Conn<State>, step: Step) -> Result<(), DispatchError> {
+    if conn.state.step == step {
+        return Ok(());
     }
+    Err(DispatchError::peer(
+        "unexpected_step",
+        anyhow!("Expected step `{step:?}`, got `{:?}`", conn.state.step),
+    ))
+}
 
-    // Calculate the next step the connection should take. Then send the state update.
-    let next_step = match packet.next_state {
-        passage_core::common::State::Status => Step::StatusPingRequest,
-        passage_core::common::State::Login => Step::StatusPingRequest,
-        passage_core::common::State::Transfer => Step::StatusPingRequest,
+async fn get_status(route: Option<&Arc<DynRoute>>, client: &Client) -> Result<ServerStatus, DispatchError> {
+    let Some(route) = route else {
+        return Err(DispatchError::peer("no_route", anyhow!("No route found")));
     };
-    ctx.handle.update(move |state| {
-        state.find_route(&packet.server_address);
-        state.step = next_step;
-        state.client.protocol_version = packet.protocol_version;
-        state.client.server_address = packet.server_address;
-        state.client.server_port = packet.server_port;
-    })?;
-    Ok(())
+    route.status_adapter
+        .status(client)
+        .await
+        .map_err(|err| DispatchError::internal("status_error", err))?
+        .ok_or(DispatchError::internal("no_status", anyhow!("No status found for the client")))
 }
 
-fn on_status_request_packet(ctx: Ctx<'_, State>, packet: ClientStatusRequestPacket) -> Result<(), DispatchError> {
-    // Ensure that the connection is in the `status_request` state.
-    if ctx.state.step != Step::StatusRequest {
-        return Err(DispatchError::peer(
-            "unexpected_step",
-            anyhow!("Expected step `status_request`, got `{:?}`", ctx.state.step),
-        ));
-    }
-
-    // TODO maybe handle the error directly? Close connection or send some status?
-    // Get the status adapter form the current route.
-    let route = ctx.state.route()
-        .ok_or_else(|| DispatchError::peer("no_route", anyhow!("No route found for the client")))?;
-    let version = ctx.version;
-    let handle = ctx.handle.clone();
-    let client = ctx.state.client.clone();
-    handle.exclusive(async move {
-        let status = route.status(&client)
-            .await
-            .context("failed to get status")?
-            .ok_or_else(|| DispatchError::internal("no_status", anyhow!("No status found for the client")))?;
-        handle.send(version, ServerStatusResponsePacket::try_from(&status).context("")?)?;
+async fn on_handshake_intention_packet(
+    conn: ConnRef<'_, State>,
+    packet: ClientIntentionPacket,
+) -> Result<(), DispatchError> {
+    conn.with(|c| {
+        expect_step(c, Step::Intention)?;
+        c.state.find_route(&packet.server_address);
+        c.state.step = match packet.next_state {
+            common::State::Status => Step::StatusRequest,
+            common::State::Login => Step::StatusPingRequest,
+            common::State::Transfer => Step::StatusPingRequest,
+        };
+        let client = c.state.client_mut();
+        client.protocol_version = packet.protocol_version;
+        client.server_address = packet.server_address;
+        client.server_port = packet.server_port;
         Ok(())
+    })
+}
+
+async fn on_status_request_packet(
+    conn: ConnRef<'_, State>,
+    _packet: ClientStatusRequestPacket,
+) -> Result<(), DispatchError> {
+    let (route, client) = conn.with(|c| {
+        expect_step(c, Step::StatusRequest)?;
+        Ok::<_, DispatchError>((c.state.route(), Arc::clone(&c.state.client)))
     })?;
+    let status = get_status(route.as_ref(), &client).await?;
+    let packet = ServerStatusResponsePacket::try_from(&status)
+        .map_err(|err| DispatchError::internal("status_encode_error", err))?;
+    conn.send(packet)?;
     Ok(())
 }
 
-fn on_status_ping_request_packet(ctx: Ctx<'_, State>, packet: ClientPingRequestPacket) -> Result<(), DispatchError> {
+async fn on_status_ping_request_packet(
+    conn: ConnRef<'_, State>,
+    packet: ClientPingRequestPacket,
+) -> Result<(), DispatchError> {
+    conn.send(ServerPongResponsePacket { payload: packet.payload })?;
+    conn.close();
     Ok(())
 }
