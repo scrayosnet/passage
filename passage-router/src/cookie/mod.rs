@@ -54,21 +54,21 @@ pub trait CookieEncodeExt: Sized {
     fn encode_signed<T: Cookie + Serialize>(secret: &[u8], cookie: &T) -> Result<Self, Error>;
 }
 
-impl CookieEncodeExt for StoreCookiePacket {
+impl CookieEncodeExt for ServerStoreCookiePacket {
     fn encode<T: Cookie + Serialize>(cookie: &T) -> Result<Self, Error> {
         let cookie_bytes = serde_json::to_vec(cookie)?;
-        Ok(StoreCookiePacket {
-            key: T::KEY.to_owned(),
-            payload: cookie_bytes,
+        Ok(ServerStoreCookiePacket {
+            key: T::KEY.into(),
+            payload: cookie_bytes.into(),
         })
     }
 
     fn encode_signed<T: Cookie + Serialize>(secret: &[u8], cookie: &T) -> Result<Self, Error> {
         let cookie_bytes = serde_json::to_vec(cookie)?;
         let message = sign(&cookie_bytes, secret);
-        Ok(StoreCookiePacket {
-            key: T::KEY.to_owned(),
-            payload: message,
+        Ok(ServerStoreCookiePacket {
+            key: T::KEY.into(),
+            payload: message.into(),
         })
     }
 }
@@ -82,7 +82,7 @@ pub trait CookieDecodeExt: Sized {
     ) -> Result<Option<T>, Error>;
 }
 
-impl CookieDecodeExt for CookieResponsePacket {
+impl CookieDecodeExt for ClientCookieResponsePacket {
     fn decode<'de, T: Cookie + Deserialize<'de>>(&'de self) -> Result<Option<T>, Error> {
         let Some(message) = &self.payload else {
             return Ok(None);

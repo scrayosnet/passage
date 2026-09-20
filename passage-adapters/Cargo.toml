@@ -20,6 +20,7 @@ rust-version.workspace = true
 tracing = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+bytestring = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 num-bigint = { workspace = true }

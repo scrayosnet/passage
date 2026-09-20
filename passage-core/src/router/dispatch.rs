@@ -2,6 +2,7 @@ use crate::common::ProtocolVersion;
 use crate::connection::{ConnRef, ConnectionError, DispatchError, Dispatcher, MakeDispatcher};
 use crate::router::{Router, UnknownPolicy};
 use anyhow::anyhow;
+use bytes::Bytes;
 use futures::future::BoxFuture;
 use std::sync::Arc;
 use tracing::trace;
@@ -83,7 +84,7 @@ impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
         &self,
         conn: ConnRef<'a, S>,
         id: i32,
-        payload: &[u8],
+        payload: Bytes,
     ) -> BoxFuture<'a, Result<(), DispatchError>> {
         let router = &*self.router;
         let table = &router.tables[self.table.1].1;
@@ -137,6 +138,7 @@ mod tests {
     use crate::router::Router;
     use crate::wire::{Options, Reader, WireResult, Writer};
     use bytes::BytesMut;
+    use bytestring::ByteString;
     use std::sync::Mutex;
 
     /// What the handlers recorded, in order.
@@ -144,7 +146,7 @@ mod tests {
 
     /// A packet whose ID moved between versions, so dispatching it is a version decision.
     struct Moved {
-        text: String,
+        text: ByteString,
     }
 
     impl Packet for Moved {
@@ -153,7 +155,7 @@ mod tests {
         const IDS: &'static [(ProtocolVersion, i32)] =
             &[(versions::V26_1, 0x05), (versions::V1_20_5, 0x02)];
 
-        fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+        fn decode(r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self {
                 text: r.string("text", 16)?,
             })
@@ -167,7 +169,12 @@ mod tests {
     /// A handler is a plain `async fn`. `P` is inferred from its signature, so the registration
     /// below needs no turbofish and no `Box::pin`.
     async fn note(conn: ConnRef<'_, Seen>, packet: Moved) -> Result<(), DispatchError> {
-        conn.with(|c| c.state.lock().expect("not poisoned").push(packet.text));
+        conn.with(|c| {
+            c.state
+                .lock()
+                .expect("not poisoned")
+                .push(packet.text.into())
+        });
         Ok(())
     }
 
@@ -181,13 +188,14 @@ mod tests {
         )
     }
 
-    /// The payload a frame carries: the ID varint, then the packet's own fields.
-    fn payload(id: i32, write: impl FnOnce(&mut Writer<'_>)) -> BytesMut {
+    /// The payload a frame carries: the ID varint, then the packet's own fields. Frozen, because
+    /// that is the shape a decoded frame arrives in -- and what lets a packet keep a slice of it.
+    fn payload(id: i32, write: impl FnOnce(&mut Writer<'_>)) -> Bytes {
         let mut buf = BytesMut::new();
         let mut writer = Writer::new(&mut buf);
         writer.var_int(id);
         write(&mut writer);
-        buf
+        buf.freeze()
     }
 
     /// A connection standing in for the one that would be driving these handlers.
@@ -209,7 +217,7 @@ mod tests {
         dispatcher.on_open(cell.as_ref()).expect("opens");
         let frame = payload(0x05, |w| w.string("text", "hello").expect("writes"));
         dispatcher
-            .on_frame(cell.as_ref(), 0x05, &frame)
+            .on_frame(cell.as_ref(), 0x05, frame.clone())
             .await
             .expect("dispatches");
 
@@ -230,7 +238,7 @@ mod tests {
 
         let frame = payload(0x05, |w| w.string("text", "bound").expect("writes"));
         dispatcher
-            .on_frame(cell.as_ref(), 0x05, &frame)
+            .on_frame(cell.as_ref(), 0x05, frame.clone())
             .await
             .expect("dispatches");
         assert_eq!(seen(&cell), vec!["bound".to_owned()]);
@@ -245,7 +253,7 @@ mod tests {
         dispatcher.on_version(cell.as_ref()).expect("rebinds");
         let frame = payload(0x02, |w| w.string("text", "older").expect("writes"));
         dispatcher
-            .on_frame(cell.as_ref(), 0x02, &frame)
+            .on_frame(cell.as_ref(), 0x02, frame.clone())
             .await
             .expect("dispatches");
 
@@ -253,7 +261,7 @@ mod tests {
         let frame = payload(0x05, |w| w.string("text", "newer").expect("writes"));
         assert!(
             dispatcher
-                .on_frame(cell.as_ref(), 0x05, &frame)
+                .on_frame(cell.as_ref(), 0x05, frame.clone())
                 .await
                 .is_err()
         );
@@ -272,7 +280,12 @@ mod tests {
                     .push("before".to_owned())
             });
             tokio::task::yield_now().await;
-            conn.with(|c| c.state.lock().expect("not poisoned").push(packet.text));
+            conn.with(|c| {
+                c.state
+                    .lock()
+                    .expect("not poisoned")
+                    .push(packet.text.into())
+            });
             Ok(())
         }
 
@@ -287,7 +300,7 @@ mod tests {
         dispatcher.on_open(cell.as_ref()).expect("opens");
 
         let frame = payload(0x05, |w| w.string("text", "after").expect("writes"));
-        let mut handled = dispatcher.on_frame(cell.as_ref(), 0x05, &frame);
+        let mut handled = dispatcher.on_frame(cell.as_ref(), 0x05, frame.clone());
 
         // Park it at the await, then reach the connection from outside the handler.
         let polled = std::future::poll_fn(|cx| {
@@ -308,7 +321,7 @@ mod tests {
         let dispatcher = router(UnknownPolicy::Reject).make();
 
         let error = dispatcher
-            .on_frame(cell.as_ref(), 0x7F, &payload(0x7F, |_| {}))
+            .on_frame(cell.as_ref(), 0x7F, payload(0x7F, |_| {}))
             .await
             .expect_err("must fail the connection");
         assert!(error.is_peer_error());
@@ -322,7 +335,7 @@ mod tests {
         let dispatcher = router(UnknownPolicy::Ignore).make();
 
         dispatcher
-            .on_frame(cell.as_ref(), 0x7F, &payload(0x7F, |_| {}))
+            .on_frame(cell.as_ref(), 0x7F, payload(0x7F, |_| {}))
             .await
             .expect("ignored, not failed");
         assert!(seen(&cell).is_empty());
@@ -336,10 +349,13 @@ mod tests {
         let mut dispatcher = router(UnknownPolicy::Reject).make();
         dispatcher.on_open(cell.as_ref()).expect("opens");
 
-        let mut frame = payload(0x05, |w| w.string("text", "hello").expect("writes"));
+        let mut frame = BytesMut::from(payload(0x05, |w| {
+            w.string("text", "hello").expect("writes")
+        }));
         frame.extend_from_slice(b"trailing");
+        let frame = frame.freeze();
         let error = dispatcher
-            .on_frame(cell.as_ref(), 0x05, &frame)
+            .on_frame(cell.as_ref(), 0x05, frame.clone())
             .await
             .expect_err("must fail the connection");
         assert!(error.to_string().contains("Moved"), "{error}");

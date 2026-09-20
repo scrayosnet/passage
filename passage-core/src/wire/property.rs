@@ -7,11 +7,7 @@ pub trait Property: Sized + Send + Sync + 'static {
     const NAME: &'static str;
 
     /// Decodes the property.
-    fn decode(
-        r: &mut Reader<'_>,
-        version: ProtocolVersion,
-        field: &'static str,
-    ) -> WireResult<Self>;
+    fn decode(r: &mut Reader, version: ProtocolVersion, field: &'static str) -> WireResult<Self>;
 
     /// Encodes the property
     fn encode(

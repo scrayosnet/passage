@@ -1,4 +1,5 @@
 use crate::connection::{ConnRef, ConnectionError};
+use bytes::Bytes;
 use futures::future::BoxFuture;
 use std::fmt;
 
@@ -159,7 +160,7 @@ pub trait Dispatcher<S> {
         &self,
         conn: ConnRef<'a, S>,
         id: i32,
-        payload: &[u8],
+        payload: Bytes,
     ) -> BoxFuture<'a, Result<()>> {
         let _ = (conn, id, payload);
         done()
@@ -209,7 +210,7 @@ impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
         &self,
         conn: ConnRef<'a, S>,
         id: i32,
-        payload: &[u8],
+        payload: Bytes,
     ) -> BoxFuture<'a, Result<()>> {
         (**self).on_frame(conn, id, payload)
     }
@@ -246,7 +247,7 @@ impl<S, D: Dispatcher<S>> Dispatcher<S> for Option<D> {
         &self,
         conn: ConnRef<'a, S>,
         id: i32,
-        payload: &[u8],
+        payload: Bytes,
     ) -> BoxFuture<'a, Result<()>> {
         let Some(this) = self else {
             return done();
@@ -342,7 +343,7 @@ mod tests {
             &self,
             _conn: ConnRef<'a, ()>,
             _id: i32,
-            _payload: &[u8],
+            _payload: Bytes,
         ) -> BoxFuture<'a, Result<()>> {
             self.note("frame");
             done()
@@ -367,7 +368,7 @@ mod tests {
         dispatcher.on_open(conn).expect("opens");
         dispatcher.on_version(conn).expect("rebinds");
         dispatcher
-            .on_frame(conn, 0x00, &[])
+            .on_frame(conn, 0x00, Bytes::new())
             .await
             .expect("dispatches");
         dispatcher.on_tick(conn).await.expect("ticks");

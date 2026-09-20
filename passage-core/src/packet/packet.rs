@@ -31,7 +31,7 @@ pub trait Packet: Sized + Send + Sync + 'static {
     ///
     /// The caller checks that the whole payload was consumed, so a decoder does not call
     /// [`Reader::finish`] itself.
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError>;
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError>;
 
     /// Encodes the packet payload (without length prefix).
     fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> Result<(), WireError>;

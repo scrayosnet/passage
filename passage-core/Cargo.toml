@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 bytes = { workspace = true }
+bytestring = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }

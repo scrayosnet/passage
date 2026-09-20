@@ -64,6 +64,7 @@ fastnbt = { version = "2.6" }
 regex = { version = "1.12" }
 hickory-resolver = { version = "0.26" }
 bytes = { version = "1.11" }
+bytestring = { version = "1.5", features = ["serde"] }
 byteorder = { version = "1.5" }
 sysinfo = { version = "0.38" }
 testcontainers = { version = "0.27" }

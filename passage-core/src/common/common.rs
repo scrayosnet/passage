@@ -1,6 +1,7 @@
 use crate::ProtocolVersion;
 use crate::common::{Nbt, TextComponent};
 use crate::wire::{Property, Reader, WireError, Writer};
+use bytestring::ByteString;
 use std::fmt::Display;
 
 /// The maximum length of an identifier (a namespaced key).
@@ -90,11 +91,7 @@ pub enum State {
 impl Property for State {
     const NAME: &'static str = "intention_state";
 
-    fn decode(
-        r: &mut Reader<'_>,
-        _: ProtocolVersion,
-        field: &'static str,
-    ) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion, field: &'static str) -> Result<Self, WireError> {
         match r.var_int(field)? {
             1 => Ok(State::Status),
             2 => Ok(State::Login),
@@ -147,11 +144,7 @@ pub enum ResourcePackResult {
 impl Property for ResourcePackResult {
     const NAME: &'static str = "resource_pack_result";
 
-    fn decode(
-        r: &mut Reader<'_>,
-        _: ProtocolVersion,
-        field: &'static str,
-    ) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion, field: &'static str) -> Result<Self, WireError> {
         match r.var_int(field)? {
             0 => Ok(ResourcePackResult::Success),
             1 => Ok(ResourcePackResult::Declined),
@@ -204,11 +197,7 @@ pub enum ChatMode {
 impl Property for ChatMode {
     const NAME: &'static str = "chat_mode";
 
-    fn decode(
-        r: &mut Reader<'_>,
-        _: ProtocolVersion,
-        field: &'static str,
-    ) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion, field: &'static str) -> Result<Self, WireError> {
         match r.var_int(field)? {
             0 => Ok(ChatMode::Enabled),
             1 => Ok(ChatMode::CommandsOnly),
@@ -312,11 +301,7 @@ impl Display for MainHand {
 impl Property for MainHand {
     const NAME: &'static str = "main_hand";
 
-    fn decode(
-        r: &mut Reader<'_>,
-        _: ProtocolVersion,
-        field: &'static str,
-    ) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion, field: &'static str) -> Result<Self, WireError> {
         match r.var_int(field)? {
             0 => Ok(MainHand::Left),
             1 => Ok(MainHand::Right),
@@ -367,11 +352,7 @@ impl Display for ParticleStatus {
 impl Property for ParticleStatus {
     const NAME: &'static str = "particle_status";
 
-    fn decode(
-        r: &mut Reader<'_>,
-        _: ProtocolVersion,
-        field: &'static str,
-    ) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion, field: &'static str) -> Result<Self, WireError> {
         match r.var_int(field)? {
             0 => Ok(ParticleStatus::All),
             1 => Ok(ParticleStatus::Decreased),
@@ -403,7 +384,7 @@ impl Property for ParticleStatus {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RegistryEntry {
     /// The identifier of the entry, such as `minecraft:overworld`.
-    pub id: String,
+    pub id: ByteString,
     /// The entry data, absent if the client is to use its own.
     pub data: Option<Nbt>,
 }
@@ -412,7 +393,7 @@ impl Property for RegistryEntry {
     const NAME: &'static str = "registry_entry";
 
     fn decode(
-        r: &mut Reader<'_>,
+        r: &mut Reader,
         version: ProtocolVersion,
         _: &'static str,
     ) -> Result<Self, WireError> {
@@ -428,7 +409,7 @@ impl Property for RegistryEntry {
         version: ProtocolVersion,
         _: &'static str,
     ) -> Result<(), WireError> {
-        w.string("id", self.id.as_str())?;
+        w.string("id", &self.id)?;
         w.optional(self.data.as_ref(), |w, data| {
             w.property(version, "data", data)
         })?;
@@ -440,7 +421,7 @@ impl Property for RegistryEntry {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Tag {
     /// The identifier of the tag, such as `minecraft:climbable`.
-    pub name: String,
+    pub name: ByteString,
     /// The numeric IDs that carry the tag.
     pub entries: Vec<VarInt>,
 }
@@ -448,7 +429,7 @@ pub struct Tag {
 impl Property for Tag {
     const NAME: &'static str = "tag";
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion, _: &'static str) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion, _: &'static str) -> Result<Self, WireError> {
         Ok(Self {
             name: r.string("name", MAX_IDENTIFIER_LEN)?,
             entries: r.array("entries", MAX_TAGS, |r| r.var_int("entry"))?,
@@ -461,7 +442,7 @@ impl Property for Tag {
         _: ProtocolVersion,
         _: &'static str,
     ) -> Result<(), WireError> {
-        w.string("name", self.name.as_str())?;
+        w.string("name", &self.name)?;
         w.array("entries", &self.entries, |w, entry| {
             w.var_int(*entry);
             Ok(())
@@ -475,7 +456,7 @@ impl Property for Tag {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TagRegistry {
     /// The identifier of the registry, such as `minecraft:block`.
-    pub registry: String,
+    pub registry: ByteString,
     /// The tags defined for the registry.
     pub tags: Vec<Tag>,
 }
@@ -484,7 +465,7 @@ impl Property for TagRegistry {
     const NAME: &'static str = "tag_registry";
 
     fn decode(
-        r: &mut Reader<'_>,
+        r: &mut Reader,
         version: ProtocolVersion,
         _: &'static str,
     ) -> Result<Self, WireError> {
@@ -500,7 +481,7 @@ impl Property for TagRegistry {
         version: ProtocolVersion,
         _: &'static str,
     ) -> Result<(), WireError> {
-        w.string("registry", self.registry.as_str())?;
+        w.string("registry", &self.registry)?;
         w.array("tags", &self.tags, |w, tag| w.property(version, "tag", tag))?;
         Ok(())
     }
@@ -510,17 +491,17 @@ impl Property for TagRegistry {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct KnownPack {
     /// The namespace of the pack, such as `minecraft`.
-    pub namespace: String,
+    pub namespace: ByteString,
     /// The ID of the pack, such as `core`.
-    pub id: String,
+    pub id: ByteString,
     /// The version of the pack.
-    pub version: String,
+    pub version: ByteString,
 }
 
 impl Property for KnownPack {
     const NAME: &'static str = "known_pack";
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion, _: &'static str) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion, _: &'static str) -> Result<Self, WireError> {
         Ok(Self {
             namespace: r.string("namespace", MAX_IDENTIFIER_LEN)?,
             id: r.string("id", MAX_IDENTIFIER_LEN)?,
@@ -534,9 +515,9 @@ impl Property for KnownPack {
         _: ProtocolVersion,
         _: &'static str,
     ) -> Result<(), WireError> {
-        w.string("namespace", self.namespace.as_str())?;
-        w.string("id", self.id.as_str())?;
-        w.string("version", self.version.as_str())?;
+        w.string("namespace", &self.namespace)?;
+        w.string("id", &self.id)?;
+        w.string("version", &self.version)?;
         Ok(())
     }
 }
@@ -546,15 +527,15 @@ impl Property for KnownPack {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ReportDetail {
     /// The title of the detail.
-    pub title: String,
+    pub title: ByteString,
     /// The description of the detail.
-    pub description: String,
+    pub description: ByteString,
 }
 
 impl Property for ReportDetail {
     const NAME: &'static str = "report_detail";
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion, _: &'static str) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion, _: &'static str) -> Result<Self, WireError> {
         Ok(Self {
             title: r.string("title", MAX_REPORT_TITLE_LEN)?,
             description: r.string("description", MAX_REPORT_DESCRIPTION_LEN)?,
@@ -567,8 +548,8 @@ impl Property for ReportDetail {
         _: ProtocolVersion,
         _: &'static str,
     ) -> Result<(), WireError> {
-        w.string("title", self.title.as_str())?;
-        w.string("description", self.description.as_str())?;
+        w.string("title", &self.title)?;
+        w.string("description", &self.description)?;
         Ok(())
     }
 }
@@ -602,11 +583,7 @@ pub enum ServerLinkType {
 impl Property for ServerLinkType {
     const NAME: &'static str = "server_link_type";
 
-    fn decode(
-        r: &mut Reader<'_>,
-        _: ProtocolVersion,
-        field: &'static str,
-    ) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion, field: &'static str) -> Result<Self, WireError> {
         match r.var_int(field)? {
             0 => Ok(ServerLinkType::BugReport),
             1 => Ok(ServerLinkType::CommunityGuidelines),
@@ -662,7 +639,7 @@ impl Property for ServerLinkLabel {
     const NAME: &'static str = "server_link_label";
 
     fn decode(
-        r: &mut Reader<'_>,
+        r: &mut Reader,
         version: ProtocolVersion,
         field: &'static str,
     ) -> Result<Self, WireError> {
@@ -698,14 +675,14 @@ pub struct ServerLink {
     /// What the link is called.
     pub label: ServerLinkLabel,
     /// Where the link points.
-    pub url: String,
+    pub url: ByteString,
 }
 
 impl Property for ServerLink {
     const NAME: &'static str = "server_link";
 
     fn decode(
-        r: &mut Reader<'_>,
+        r: &mut Reader,
         version: ProtocolVersion,
         _: &'static str,
     ) -> Result<Self, WireError> {
@@ -722,7 +699,7 @@ impl Property for ServerLink {
         _: &'static str,
     ) -> Result<(), WireError> {
         w.property(version, "label", &self.label)?;
-        w.string("url", self.url.as_str())?;
+        w.string("url", &self.url)?;
         Ok(())
     }
 }

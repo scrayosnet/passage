@@ -7,6 +7,7 @@
 
 mod common;
 
+use bytes::Bytes;
 use common::*;
 use futures::future::BoxFuture;
 use passage_core::client::{Client, Connected};
@@ -67,7 +68,7 @@ impl Dispatcher<()> for Recorder {
         &self,
         conn: ConnRef<'a, ()>,
         id: i32,
-        payload: &[u8],
+        payload: Bytes,
     ) -> BoxFuture<'a, Result<(), DispatchError>> {
         let seen = {
             let mut log = self.log.lock().expect("not poisoned");
@@ -264,7 +265,7 @@ async fn a_failure_the_hook_cannot_answer_still_reports_what_it_was() {
             &self,
             _conn: ConnRef<'a, ()>,
             _id: i32,
-            _payload: &[u8],
+            _payload: Bytes,
         ) -> BoxFuture<'a, Result<(), DispatchError>> {
             Box::pin(std::future::ready(Err(DispatchError::peer(
                 "the_real_reason",

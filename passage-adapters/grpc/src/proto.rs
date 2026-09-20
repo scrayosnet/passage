@@ -185,7 +185,7 @@ impl From<Client> for ClientInfo {
                 port: u32::from(value.address.port()),
             }),
             server_address: Some(Address {
-                hostname: value.server_address.clone(),
+                hostname: value.server_address.to_string(),
                 port: u32::from(value.server_port),
             }),
             protocol_version: value.protocol_version as u64,

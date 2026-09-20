@@ -10,6 +10,8 @@ use crate::common::{
 };
 use crate::wire::{Reader, WireError, Writer};
 use crate::{Packet, Phase, ProtocolVersion};
+use bytes::Bytes;
+use bytestring::ByteString;
 use uuid::Uuid;
 
 /// The [`ServerCookieRequestPacket`].
@@ -18,7 +20,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ServerCookieRequestPacket {
     /// The identifier of the cookie.
-    pub key: String,
+    pub key: ByteString,
 }
 
 impl Packet for ServerCookieRequestPacket {
@@ -26,14 +28,14 @@ impl Packet for ServerCookieRequestPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x00)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             key: r.string("key", MAX_IDENTIFIER_LEN)?,
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.string("key", self.key.as_str())?;
+        w.string("key", &self.key)?;
         Ok(())
     }
 }
@@ -44,9 +46,9 @@ impl Packet for ServerCookieRequestPacket {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ServerCustomPayloadPacket {
     /// The plugin channel the data belongs to.
-    pub channel: String,
+    pub channel: ByteString,
     /// The channel-specific data, which runs to the end of the packet.
-    pub data: Vec<u8>,
+    pub data: Bytes,
 }
 
 impl Packet for ServerCustomPayloadPacket {
@@ -54,16 +56,16 @@ impl Packet for ServerCustomPayloadPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x01)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             channel: r.string("channel", MAX_IDENTIFIER_LEN)?,
-            data: r.pop_rest().to_vec(),
+            data: r.pop_rest(),
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.string("channel", self.channel.as_str())?;
-        w.raw(self.data.as_slice());
+        w.string("channel", &self.channel)?;
+        w.raw(&self.data);
         Ok(())
     }
 }
@@ -80,7 +82,7 @@ pub struct ServerDisconnectPacket {
 impl ServerDisconnectPacket {
     /// Creates a new [`ServerDisconnectPacket`] from literal text.
     #[must_use]
-    pub fn text(reason: impl Into<String>) -> Self {
+    pub fn text(reason: impl Into<ByteString>) -> Self {
         Self {
             reason: TextComponent::text(reason),
         }
@@ -92,7 +94,7 @@ impl Packet for ServerDisconnectPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x02)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             reason: r.property(version, "reason")?,
         })
@@ -115,7 +117,7 @@ impl Packet for ServerFinishConfigurationPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x03)];
 
-    fn decode(_: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(_: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self)
     }
 
@@ -146,7 +148,7 @@ impl Packet for ServerKeepAlivePacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x04)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self { id: r.i64("id")? })
     }
 
@@ -170,7 +172,7 @@ impl Packet for ServerPingPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x05)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self { id: r.i32("id")? })
     }
 
@@ -191,7 +193,7 @@ impl Packet for ServerResetChatPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x06)];
 
-    fn decode(_: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(_: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self)
     }
 
@@ -206,7 +208,7 @@ impl Packet for ServerResetChatPacket {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServerRegistryDataPacket {
     /// The identifier of the registry, such as `minecraft:dimension_type`.
-    pub registry: String,
+    pub registry: ByteString,
     /// The entries of the registry.
     pub entries: Vec<RegistryEntry>,
 }
@@ -216,7 +218,7 @@ impl Packet for ServerRegistryDataPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x07)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             registry: r.string("registry", MAX_IDENTIFIER_LEN)?,
             entries: r.array("entries", MAX_REGISTRY_ENTRIES, |r| {
@@ -226,7 +228,7 @@ impl Packet for ServerRegistryDataPacket {
     }
 
     fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> Result<(), WireError> {
-        w.string("registry", self.registry.as_str())?;
+        w.string("registry", &self.registry)?;
         w.array("entries", &self.entries, |w, entry| {
             w.property(version, "entry", entry)
         })?;
@@ -248,7 +250,7 @@ impl Packet for ServerResourcePackPopPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x08)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             uuid: r.optional("uuid", |r| r.uuid("uuid"))?,
         })
@@ -271,9 +273,9 @@ pub struct ServerResourcePackPushPacket {
     /// The identity of the pack, which the client reports back and the server removes it by.
     pub uuid: Uuid,
     /// Where the pack is downloaded from.
-    pub url: String,
+    pub url: ByteString,
     /// The hexadecimal SHA-1 hash of the pack file.
-    pub hash: String,
+    pub hash: ByteString,
     /// Whether the client is kicked when it declines.
     pub forced: bool,
     /// The component shown in the prompt, if the client is to be asked.
@@ -285,7 +287,7 @@ impl Packet for ServerResourcePackPushPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x09)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             uuid: r.uuid("uuid")?,
             url: r.string("url", MAX_URL_LEN)?,
@@ -298,8 +300,8 @@ impl Packet for ServerResourcePackPushPacket {
 
     fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> Result<(), WireError> {
         w.uuid(&self.uuid);
-        w.string("url", self.url.as_str())?;
-        w.string("hash", self.hash.as_str())?;
+        w.string("url", &self.url)?;
+        w.string("hash", &self.hash)?;
         w.bool(self.forced);
         w.optional(self.prompt_message.as_ref(), |w, prompt_message| {
             w.property(version, "prompt_message", prompt_message)
@@ -314,9 +316,9 @@ impl Packet for ServerResourcePackPushPacket {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ServerStoreCookiePacket {
     /// The identifier of the cookie.
-    pub key: String,
+    pub key: ByteString,
     /// The data to store, which survives a transfer.
-    pub payload: Vec<u8>,
+    pub payload: Bytes,
 }
 
 impl Packet for ServerStoreCookiePacket {
@@ -324,16 +326,16 @@ impl Packet for ServerStoreCookiePacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x0A)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             key: r.string("key", MAX_IDENTIFIER_LEN)?,
-            payload: r.bytes("payload", MAX_COOKIE_LEN)?.to_vec(),
+            payload: r.bytes("payload", MAX_COOKIE_LEN)?,
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.string("key", self.key.as_str())?;
-        w.bytes("payload", self.payload.as_slice())?;
+        w.string("key", &self.key)?;
+        w.bytes("payload", &self.payload)?;
         Ok(())
     }
 }
@@ -344,7 +346,7 @@ impl Packet for ServerStoreCookiePacket {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ServerTransferPacket {
     /// The hostname or IP of the server to transfer to.
-    pub host: String,
+    pub host: ByteString,
     /// The port of the server to transfer to.
     pub port: u16,
 }
@@ -354,7 +356,7 @@ impl Packet for ServerTransferPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x0B)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         let host = r.string("host", MAX_URL_LEN)?;
         let port = r.var_int("port")?;
         let port = u16::try_from(port).map_err(|_| WireError::IllegalEnumValue {
@@ -365,7 +367,7 @@ impl Packet for ServerTransferPacket {
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.string("host", self.host.as_str())?;
+        w.string("host", &self.host)?;
         w.var_int(i32::from(self.port));
         Ok(())
     }
@@ -377,7 +379,7 @@ impl Packet for ServerTransferPacket {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ServerUpdateEnabledFeaturesPacket {
     /// The identifiers of the features to enable.
-    pub features: Vec<String>,
+    pub features: Vec<ByteString>,
 }
 
 impl Packet for ServerUpdateEnabledFeaturesPacket {
@@ -385,7 +387,7 @@ impl Packet for ServerUpdateEnabledFeaturesPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x0C)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             features: r.array("features", MAX_FEATURES, |r| {
                 r.string("feature", MAX_IDENTIFIER_LEN)
@@ -395,7 +397,7 @@ impl Packet for ServerUpdateEnabledFeaturesPacket {
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
         w.array("features", &self.features, |w, feature| {
-            w.string("feature", feature.as_str())
+            w.string("feature", feature)
         })?;
         Ok(())
     }
@@ -415,7 +417,7 @@ impl Packet for ServerUpdateTagsPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x0D)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             registries: r.array("registries", MAX_TAGS, |r| r.property(version, "registry"))?,
         })
@@ -443,7 +445,7 @@ impl Packet for ServerSelectKnownPacksPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x0E)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             packs: r.array("packs", MAX_KNOWN_PACKS, |r| r.property(version, "pack"))?,
         })
@@ -471,7 +473,7 @@ impl Packet for ServerCustomReportDetailsPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_21_2, 0x0F)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             details: r.array("details", MAX_REPORT_DETAILS, |r| {
                 r.property(version, "detail")
@@ -501,7 +503,7 @@ impl Packet for ServerLinksPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_21_2, 0x10)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             links: r.array("links", MAX_SERVER_LINKS, |r| r.property(version, "link"))?,
         })
@@ -526,7 +528,7 @@ impl Packet for ServerClearDialogPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_21_6, 0x11)];
 
-    fn decode(_: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(_: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self)
     }
 
@@ -549,7 +551,7 @@ impl Packet for ServerShowDialogPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_21_6, 0x12)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             dialog: r.property(version, "dialog")?,
         })
@@ -567,7 +569,7 @@ impl Packet for ServerShowDialogPacket {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ServerCodeOfConductPacket {
     /// The code of conduct the player has to accept before the configuration continues.
-    pub code_of_conduct: String,
+    pub code_of_conduct: ByteString,
 }
 
 impl Packet for ServerCodeOfConductPacket {
@@ -575,14 +577,14 @@ impl Packet for ServerCodeOfConductPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_21_9, 0x13)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             code_of_conduct: r.string("code_of_conduct", MAX_CODE_OF_CONDUCT_LEN)?,
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.string("code_of_conduct", self.code_of_conduct.as_str())?;
+        w.string("code_of_conduct", &self.code_of_conduct)?;
         Ok(())
     }
 }
@@ -593,7 +595,7 @@ impl Packet for ServerCodeOfConductPacket {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ClientInformationPacket {
     /// The locale of the client, such as `en_GB`.
-    pub locale: String,
+    pub locale: ByteString,
     /// The render distance of the client, in chunks.
     pub view_distance: i8,
     /// What the client wants to see of the chat.
@@ -617,7 +619,7 @@ impl Packet for ClientInformationPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x00)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             locale: r.string("locale", MAX_LOCALE_LEN)?,
             view_distance: r.i8("view_distance")?,
@@ -634,7 +636,7 @@ impl Packet for ClientInformationPacket {
     }
 
     fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> Result<(), WireError> {
-        w.string("locale", self.locale.as_str())?;
+        w.string("locale", &self.locale)?;
         w.i8(self.view_distance);
         w.property(version, "chat_mode", &self.chat_mode)?;
         w.bool(self.chat_colors);
@@ -656,9 +658,9 @@ impl Packet for ClientInformationPacket {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ClientCookieResponsePacket {
     /// The identifier of the cookie.
-    pub key: String,
+    pub key: ByteString,
     /// The data of the cookie, absent if the client has none stored.
-    pub payload: Option<Vec<u8>>,
+    pub payload: Option<Bytes>,
 }
 
 impl Packet for ClientCookieResponsePacket {
@@ -666,17 +668,15 @@ impl Packet for ClientCookieResponsePacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x01)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             key: r.string("key", MAX_IDENTIFIER_LEN)?,
-            payload: r.optional("payload", |r| {
-                Ok(r.bytes("payload", MAX_COOKIE_LEN)?.to_vec())
-            })?,
+            payload: r.optional("payload", |r| r.bytes("payload", MAX_COOKIE_LEN))?,
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.string("key", self.key.as_str())?;
+        w.string("key", &self.key)?;
         w.optional(self.payload.as_deref(), |w, payload| {
             w.bytes("payload", payload)
         })?;
@@ -690,9 +690,9 @@ impl Packet for ClientCookieResponsePacket {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ClientCustomPayloadPacket {
     /// The plugin channel the data belongs to.
-    pub channel: String,
+    pub channel: ByteString,
     /// The channel-specific data, which runs to the end of the packet.
-    pub data: Vec<u8>,
+    pub data: Bytes,
 }
 
 impl Packet for ClientCustomPayloadPacket {
@@ -700,16 +700,16 @@ impl Packet for ClientCustomPayloadPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x02)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             channel: r.string("channel", MAX_IDENTIFIER_LEN)?,
-            data: r.pop_rest().to_vec(),
+            data: r.pop_rest(),
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.string("channel", self.channel.as_str())?;
-        w.raw(self.data.as_slice());
+        w.string("channel", &self.channel)?;
+        w.raw(&self.data);
         Ok(())
     }
 }
@@ -725,7 +725,7 @@ impl Packet for ClientFinishConfigurationPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x03)];
 
-    fn decode(_: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(_: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self)
     }
 
@@ -748,7 +748,7 @@ impl Packet for ClientKeepAlivePacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x04)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self { id: r.i64("id")? })
     }
 
@@ -772,7 +772,7 @@ impl Packet for ClientPongPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x05)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self { id: r.i32("id")? })
     }
 
@@ -798,7 +798,7 @@ impl Packet for ClientResourcePackPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x06)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             uuid: r.uuid("uuid")?,
             result: r.property(version, "result")?,
@@ -826,7 +826,7 @@ impl Packet for ClientSelectKnownPacksPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x07)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             packs: r.array("packs", MAX_KNOWN_PACKS, |r| r.property(version, "pack"))?,
         })
@@ -846,7 +846,7 @@ impl Packet for ClientSelectKnownPacksPacket {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientCustomClickActionPacket {
     /// The identifier of the action that was clicked.
-    pub id: String,
+    pub id: ByteString,
     /// The data of the action, absent if the click carried none.
     pub payload: Option<Nbt>,
 }
@@ -856,14 +856,15 @@ impl Packet for ClientCustomClickActionPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_21_6, 0x08)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         let id = r.string("id", MAX_IDENTIFIER_LEN)?;
         // The payload is sized rather than optional, and an empty click is a lone `TAG_End`.
         let payload = r.bytes("payload", MAX_IDENTIFIER_LEN)?;
-        let payload = match payload {
+        let payload = match payload.as_ref() {
             [] | [0x00] => None,
-            payload => {
-                let mut sub = Reader::new(payload);
+            _ => {
+                // Shared, so the nested walk cuts its own fields out of the same frame.
+                let mut sub = Reader::new(payload.clone());
                 let value = sub.property(version, "payload")?;
                 // The size is the peer's claim about the value; a value that does not fill it is
                 // one of us misreading the other.
@@ -875,7 +876,7 @@ impl Packet for ClientCustomClickActionPacket {
     }
 
     fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> Result<(), WireError> {
-        w.string("id", self.id.as_str())?;
+        w.string("id", &self.id)?;
         match &self.payload {
             Some(payload) => {
                 let mut buf = bytes::BytesMut::new();
@@ -902,7 +903,7 @@ impl Packet for ClientAcceptCodeOfConductPacket {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_21_9, 0x09)];
 
-    fn decode(_: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(_: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self)
     }
 
@@ -924,7 +925,7 @@ mod tests {
         packet
             .encode(&mut Writer::new(&mut buf), version)
             .expect("encodes");
-        let mut r = Reader::new(&buf);
+        let mut r = Reader::new(buf.clone().freeze());
         let decoded = P::decode(&mut r, version).expect("decodes");
         r.finish(P::NAME).expect("consumes the whole payload");
         decoded
@@ -935,8 +936,8 @@ mod tests {
         // The four the router itself writes, in the order a transferred player meets them.
         let packet = ServerResourcePackPushPacket {
             uuid: Uuid::from_u128(1),
-            url: "https://cdn.justchunks.net/pack.zip".to_owned(),
-            hash: "0".repeat(40),
+            url: "https://cdn.justchunks.net/pack.zip".into(),
+            hash: "0".repeat(40).into(),
             forced: true,
             prompt_message: Some(TextComponent::text("Please install our pack")),
         };
@@ -946,7 +947,7 @@ mod tests {
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
 
         let packet = ServerTransferPacket {
-            host: "mc.justchunks.net".to_owned(),
+            host: "mc.justchunks.net".into(),
             port: 25_565,
         };
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
@@ -960,7 +961,7 @@ mod tests {
         // Below the threshold the field is not on the wire at all, so a client that does not send
         // it must not have one read for it -- and must not be written one either.
         let packet = ClientInformationPacket {
-            locale: "en_GB".to_owned(),
+            locale: "en_GB".into(),
             view_distance: 12,
             chat_mode: ChatMode::Enabled,
             chat_colors: true,
@@ -999,14 +1000,14 @@ mod tests {
         // last field: the shapes a length-prefixed walk can get wrong.
         let packet = ServerUpdateTagsPacket {
             registries: vec![TagRegistry {
-                registry: "minecraft:block".to_owned(),
+                registry: "minecraft:block".into(),
                 tags: vec![
                     Tag {
-                        name: "minecraft:climbable".to_owned(),
+                        name: "minecraft:climbable".into(),
                         entries: vec![1, 2, 3],
                     },
                     Tag {
-                        name: "minecraft:wool".to_owned(),
+                        name: "minecraft:wool".into(),
                         entries: vec![],
                     },
                 ],
@@ -1015,14 +1016,14 @@ mod tests {
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
 
         let packet = ServerRegistryDataPacket {
-            registry: "minecraft:dimension_type".to_owned(),
+            registry: "minecraft:dimension_type".into(),
             entries: vec![
                 RegistryEntry {
-                    id: "minecraft:overworld".to_owned(),
+                    id: "minecraft:overworld".into(),
                     data: Some(Nbt(nbt!({"natural": 1i8}))),
                 },
                 RegistryEntry {
-                    id: "minecraft:the_nether".to_owned(),
+                    id: "minecraft:the_nether".into(),
                     data: None,
                 },
             ],
@@ -1033,11 +1034,11 @@ mod tests {
             links: vec![
                 ServerLink {
                     label: ServerLinkLabel::BuiltIn(ServerLinkType::BugReport),
-                    url: "https://justchunks.net/bugs".to_owned(),
+                    url: "https://justchunks.net/bugs".into(),
                 },
                 ServerLink {
                     label: ServerLinkLabel::Custom(TextComponent::text("Discord")),
-                    url: "https://justchunks.net/discord".to_owned(),
+                    url: "https://justchunks.net/discord".into(),
                 },
             ],
         };
@@ -1047,13 +1048,13 @@ mod tests {
     #[test]
     fn a_click_without_a_payload_is_a_lone_end_tag() {
         let packet = ClientCustomClickActionPacket {
-            id: "justchunks:queue".to_owned(),
+            id: "justchunks:queue".into(),
             payload: None,
         };
         assert_eq!(round_trip(&packet, versions::V1_21_6), packet);
 
         let packet = ClientCustomClickActionPacket {
-            id: "justchunks:queue".to_owned(),
+            id: "justchunks:queue".into(),
             payload: Some(Nbt(nbt!({"server": "lobby"}))),
         };
         assert_eq!(round_trip(&packet, versions::V1_21_6), packet);
@@ -1062,14 +1063,14 @@ mod tests {
     #[test]
     fn a_cookie_the_client_does_not_have_costs_one_byte() {
         let packet = ClientCookieResponsePacket {
-            key: "justchunks:session".to_owned(),
+            key: "justchunks:session".into(),
             payload: None,
         };
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
 
         let packet = ClientCookieResponsePacket {
-            key: "justchunks:session".to_owned(),
-            payload: Some(vec![0x01, 0x02, 0x03]),
+            key: "justchunks:session".into(),
+            payload: Some(Bytes::from_static(&[0x01, 0x02, 0x03])),
         };
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
 
@@ -1082,8 +1083,8 @@ mod tests {
     fn a_plugin_message_keeps_whatever_is_left_of_the_frame() {
         // The one field with no length of its own: it is whatever the frame did not account for.
         let packet = ClientCustomPayloadPacket {
-            channel: "minecraft:brand".to_owned(),
-            data: b"vanilla".to_vec(),
+            channel: "minecraft:brand".into(),
+            data: Bytes::from_static(b"vanilla"),
         };
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
     }

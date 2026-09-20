@@ -1,13 +1,14 @@
 use crate::common::Phase;
 use crate::common::ProtocolVersion;
 use crate::connection::{ConnRef, ConnectionError, DispatchError};
+use bytes::Bytes;
 use futures::future::BoxFuture;
 use std::sync::Arc;
 use tracing::warn;
 
 /// The dispatch handler type with an erased packet type.
 pub type ErasedHandler<S> = Box<
-    dyn for<'a> Fn(ConnRef<'a, S>, &[u8]) -> BoxFuture<'a, Result<(), DispatchError>> + Send + Sync,
+    dyn for<'a> Fn(ConnRef<'a, S>, Bytes) -> BoxFuture<'a, Result<(), DispatchError>> + Send + Sync,
 >;
 
 /// The open handler type, called once before the connection reads or writes anything.

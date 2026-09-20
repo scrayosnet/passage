@@ -5,6 +5,7 @@
 //! field that only exists above a threshold, a packet that does not exist below one, and a phase
 //! where both directions claim the same ID.
 
+use bytestring::ByteString;
 use passage_core::wire::{Reader, WireResult, Writer};
 use passage_core::{Packet, Phase, ProtocolVersion, versions};
 use uuid::Uuid;
@@ -23,7 +24,7 @@ pub enum Intent {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Handshake {
     pub version: ProtocolVersion,
-    pub host: String,
+    pub host: ByteString,
     pub port: u16,
     pub intent: Intent,
 }
@@ -38,7 +39,7 @@ impl Handshake {
     pub fn to(host: &str, version: ProtocolVersion, intent: Intent) -> Self {
         Self {
             version,
-            host: host.to_owned(),
+            host: host.into(),
             port: 25_565,
             intent,
         }
@@ -50,7 +51,7 @@ impl Packet for Handshake {
     const PHASE: Phase = Phase::Handshake;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
-    fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+    fn decode(r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
         Ok(Self {
             version: ProtocolVersion::new(r.var_int("protocol_version")?),
             host: r.string("server_address", 255)?,
@@ -84,7 +85,7 @@ impl Packet for StatusRequest {
     const PHASE: Phase = Phase::Status;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
-    fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+    fn decode(_r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
         Ok(Self)
     }
 
@@ -96,14 +97,12 @@ impl Packet for StatusRequest {
 /// The answer to a [`StatusRequest`]. Claims the same ID in the same phase, in the other direction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StatusResponse {
-    pub body: String,
+    pub body: ByteString,
 }
 
 impl StatusResponse {
     pub fn text(body: &str) -> Self {
-        Self {
-            body: body.to_owned(),
-        }
+        Self { body: body.into() }
     }
 }
 
@@ -112,7 +111,7 @@ impl Packet for StatusResponse {
     const PHASE: Phase = Phase::Status;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
-    fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+    fn decode(r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
         Ok(Self {
             body: r.string("body", 32_000)?,
         })
@@ -134,7 +133,7 @@ impl Packet for Ping {
     const PHASE: Phase = Phase::Status;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x01)];
 
-    fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+    fn decode(r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
         Ok(Self {
             payload: r.i64("payload")?,
         })
@@ -157,7 +156,7 @@ impl Packet for Pong {
     const PHASE: Phase = Phase::Status;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x01)];
 
-    fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+    fn decode(r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
         Ok(Self {
             payload: r.i64("payload")?,
         })
@@ -172,14 +171,14 @@ impl Packet for Pong {
 /// Starts a login.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoginStart {
-    pub user_name: String,
+    pub user_name: ByteString,
     pub user_id: Uuid,
 }
 
 impl LoginStart {
     pub fn named(user_name: &str) -> Self {
         Self {
-            user_name: user_name.to_owned(),
+            user_name: user_name.into(),
             user_id: Uuid::nil(),
         }
     }
@@ -190,7 +189,7 @@ impl Packet for LoginStart {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
-    fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+    fn decode(r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
         Ok(Self {
             user_name: r.string("user_name", 16)?,
             user_id: r.uuid("user_id")?,
@@ -208,7 +207,7 @@ impl Packet for LoginStart {
 /// at the same threshold. An old client must not be sent either.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoginSuccess {
-    pub user_name: String,
+    pub user_name: ByteString,
     pub session_id: Option<Uuid>,
 }
 
@@ -218,7 +217,7 @@ impl Packet for LoginSuccess {
     const IDS: &'static [(ProtocolVersion, i32)] =
         &[(versions::V26_1, 0x02), (ProtocolVersion::UNKNOWN, 0x01)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> WireResult<Self> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> WireResult<Self> {
         Ok(Self {
             user_name: r.string("user_name", 16)?,
             session_id: r.gated(version.at_least(versions::V26_1), |r| r.uuid("session_id"))?,
@@ -244,7 +243,7 @@ impl Packet for LoginAcknowledged {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x03)];
 
-    fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+    fn decode(_r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
         Ok(Self)
     }
 
@@ -257,13 +256,13 @@ impl Packet for LoginAcknowledged {
 /// sent to is one whose version resolves nothing else.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Disconnect {
-    pub reason: String,
+    pub reason: ByteString,
 }
 
 impl Disconnect {
     pub fn text(reason: &str) -> Self {
         Self {
-            reason: reason.to_owned(),
+            reason: reason.into(),
         }
     }
 }
@@ -273,7 +272,7 @@ impl Packet for Disconnect {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
-    fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+    fn decode(r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
         Ok(Self {
             reason: r.string("reason", 256)?,
         })
@@ -288,7 +287,7 @@ impl Packet for Disconnect {
 /// below that threshold is a mistake the codec can catch.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Transfer {
-    pub host: String,
+    pub host: ByteString,
     pub port: u16,
 }
 
@@ -297,7 +296,7 @@ impl Packet for Transfer {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V1_20_5, 0x0B)];
 
-    fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+    fn decode(r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
         Ok(Self {
             host: r.string("host", 255)?,
             port: r.u16("port")?,
@@ -322,7 +321,7 @@ impl Packet for KeepAlive {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x04)];
 
-    fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+    fn decode(r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
         Ok(Self { id: r.i64("id")? })
     }
 
@@ -343,7 +342,7 @@ impl Packet for KeepAliveResponse {
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x04)];
 
-    fn decode(r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+    fn decode(r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
         Ok(Self { id: r.i64("id")? })
     }
 

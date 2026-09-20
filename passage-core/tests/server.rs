@@ -6,6 +6,7 @@
 
 mod common;
 
+use bytes::Bytes;
 use common::packets::*;
 use common::*;
 use futures::future::BoxFuture;
@@ -272,7 +273,7 @@ impl Dispatcher<Notes> for Panicking {
         &self,
         _conn: ConnRef<'a, Notes>,
         _id: i32,
-        _payload: &[u8],
+        _payload: Bytes,
     ) -> BoxFuture<'a, Result<(), DispatchError>> {
         panic!("a handler bug");
     }

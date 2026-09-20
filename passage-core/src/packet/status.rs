@@ -1,6 +1,7 @@
 use crate::common::VarInt;
 use crate::wire::{Reader, WireError, Writer};
 use crate::{Packet, Phase, ProtocolVersion};
+use bytestring::ByteString;
 use serde::Serialize;
 
 /// The [`ServerStatusResponsePacket`].
@@ -9,7 +10,7 @@ use serde::Serialize;
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ServerStatusResponsePacket {
     /// The JSON response body that contains all self-reported server metadata.
-    pub body: String,
+    pub body: ByteString,
 }
 
 impl ServerStatusResponsePacket {
@@ -17,7 +18,7 @@ impl ServerStatusResponsePacket {
     /// conform to the packet body.
     pub fn try_from<T: Serialize>(status: &T) -> Result<Self, serde_json::Error> {
         Ok(Self {
-            body: serde_json::to_string(status)?,
+            body: serde_json::to_string(status)?.into(),
         })
     }
 }
@@ -27,14 +28,14 @@ impl Packet for ServerStatusResponsePacket {
     const PHASE: Phase = Phase::Status;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             body: r.string("body", 32767)?,
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.string("body", self.body.as_str())?;
+        w.string("body", &self.body)?;
         Ok(())
     }
 }
@@ -53,7 +54,7 @@ impl Packet for ServerPongResponsePacket {
     const PHASE: Phase = Phase::Status;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(ProtocolVersion::UNKNOWN, 0x01)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             payload: r.u64("payload")?,
         })
@@ -76,7 +77,7 @@ impl Packet for ClientStatusRequestPacket {
     const PHASE: Phase = Phase::Status;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
-    fn decode(_: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(_: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self)
     }
 
@@ -99,7 +100,7 @@ impl Packet for ClientPingRequestPacket {
     const PHASE: Phase = Phase::Status;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(ProtocolVersion::UNKNOWN, 0x01)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             payload: r.u64("payload")?,
         })

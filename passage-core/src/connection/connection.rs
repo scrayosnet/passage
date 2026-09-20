@@ -343,7 +343,7 @@ where
                     let Some(frame) = frame.transpose()? else {
                         return Err(ConnectionError::peer());
                     };
-                    let handled = self.dispatcher.on_frame(conn, frame.id, &frame.payload);
+                    let handled = self.dispatcher.on_frame(conn, frame.id, frame.payload);
                     start(handled, tasks).await?
                 },
             }

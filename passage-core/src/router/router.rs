@@ -6,6 +6,7 @@ use crate::router::{
 };
 use crate::wire::{Options, Reader};
 use anyhow::anyhow;
+use bytes::Bytes;
 use std::sync::Arc;
 
 /// The most packets a router can hold, bounded by the table's index width.
@@ -21,10 +22,12 @@ fn malformed(packet: &'static str, what: &str, cause: &dyn std::fmt::Display) ->
 
 /// Decodes one packet from a frame payload, which leads with the ID varint it was routed by.
 ///
-/// This runs before the handler's future is built, so the borrow of the connection's read buffer
-/// ends here and nothing that outlives the dispatch call can be holding it.
+/// This runs before the handler's future is built, so nothing that outlives the dispatch call is
+/// left pointing at the connection's read buffer. What the packet keeps is a slice of the frame
+/// rather than a copy of it, so a field the handler still owns after the dispatch call keeps the
+/// frame alive instead of an allocation of its own.
 fn decode<P: Packet>(
-    payload: &[u8],
+    payload: Bytes,
     version: ProtocolVersion,
     options: Options,
 ) -> Result<P, DispatchError> {
@@ -320,7 +323,7 @@ mod tests {
         const PHASE: Phase = Phase::Status;
         const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
-        fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+        fn decode(_r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self)
         }
 
@@ -338,7 +341,7 @@ mod tests {
         const IDS: &'static [(ProtocolVersion, i32)] =
             &[(versions::V26_1, 0x05), (versions::V1_20_5, 0x02)];
 
-        fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+        fn decode(_r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self)
         }
 
@@ -356,7 +359,7 @@ mod tests {
         const IDS: &'static [(ProtocolVersion, i32)] =
             &[(versions::V1_20_5, 0x40), (versions::V26_1, 0x41)];
 
-        fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+        fn decode(_r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self)
         }
 

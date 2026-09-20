@@ -13,6 +13,8 @@ use crate::common::{
 };
 use crate::wire::{Reader, WireError, Writer};
 use crate::{Packet, Phase, ProtocolVersion};
+use bytes::Bytes;
+use bytestring::ByteString;
 use uuid::Uuid;
 
 /// The [`ServerDisconnectPacket`].
@@ -21,7 +23,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ServerDisconnectPacket {
     /// The JSON text component explaining why the player was turned away.
-    pub reason: String,
+    pub reason: ByteString,
 }
 
 impl ServerDisconnectPacket {
@@ -33,7 +35,7 @@ impl ServerDisconnectPacket {
         // it as part of a larger document -- and a string cannot fail to serialise.
         let text = serde_json::Value::String(reason.into());
         Self {
-            reason: format!(r#"{{"text":{text}}}"#),
+            reason: format!(r#"{{"text":{text}}}"#).into(),
         }
     }
 }
@@ -45,14 +47,14 @@ impl Packet for ServerDisconnectPacket {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x00)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             reason: r.string("reason", MAX_COMPONENT_JSON_LEN)?,
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.string("reason", self.reason.as_str())?;
+        w.string("reason", &self.reason)?;
         Ok(())
     }
 }
@@ -63,11 +65,11 @@ impl Packet for ServerDisconnectPacket {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ServerEncryptionRequestPacket {
     /// The server ID that goes into the session hash, which is empty for every server since 1.7.
-    pub server_id: String,
+    pub server_id: ByteString,
     /// The DER-encoded public key the client encrypts the shared secret under.
-    pub public_key: Vec<u8>,
+    pub public_key: Bytes,
     /// The token the client has to return encrypted, proving it holds the shared secret.
-    pub verify_token: Vec<u8>,
+    pub verify_token: Bytes,
     /// Whether the client authenticates against the session server before answering.
     pub should_authenticate: bool,
 }
@@ -77,19 +79,19 @@ impl Packet for ServerEncryptionRequestPacket {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x01)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             server_id: r.string("server_id", MAX_SERVER_ID_LEN)?,
-            public_key: r.bytes("public_key", MAX_CRYPTO_BLOB_LEN)?.to_vec(),
-            verify_token: r.bytes("verify_token", MAX_CRYPTO_BLOB_LEN)?.to_vec(),
+            public_key: r.bytes("public_key", MAX_CRYPTO_BLOB_LEN)?,
+            verify_token: r.bytes("verify_token", MAX_CRYPTO_BLOB_LEN)?,
             should_authenticate: r.bool("should_authenticate")?,
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.string("server_id", self.server_id.as_str())?;
-        w.bytes("public_key", self.public_key.as_slice())?;
-        w.bytes("verify_token", self.verify_token.as_slice())?;
+        w.string("server_id", &self.server_id)?;
+        w.bytes("public_key", &self.public_key)?;
+        w.bytes("verify_token", &self.verify_token)?;
         w.bool(self.should_authenticate);
         Ok(())
     }
@@ -103,7 +105,7 @@ pub struct ServerLoginSuccessPacket {
     /// The unique identifier of the player, which the client takes as its own from here on.
     pub uuid: Uuid,
     /// The name of the player.
-    pub name: String,
+    pub name: ByteString,
     /// The signed properties of the profile, such as `textures`.
     pub properties: Vec<ProfileProperty>,
     /// Whether the client disconnects on any packet error, between 1.20.5 and 1.21.2. The vanilla
@@ -130,7 +132,7 @@ impl Packet for ServerLoginSuccessPacket {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x02)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             uuid: r.uuid("uuid")?,
             name: r.string("name", MAX_USERNAME_LEN)?,
@@ -146,7 +148,7 @@ impl Packet for ServerLoginSuccessPacket {
 
     fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> Result<(), WireError> {
         w.uuid(&self.uuid);
-        w.string("name", self.name.as_str())?;
+        w.string("name", &self.name)?;
         w.array("properties", &self.properties, |w, property| {
             w.property(version, "property", property)
         })?;
@@ -177,7 +179,7 @@ impl Packet for ServerSetCompressionPacket {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x03)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             threshold: r.var_int("threshold")?,
         })
@@ -197,9 +199,9 @@ pub struct ServerLoginPluginRequestPacket {
     /// The ID the client's answer refers back to.
     pub message_id: VarInt,
     /// The plugin channel the data belongs to.
-    pub channel: String,
+    pub channel: ByteString,
     /// The channel-specific data, which runs to the end of the packet.
-    pub data: Vec<u8>,
+    pub data: Bytes,
 }
 
 impl Packet for ServerLoginPluginRequestPacket {
@@ -207,18 +209,18 @@ impl Packet for ServerLoginPluginRequestPacket {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x04)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             message_id: r.var_int("message_id")?,
             channel: r.string("channel", MAX_IDENTIFIER_LEN)?,
-            data: r.pop_rest().to_vec(),
+            data: r.pop_rest(),
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
         w.var_int(self.message_id);
-        w.string("channel", self.channel.as_str())?;
-        w.raw(self.data.as_slice());
+        w.string("channel", &self.channel)?;
+        w.raw(&self.data);
         Ok(())
     }
 }
@@ -229,7 +231,7 @@ impl Packet for ServerLoginPluginRequestPacket {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ServerCookieRequestPacket {
     /// The identifier of the cookie.
-    pub key: String,
+    pub key: ByteString,
 }
 
 impl Packet for ServerCookieRequestPacket {
@@ -237,14 +239,14 @@ impl Packet for ServerCookieRequestPacket {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x05)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             key: r.string("key", MAX_IDENTIFIER_LEN)?,
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.string("key", self.key.as_str())?;
+        w.string("key", &self.key)?;
         Ok(())
     }
 }
@@ -255,7 +257,7 @@ impl Packet for ServerCookieRequestPacket {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ClientLoginStartPacket {
     /// The name the player claims, which is only theirs once the session server says so.
-    pub name: String,
+    pub name: ByteString,
     /// The unique identifier the player claims, under the same caveat.
     pub uuid: Uuid,
 }
@@ -265,7 +267,7 @@ impl Packet for ClientLoginStartPacket {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x00)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             name: r.string("name", MAX_USERNAME_LEN)?,
             uuid: r.uuid("uuid")?,
@@ -273,7 +275,7 @@ impl Packet for ClientLoginStartPacket {
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.string("name", self.name.as_str())?;
+        w.string("name", &self.name)?;
         w.uuid(&self.uuid);
         Ok(())
     }
@@ -285,9 +287,9 @@ impl Packet for ClientLoginStartPacket {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ClientEncryptionResponsePacket {
     /// The shared secret, encrypted under the public key of the request.
-    pub shared_secret: Vec<u8>,
+    pub shared_secret: Bytes,
     /// The verify token of the request, encrypted under the same key.
-    pub verify_token: Vec<u8>,
+    pub verify_token: Bytes,
 }
 
 impl Packet for ClientEncryptionResponsePacket {
@@ -295,16 +297,16 @@ impl Packet for ClientEncryptionResponsePacket {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x01)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
-            shared_secret: r.bytes("shared_secret", MAX_CRYPTO_BLOB_LEN)?.to_vec(),
-            verify_token: r.bytes("verify_token", MAX_CRYPTO_BLOB_LEN)?.to_vec(),
+            shared_secret: r.bytes("shared_secret", MAX_CRYPTO_BLOB_LEN)?,
+            verify_token: r.bytes("verify_token", MAX_CRYPTO_BLOB_LEN)?,
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.bytes("shared_secret", self.shared_secret.as_slice())?;
-        w.bytes("verify_token", self.verify_token.as_slice())?;
+        w.bytes("shared_secret", &self.shared_secret)?;
+        w.bytes("verify_token", &self.verify_token)?;
         Ok(())
     }
 }
@@ -318,7 +320,7 @@ pub struct ClientLoginPluginResponsePacket {
     pub message_id: VarInt,
     /// The answer, which runs to the end of the packet, and is absent if the client did not
     /// understand the channel -- which is what the vanilla client always says.
-    pub data: Option<Vec<u8>>,
+    pub data: Option<Bytes>,
 }
 
 impl Packet for ClientLoginPluginResponsePacket {
@@ -326,10 +328,10 @@ impl Packet for ClientLoginPluginResponsePacket {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x02)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             message_id: r.var_int("message_id")?,
-            data: r.optional("data", |r| Ok(r.pop_rest().to_vec()))?,
+            data: r.optional("data", |r| Ok(r.pop_rest()))?,
         })
     }
 
@@ -354,7 +356,7 @@ impl Packet for ClientLoginAcknowledgedPacket {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x03)];
 
-    fn decode(_: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(_: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self)
     }
 
@@ -369,9 +371,9 @@ impl Packet for ClientLoginAcknowledgedPacket {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ClientCookieResponsePacket {
     /// The identifier of the cookie.
-    pub key: String,
+    pub key: ByteString,
     /// The data of the cookie, absent if the client has none stored.
-    pub payload: Option<Vec<u8>>,
+    pub payload: Option<Bytes>,
 }
 
 impl Packet for ClientCookieResponsePacket {
@@ -379,17 +381,15 @@ impl Packet for ClientCookieResponsePacket {
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x04)];
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             key: r.string("key", MAX_IDENTIFIER_LEN)?,
-            payload: r.optional("payload", |r| {
-                Ok(r.bytes("payload", MAX_COOKIE_LEN)?.to_vec())
-            })?,
+            payload: r.optional("payload", |r| r.bytes("payload", MAX_COOKIE_LEN))?,
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
-        w.string("key", self.key.as_str())?;
+        w.string("key", &self.key)?;
         w.optional(self.payload.as_deref(), |w, payload| {
             w.bytes("payload", payload)
         })?;
@@ -408,7 +408,7 @@ mod tests {
         packet
             .encode(&mut Writer::new(&mut buf), version)
             .expect("encodes");
-        let mut r = Reader::new(&buf);
+        let mut r = Reader::new(buf.clone().freeze());
         let decoded = P::decode(&mut r, version).expect("decodes");
         r.finish(P::NAME).expect("consumes the whole payload");
         decoded
@@ -418,11 +418,11 @@ mod tests {
     fn profile() -> Profile {
         Profile {
             id: Uuid::from_u128(1),
-            name: "Notch".to_owned(),
+            name: "Notch".into(),
             properties: vec![ProfileProperty {
-                name: "textures".to_owned(),
-                value: "eyJ0aW1lc3RhbXAiOjF9".to_owned(),
-                signature: Some("c2lnbmF0dXJl".to_owned()),
+                name: "textures".into(),
+                value: "eyJ0aW1lc3RhbXAiOjF9".into(),
+                signature: Some("c2lnbmF0dXJl".into()),
             }],
             profile_actions: vec![],
         }
@@ -433,27 +433,27 @@ mod tests {
         // The exchange in the order a player meets it: the cookie Passage asks for, the encryption
         // handshake, and the profile that ends the phase.
         let packet = ClientLoginStartPacket {
-            name: "Notch".to_owned(),
+            name: "Notch".into(),
             uuid: Uuid::from_u128(1),
         };
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
 
         let packet = ServerCookieRequestPacket {
-            key: "justchunks:session".to_owned(),
+            key: "justchunks:session".into(),
         };
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
 
         let packet = ServerEncryptionRequestPacket {
-            server_id: String::new(),
-            public_key: vec![0x30, 0x81, 0x9F],
-            verify_token: vec![0xAA; 32],
+            server_id: ByteString::new(),
+            public_key: Bytes::from_static(&[0x30, 0x81, 0x9F]),
+            verify_token: Bytes::from(vec![0xAA; 32]),
             should_authenticate: true,
         };
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
 
         let packet = ClientEncryptionResponsePacket {
-            shared_secret: vec![0x01; 128],
-            verify_token: vec![0x02; 128],
+            shared_secret: Bytes::from(vec![0x01; 128]),
+            verify_token: Bytes::from(vec![0x02; 128]),
         };
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
 
@@ -489,8 +489,8 @@ mod tests {
         assert_eq!(decoded.properties, profile.properties);
         let packet = ServerLoginSuccessPacket {
             properties: vec![ProfileProperty {
-                name: "textures".to_owned(),
-                value: "eyJ0aW1lc3RhbXAiOjF9".to_owned(),
+                name: "textures".into(),
+                value: "eyJ0aW1lc3RhbXAiOjF9".into(),
                 signature: None,
             }],
             ..packet
@@ -563,14 +563,14 @@ mod tests {
 
         let packet = ClientLoginPluginResponsePacket {
             message_id: 1,
-            data: Some(b"justchunks".to_vec()),
+            data: Some(Bytes::from_static(b"justchunks")),
         };
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
 
         let packet = ServerLoginPluginRequestPacket {
             message_id: 1,
-            channel: "justchunks:queue".to_owned(),
-            data: b"justchunks".to_vec(),
+            channel: "justchunks:queue".into(),
+            data: Bytes::from_static(b"justchunks"),
         };
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
     }
@@ -578,14 +578,14 @@ mod tests {
     #[test]
     fn a_cookie_the_client_does_not_have_costs_one_byte() {
         let packet = ClientCookieResponsePacket {
-            key: "justchunks:session".to_owned(),
+            key: "justchunks:session".into(),
             payload: None,
         };
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
 
         let packet = ClientCookieResponsePacket {
-            key: "justchunks:session".to_owned(),
-            payload: Some(vec![0x01, 0x02, 0x03]),
+            key: "justchunks:session".into(),
+            payload: Some(Bytes::from_static(&[0x01, 0x02, 0x03])),
         };
         assert_eq!(round_trip(&packet, versions::V1_20_5), packet);
     }

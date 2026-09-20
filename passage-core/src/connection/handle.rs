@@ -280,7 +280,7 @@ mod tests {
         const PHASE: Phase = Phase::Configuration;
         const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V26_1, 0x0B)];
 
-        fn decode(_r: &mut Reader<'_>, _version: ProtocolVersion) -> WireResult<Self> {
+        fn decode(_r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self)
         }
 

@@ -1,6 +1,7 @@
 use crate::ProtocolVersion;
 use crate::common::{MAX_PROPERTY_NAME_LEN, MAX_PROPERTY_SIGNATURE_LEN, MAX_PROPERTY_VALUE_LEN};
 use crate::wire::{Property, Reader, WireError, Writer};
+use bytestring::ByteString;
 use num_bigint::BigInt;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
@@ -21,13 +22,13 @@ pub struct Profile {
     /// The unique identifier of the Minecraft user profile.
     pub id: Uuid,
     /// The current visual name of the Minecraft user profile.
-    pub name: String,
+    pub name: ByteString,
     /// The currently assigned properties of the Minecraft user profile.
     #[serde(default)]
     pub properties: Vec<ProfileProperty>,
     /// The pending imposed moderative actions of the Minecraft user profile.
     #[serde(default)]
-    pub profile_actions: Vec<String>,
+    pub profile_actions: Vec<ByteString>,
 }
 
 /// Represents a single property of a Minecraft user profile.
@@ -43,12 +44,12 @@ pub struct Profile {
 #[serde(rename_all = "camelCase")]
 pub struct ProfileProperty {
     /// The unique, identifiable name of the profile property.
-    pub name: String,
+    pub name: ByteString,
     /// The base64 encoded value of the profile property.
-    pub value: String,
+    pub value: ByteString,
     /// The base64 encoded signature of the profile property.
     /// Only provided if `?unsigned=false` is appended to url
-    pub signature: Option<String>,
+    pub signature: Option<ByteString>,
 }
 
 /// On the wire a property is its name, its value, and the signature the session server put on it --
@@ -56,7 +57,7 @@ pub struct ProfileProperty {
 impl Property for ProfileProperty {
     const NAME: &'static str = "profile_property";
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion, _: &'static str) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, _: ProtocolVersion, _: &'static str) -> Result<Self, WireError> {
         Ok(Self {
             name: r.string("name", MAX_PROPERTY_NAME_LEN)?,
             value: r.string("value", MAX_PROPERTY_VALUE_LEN)?,
@@ -72,8 +73,8 @@ impl Property for ProfileProperty {
         _: ProtocolVersion,
         _: &'static str,
     ) -> Result<(), WireError> {
-        w.string("name", self.name.as_str())?;
-        w.string("value", self.value.as_str())?;
+        w.string("name", &self.name)?;
+        w.string("value", &self.value)?;
         w.optional(self.signature.as_deref(), |w, signature| {
             w.string("signature", signature)
         })?;

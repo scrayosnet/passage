@@ -152,8 +152,11 @@ impl<'a> Writer<'a> {
         Ok(())
     }
 
-    // TODO use bytestring instead
     /// Writes a length-prefixed string.
+    ///
+    /// Takes a `&str` rather than an owned string, so a
+    /// [`ByteString`](bytestring::ByteString) field is written through its deref and neither side
+    /// of a round trip allocates.
     ///
     /// # Errors
     ///

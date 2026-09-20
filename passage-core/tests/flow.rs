@@ -164,7 +164,7 @@ async fn slow_transfer(conn: ConnRef<'_, Notes>, packet: LoginStart) -> Result<(
     // One closure, so a keep-alive cannot land between the transfer and the close.
     conn.with(|c| {
         c.send(Transfer {
-            host: "backend-1".to_owned(),
+            host: "backend-1".into(),
             port: 25_565,
         })?;
         c.close();
@@ -236,7 +236,7 @@ async fn a_packet_that_does_not_exist_in_the_peers_version_is_refused() {
         .handle::<Handshake>(on_handshake)
         .handle::<LoginStart>(|conn, _packet| {
             conn.send(Transfer {
-                host: "backend-1".to_owned(),
+                host: "backend-1".into(),
                 port: 25_565,
             })?;
             Ok(())
@@ -417,7 +417,7 @@ async fn an_answer_that_cannot_be_sent_does_not_replace_the_reason() {
         .on_error(errors(|conn, _error| {
             // `Transfer` does not exist at the version this connection never got past.
             conn.send(Transfer {
-                host: "nowhere".to_owned(),
+                host: "nowhere".into(),
                 port: 1,
             })?;
             Ok(())

@@ -1,6 +1,7 @@
 //! This module contains the adapter logic and the individual implementations of the adapters with
 //! different responsibilities.
 
+use bytestring::ByteString;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
 use std::collections::HashMap;
@@ -45,8 +46,8 @@ pub struct Client {
     /// The pretended protocol version.
     pub protocol_version: Protocol,
 
-    /// The pretended server address.
-    pub server_address: String,
+    /// The pretended server address, as it came off the handshake.
+    pub server_address: ByteString,
 
     /// The pretended server port.
     pub server_port: u16,
@@ -59,7 +60,7 @@ impl Default for Client {
     fn default() -> Self {
         Self {
             protocol_version: 775,
-            server_address: "mc.justchunks.net".to_owned(),
+            server_address: "mc.justchunks.net".into(),
             server_port: 25565,
             address: SocketAddr::new("127.0.0.1".parse().unwrap(), 0),
         }

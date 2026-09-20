@@ -1,5 +1,6 @@
 use crate::ProtocolVersion;
 use crate::wire::{Property, Reader, WireError, WireResult, Writer};
+use bytestring::ByteString;
 use fastnbt::{DeOpts, SerOpts, Value};
 use std::io::Cursor;
 
@@ -19,7 +20,7 @@ pub struct Nbt(pub Value);
 impl Property for Nbt {
     const NAME: &'static str = "nbt";
 
-    fn decode(r: &mut Reader<'_>, _: ProtocolVersion, field: &'static str) -> WireResult<Self> {
+    fn decode(r: &mut Reader, _: ProtocolVersion, field: &'static str) -> WireResult<Self> {
         // The NBT codec reads exactly the bytes the value occupies and nothing beyond it, so the
         // cursor's position is how far the field reached into the payload.
         let mut cursor = Cursor::new(r.peek_rest());
@@ -29,7 +30,7 @@ impl Property for Nbt {
                 message: err.to_string(),
             })?;
         // `position` is bounded by the slice it read from, so the cast cannot lose anything.
-        r.take(field, cursor.position() as usize)?;
+        r.skip(field, cursor.position() as usize)?;
         Ok(Self(value))
     }
 
@@ -57,12 +58,12 @@ impl Property for Nbt {
 /// piece of text, and a compound for anything with formatting. A value that does not start with `{`
 /// is written as the former and read back as itself; everything else round trips through JSON.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct TextComponent(pub String);
+pub struct TextComponent(pub ByteString);
 
 impl TextComponent {
     /// Creates a component from literal text, which is written as a bare `TAG_String`.
     #[must_use]
-    pub fn text(text: impl Into<String>) -> Self {
+    pub fn text(text: impl Into<ByteString>) -> Self {
         Self(text.into())
     }
 }
@@ -75,6 +76,12 @@ impl From<&str> for TextComponent {
 
 impl From<String> for TextComponent {
     fn from(text: String) -> Self {
+        Self(text.into())
+    }
+}
+
+impl From<ByteString> for TextComponent {
+    fn from(text: ByteString) -> Self {
         Self(text)
     }
 }
@@ -82,26 +89,23 @@ impl From<String> for TextComponent {
 impl Property for TextComponent {
     const NAME: &'static str = "text_component";
 
-    fn decode(
-        r: &mut Reader<'_>,
-        version: ProtocolVersion,
-        field: &'static str,
-    ) -> WireResult<Self> {
+    fn decode(r: &mut Reader, version: ProtocolVersion, field: &'static str) -> WireResult<Self> {
         if r.peek_rest().first() != Some(&TAG_STRING) {
             let Nbt(value) = Nbt::decode(r, version, field)?;
             let json = serde_json::to_string(&value).map_err(|err| WireError::Nbt {
                 field,
                 message: err.to_string(),
             })?;
-            return Ok(Self(json));
+            return Ok(Self(json.into()));
         }
 
         // A literal component is short-cut rather than walked, because it is the one the router
-        // sends for every disconnect reason it writes itself.
+        // sends for every disconnect reason it writes itself. The text is cut from the frame, so a
+        // reason that arrives is as cheap as one we wrote.
         r.u8(field)?;
         let length = r.u16(field)? as usize;
         let bytes = r.take(field, length)?;
-        String::from_utf8(bytes.to_vec())
+        ByteString::try_from(bytes)
             .map(Self)
             .map_err(|_| WireError::Utf8 { field })
     }
@@ -139,7 +143,7 @@ impl Property for TextComponent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::BytesMut;
+    use bytes::{Bytes, BytesMut};
 
     /// Round trips a property through the writer and the reader it will meet.
     fn round_trip<T: Property + std::fmt::Debug>(value: &T) -> T {
@@ -151,7 +155,7 @@ mod tests {
                 "value",
             )
             .expect("encodes");
-        let mut r = Reader::new(&buf);
+        let mut r = Reader::new(buf.clone().freeze());
         let decoded = T::decode(&mut r, ProtocolVersion::UNKNOWN, "value").expect("decodes");
         r.finish("Test").expect("consumes the whole payload");
         decoded
@@ -175,7 +179,7 @@ mod tests {
 
     #[test]
     fn a_formatted_component_round_trips_through_json() {
-        let component = TextComponent(r#"{"text":"Server full"}"#.to_owned());
+        let component = TextComponent(r#"{"text":"Server full"}"#.into());
         let decoded = round_trip(&component);
         // The compound is not ordered, so the JSON is compared by value rather than by text.
         let expected: serde_json::Value = serde_json::from_str(&component.0).expect("is JSON");
@@ -194,7 +198,7 @@ mod tests {
             .expect("encodes");
         w.string("url", "https://justchunks.net").expect("encodes");
 
-        let mut r = Reader::new(&buf);
+        let mut r = Reader::new(buf.clone().freeze());
         let label: TextComponent = r
             .property(ProtocolVersion::UNKNOWN, "label")
             .expect("decodes");
@@ -210,7 +214,7 @@ mod tests {
     fn a_payload_that_is_not_nbt_names_the_field_it_broke() {
         // 0x7F is not a tag, so the walk fails before it allocates anything.
         let err = Nbt::decode(
-            &mut Reader::new(&[0x7F, 0x00]),
+            &mut Reader::new(Bytes::from_static(&[0x7F, 0x00])),
             ProtocolVersion::UNKNOWN,
             "dialog",
         )

@@ -1,6 +1,7 @@
 use crate::common::{State, VarInt};
 use crate::wire::{Reader, WireError, Writer};
 use crate::{Packet, Phase, ProtocolVersion};
+use bytestring::ByteString;
 
 /// The [`ClientIntentionPacket`].
 ///
@@ -10,7 +11,7 @@ pub struct ClientIntentionPacket {
     /// The pretended protocol version.
     pub protocol_version: VarInt,
     /// The pretended server address.
-    pub server_address: String,
+    pub server_address: ByteString,
     /// The pretended server port.
     pub server_port: u16,
     /// The protocol states to initiate.
@@ -22,7 +23,7 @@ impl Packet for ClientIntentionPacket {
     const PHASE: Phase = Phase::Handshake;
     const IDS: &'static [(ProtocolVersion, i32)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
-    fn decode(r: &mut Reader<'_>, version: ProtocolVersion) -> Result<Self, WireError> {
+    fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
             protocol_version: r.var_int("protocol_version")?,
             server_address: r.string("server_address", 255)?,
@@ -33,7 +34,7 @@ impl Packet for ClientIntentionPacket {
 
     fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> Result<(), WireError> {
         w.var_int(self.protocol_version);
-        w.string("server_address", self.server_address.as_str())?;
+        w.string("server_address", &self.server_address)?;
         w.u16(self.server_port);
         w.property(version, "next_state", &self.next_state)?;
         Ok(())

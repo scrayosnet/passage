@@ -82,7 +82,7 @@ impl RawClient {
             P::id(self.version),
             frame.id,
         );
-        let mut reader = Reader::new(&frame.payload).with_options(self.options);
+        let mut reader = Reader::new(frame.payload.clone()).with_options(self.options);
         reader
             .var_int("packet_id")
             .expect("the ID leads the payload");
