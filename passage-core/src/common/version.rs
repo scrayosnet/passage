@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// The bit a snapshot sets in its protocol number.
@@ -6,7 +7,9 @@ const SNAPSHOT_BIT: i32 = 0x4000_0000;
 /// A Minecraft (Java) protocol version, as sent in the handshake `intention` packet. The handshake
 /// protocol version is compared against a set of breakpoints which define breaking changes in the
 /// protocol that have to be handled by the wire codec.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+#[derive(
+    Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Deserialize, Serialize,
+)]
 pub struct ProtocolVersion(i32);
 
 impl ProtocolVersion {

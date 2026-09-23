@@ -1,3 +1,5 @@
+use crate::common::State;
+
 /// The protocol phase a packet belongs to.
 ///
 /// The phase is part of a packet's identity: IDs are only unique within a phase and direction.
@@ -36,6 +38,16 @@ impl Phase {
     #[must_use]
     pub const fn index(self) -> usize {
         self as usize
+    }
+}
+
+impl From<State> for Phase {
+    fn from(value: State) -> Self {
+        match value {
+            State::Status => Phase::Status,
+            State::Login => Phase::Login,
+            State::Transfer => Phase::Configuration,
+        }
     }
 }
 

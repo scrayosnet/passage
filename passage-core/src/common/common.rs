@@ -3,6 +3,7 @@ use crate::common::{Nbt, TextComponent};
 use crate::wire::{Property, Reader, WireError, Writer};
 use bytestring::ByteString;
 use std::fmt::Display;
+use bytes::Bytes;
 
 /// The maximum length of an identifier (a namespaced key).
 pub(crate) const MAX_IDENTIFIER_LEN: usize = 32_767;
@@ -68,7 +69,7 @@ pub(crate) const MAX_REPORT_DETAILS: usize = 32;
 pub(crate) const MAX_SERVER_LINKS: usize = 256;
 
 /// A 32-byte random token exchanged during the encryption handshake to verify the client.
-pub type VerifyToken = [u8; 32];
+pub type VerifyToken = Bytes;
 
 /// Variable-length integer as defined by the Minecraft protocol (encoded as 1–5 bytes on the wire).
 pub type VarInt = i32;

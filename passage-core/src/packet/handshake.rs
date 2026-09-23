@@ -9,7 +9,7 @@ use bytestring::ByteString;
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ClientIntentionPacket {
     /// The pretended protocol version.
-    pub protocol_version: VarInt,
+    pub protocol_version: ProtocolVersion,
     /// The pretended server address.
     pub server_address: ByteString,
     /// The pretended server port.
@@ -25,7 +25,7 @@ impl Packet for ClientIntentionPacket {
 
     fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
-            protocol_version: r.var_int("protocol_version")?,
+            protocol_version: r.var_int("protocol_version")?.into(),
             server_address: r.string("server_address", 255)?,
             server_port: r.u16("server_port")?,
             next_state: r.property(version, "next_state")?,
@@ -33,7 +33,7 @@ impl Packet for ClientIntentionPacket {
     }
 
     fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> Result<(), WireError> {
-        w.var_int(self.protocol_version);
+        w.var_int(self.protocol_version.get());
         w.string("server_address", &self.server_address)?;
         w.u16(self.server_port);
         w.property(version, "next_state", &self.next_state)?;

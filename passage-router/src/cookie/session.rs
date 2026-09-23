@@ -1,7 +1,9 @@
-use crate::cookie::Cookie;
+use crate::cookie::{Cookie, CookieError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tokio_util::bytes::{BufMut, BytesMut};
 use uuid::Uuid;
+use passage_core::wire::Bytes;
 
 /// The session cookie key.
 pub const SESSION_COOKIE_KEY: &str = "passage:session";
@@ -10,7 +12,7 @@ pub const SESSION_COOKIE_KEY: &str = "passage:session";
 /// is not signed and may be tampered with by the client. Instead, it is meant to store additional
 /// information supplementing the [`AuthCookie`](super::auth::AuthCookie) without the additional signature bytes and being
 /// configurable without the need for the signing secret.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SessionCookie {
     /// The ID of the session.
     pub id: Uuid,
@@ -29,4 +31,14 @@ pub struct SessionCookie {
 
 impl Cookie for SessionCookie {
     const KEY: &'static str = SESSION_COOKIE_KEY;
+
+    fn encode(&self, _: Option<&[u8]>) -> Result<Bytes, CookieError> {
+        let mut bytes = BytesMut::with_capacity(64);
+        serde_json::to_writer((&mut bytes).writer(), self)?;
+        Ok(bytes.freeze().into())
+    }
+
+    fn decode(_: Option<&[u8]>, signed: &[u8]) -> Result<Option<Self>, CookieError> {
+        Ok(Some(serde_json::from_slice(signed)?))
+    }
 }

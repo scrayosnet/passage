@@ -1,5 +1,6 @@
 pub mod error;
 
+use std::convert::Into;
 pub(crate) use crate::crypto::error::Error;
 use passage_core::common::VerifyToken;
 use rand::TryRng;
@@ -9,14 +10,16 @@ use rsa::pkcs8::EncodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use std::sync::LazyLock;
 use tokio::time::Instant;
+use tokio_util::bytes::BytesMut;
+use passage_core::wire::Bytes;
 
 /// The RSA keypair of the application.
 pub static KEY_PAIR: LazyLock<(RsaPrivateKey, RsaPublicKey)> =
     LazyLock::new(|| generate_keypair().expect("failed to generate keypair"));
 
 /// The encoded public key.
-pub static ENCODED_PUB: LazyLock<Vec<u8>> =
-    LazyLock::new(|| encode_public_key(&KEY_PAIR.1).expect("failed to encode keypair"));
+pub static ENCODED_PUB: LazyLock<Bytes> =
+    LazyLock::new(|| encode_public_key(&KEY_PAIR.1).expect("failed to encode keypair").into());
 
 /// A time anchor for generating keep alive packet IDs.
 static TIME_ANCHOR: LazyLock<Instant> = LazyLock::new(Instant::now);
@@ -43,7 +46,7 @@ fn generate_keypair() -> Result<(RsaPrivateKey, RsaPublicKey), Error> {
 
 /// Encodes an RSA public key for the Minecraft protocol.
 fn encode_public_key(key: &RsaPublicKey) -> Result<Vec<u8>, Error> {
-    Ok(key.to_public_key_der()?.to_vec())
+    Ok(key.to_public_key_der()?.into_vec())
 }
 
 /// Encrypts some value with an RSA public key for the Minecraft protocol.
@@ -65,14 +68,13 @@ pub fn generate_token() -> Result<VerifyToken, Error> {
     let mut rng = SysRng;
 
     // populate the random bytes
-    let mut data = [0u8; 32];
-    rng.try_fill_bytes(&mut data)?;
-
-    Ok(data)
+    let mut buf = BytesMut::zeroed(32);
+    rng.try_fill_bytes(&mut buf)?;
+    Ok(buf.freeze())
 }
 
 /// Checks whether the provided [`VerifyToken`] matches the expected [`VerifyToken`].
-pub fn verify_token(expected: VerifyToken, actual: &[u8]) -> bool {
+pub fn verify_token(expected: &[u8], actual: &[u8]) -> bool {
     expected == actual
 }
 
@@ -111,14 +113,14 @@ mod tests {
     #[test]
     fn verify_valid_token() {
         let token = generate_token().expect("failed to generate token");
-        assert!(verify_token(token, &token), "token should be valid");
+        assert!(verify_token(&token, &token), "token should be valid");
     }
 
     #[test]
     fn verify_invalid_token_self() {
         let token1 = generate_token().expect("failed to generate token");
         let token2 = generate_token().expect("failed to generate token");
-        assert!(!verify_token(token1, &token2), "should be different token");
+        assert!(!verify_token(&token1, &token2), "should be different token");
     }
 
     #[test]
