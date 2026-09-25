@@ -266,6 +266,7 @@ impl<'a, S> ConnRef<'a, S> {
 
 #[cfg(test)]
 mod tests {
+    use crate::codec::NoCipher;
     use super::*;
     use crate::common::versions;
     use crate::connection::ConnectionError;
@@ -438,13 +439,5 @@ mod tests {
         let cell = cell();
         cell.as_ref().with(|c| c.state.push("recorded"));
         assert_eq!(cell.into_inner().state, vec!["recorded"]);
-    }
-
-    /// A cipher that does nothing, for tests that only care that the switch was queued.
-    struct NoCipher;
-
-    impl Cipher for NoCipher {
-        fn encrypt(&mut self, _buf: &mut [u8]) {}
-        fn decrypt(&mut self, _buf: &mut [u8]) {}
     }
 }

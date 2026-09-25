@@ -1,6 +1,6 @@
 use crate::error::MissingFieldError;
 use passage_adapters::{
-    Client, Error, Player, ServerPlayer, ServerPlayers, ServerStatus, ServerVersion,
+    Client, AdapterError, Player, ServerPlayer, ServerPlayers, ServerStatus, ServerVersion,
 };
 use serde_json::value::RawValue;
 use std::net::{IpAddr, SocketAddr};
@@ -30,17 +30,17 @@ impl From<&passage_adapters::Target> for Target {
 }
 
 impl TryFrom<Target> for passage_adapters::Target {
-    type Error = Error;
+    type Error = AdapterError;
 
     fn try_from(value: Target) -> Result<Self, Self::Error> {
         let Some(raw_addr) = value.address.clone() else {
-            return Err(Error::FailedParse {
+            return Err(AdapterError::FailedParse {
                 adapter_type: "grpc",
                 cause: Box::new(MissingFieldError { field: "address" }),
             });
         };
         let address = SocketAddr::from_str(&format!("{}:{}", raw_addr.hostname, raw_addr.port))
-            .map_err(|err| Error::FailedParse {
+            .map_err(|err| AdapterError::FailedParse {
                 adapter_type: "grpc",
                 cause: err.into(),
             })?;
@@ -59,13 +59,13 @@ impl TryFrom<Target> for passage_adapters::Target {
 }
 
 impl TryFrom<Profile> for passage_adapters::authentication::Profile {
-    type Error = Error;
+    type Error = AdapterError;
 
     fn try_from(value: Profile) -> Result<Self, Self::Error> {
         let user_id = value
             .id
             .try_into()
-            .map_err(|err: uuid::Error| Error::FailedParse {
+            .map_err(|err: uuid::Error| AdapterError::FailedParse {
                 adapter_type: "grpc",
                 cause: err.into(),
             })?;
@@ -90,14 +90,14 @@ impl From<ProfileProperty> for passage_adapters::authentication::ProfileProperty
 }
 
 impl TryFrom<StatusData> for ServerStatus {
-    type Error = Error;
+    type Error = AdapterError;
 
     fn try_from(value: StatusData) -> Result<Self, Self::Error> {
         let description = value
             .description
             .map(RawValue::from_string)
             .transpose()
-            .map_err(|err| Error::FailedParse {
+            .map_err(|err| AdapterError::FailedParse {
                 adapter_type: "grpc",
                 cause: err.into(),
             })?;
@@ -106,13 +106,13 @@ impl TryFrom<StatusData> for ServerStatus {
             .favicon
             .map(String::from_utf8)
             .transpose()
-            .map_err(|err| Error::FailedParse {
+            .map_err(|err| AdapterError::FailedParse {
                 adapter_type: "grpc",
                 cause: err.into(),
             })?;
 
         Ok(Self {
-            version: value.version.map(Into::into).ok_or(Error::FailedParse {
+            version: value.version.map(Into::into).ok_or(AdapterError::FailedParse {
                 adapter_type: "grpc",
                 cause: Box::new(MissingFieldError {
                     field: "status.version",
@@ -161,15 +161,15 @@ impl From<Players> for ServerPlayers {
 }
 
 impl TryFrom<Address> for SocketAddr {
-    type Error = Error;
+    type Error = AdapterError;
 
     fn try_from(value: Address) -> Result<Self, Self::Error> {
         Ok(Self::new(
-            IpAddr::from_str(&value.hostname).map_err(|err| Error::FailedParse {
+            IpAddr::from_str(&value.hostname).map_err(|err| AdapterError::FailedParse {
                 adapter_type: "grpc",
                 cause: err.into(),
             })?,
-            u16::try_from(value.port).map_err(|err| Error::FailedParse {
+            u16::try_from(value.port).map_err(|err| AdapterError::FailedParse {
                 adapter_type: "grpc",
                 cause: err.into(),
             })?,

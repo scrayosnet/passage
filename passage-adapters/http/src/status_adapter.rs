@@ -1,6 +1,6 @@
 use crate::HTTP_CLIENT;
 use passage_adapters::status::StatusAdapter;
-use passage_adapters::{Client, Error, ServerStatus, metrics};
+use passage_adapters::{Client, AdapterError, ServerStatus, metrics};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,7 +35,7 @@ impl HttpStatusAdapter {
     /// Creates a new `HttpStatusAdapter` that polls `address` every `cache_duration` seconds.
     ///
     /// The background refresh task starts immediately and is cancelled when the adapter is dropped.
-    pub fn new(address: String, cache_duration: u64) -> Result<Self, Error> {
+    pub fn new(address: String, cache_duration: u64) -> Result<Self, AdapterError> {
         let refresh_interval = Duration::from_secs(cache_duration);
         let inner = Arc::new(RwLock::new(None));
         let token = CancellationToken::new();
@@ -67,26 +67,26 @@ impl HttpStatusAdapter {
 
     /// Fetches the next status from HTTP. Any error status will resul in the status not getting updated.
     #[instrument(skip_all)]
-    async fn fetch(url: &str) -> Result<Option<ServerStatus>, Error> {
+    async fn fetch(url: &str) -> Result<Option<ServerStatus>, AdapterError> {
         HTTP_CLIENT
             // send fetch request
             .get(url)
             .send()
             .await
-            .map_err(|err| Error::FailedFetch {
+            .map_err(|err| AdapterError::FailedFetch {
                 adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })?
             // handle status codes
             .error_for_status()
-            .map_err(|err| Error::FailedFetch {
+            .map_err(|err| AdapterError::FailedFetch {
                 adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })?
             // parse response
             .json()
             .await
-            .map_err(|err| Error::FailedParse {
+            .map_err(|err| AdapterError::FailedParse {
                 adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })
@@ -100,7 +100,7 @@ impl Drop for HttpStatusAdapter {
 }
 
 impl StatusAdapter for HttpStatusAdapter {
-    async fn status(&self, _client: &Client) -> Result<Option<ServerStatus>, Error> {
+    async fn status(&self, _client: &Client) -> Result<Option<ServerStatus>, AdapterError> {
         let start = Instant::now();
         let status = self.inner.read().await.clone();
         metrics::adapter_duration::record(ADAPTER_TYPE, start);

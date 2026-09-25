@@ -20,6 +20,16 @@ impl<C: Cipher + ?Sized> Cipher for Box<C> {
     }
 }
 
+/// A cipher that does nothing.
+pub struct NoCipher;
+
+impl Cipher for NoCipher {
+    fn encrypt(&mut self, _buf: &mut [u8]) {}
+    fn decrypt(&mut self, _buf: &mut [u8]) {}
+}
+
+// TODO implement a proper cipher.
+
 #[cfg(test)]
 mod tests {
     use super::*;

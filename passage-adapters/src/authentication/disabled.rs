@@ -35,7 +35,7 @@ impl AuthenticationAdapter for DisabledAuthenticationAdapter {
         // TODO profile may need skin information, maybe provide default
         Ok(Profile {
             id: player.id,
-            name: player.name.clone(),
+            name: player.name.clone().into(),
             properties: vec![],
             profile_actions: vec![],
         })

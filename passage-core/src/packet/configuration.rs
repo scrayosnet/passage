@@ -589,11 +589,11 @@ impl Packet for ServerCodeOfConductPacket {
     }
 }
 
-/// The [`ClientInformationPacket`].
+/// The [`ClientClientInformationPacket`].
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Client_Information)
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ClientInformationPacket {
+pub struct ClientClientInformationPacket {
     /// The locale of the client, such as `en_GB`.
     pub locale: ByteString,
     /// The render distance of the client, in chunks.
@@ -614,7 +614,7 @@ pub struct ClientInformationPacket {
     pub particle_status: Option<ParticleStatus>,
 }
 
-impl Packet for ClientInformationPacket {
+impl Packet for ClientClientInformationPacket {
     const NAME: &'static str = "client::client_information";
     const PHASE: Phase = Phase::Configuration;
     const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x00)];
@@ -960,7 +960,7 @@ mod tests {
     fn client_information_gains_a_field_at_1_21_2() {
         // Below the threshold the field is not on the wire at all, so a client that does not send
         // it must not have one read for it -- and must not be written one either.
-        let packet = ClientInformationPacket {
+        let packet = ClientClientInformationPacket {
             locale: "en_GB".into(),
             view_distance: 12,
             chat_mode: ChatMode::Enabled,

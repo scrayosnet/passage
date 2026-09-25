@@ -1,7 +1,7 @@
 use crate::proto::discovery_action_client::DiscoveryActionClient;
 use crate::proto::{ApplyRequest, Targets, apply_response};
 use passage_adapters::discovery_action::DiscoveryActionAdapter;
-use passage_adapters::{Client, Error, Player, Target, metrics, reject_reason};
+use passage_adapters::{Client, AdapterError, Player, Target, metrics, reject_reason};
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
 use tonic::transport::Channel;
@@ -28,7 +28,7 @@ impl Debug for GrpcDiscoveryActionAdapter {
 
 impl GrpcDiscoveryActionAdapter {
     /// Connects to the gRPC service at `address` and returns an initialized adapter.
-    pub async fn new<D>(address: D) -> Result<Self, Error>
+    pub async fn new<D>(address: D) -> Result<Self, AdapterError>
     where
         D: TryInto<tonic::transport::Endpoint>,
         D::Error: Into<tonic::codegen::StdError>,
@@ -36,7 +36,7 @@ impl GrpcDiscoveryActionAdapter {
         Ok(Self {
             client: DiscoveryActionClient::connect(address)
                 .await
-                .map_err(|err| Error::FailedInitialization {
+                .map_err(|err| AdapterError::FailedInitialization {
                     adapter_type: ADAPTER_TYPE,
                     cause: err.into(),
                 })?,
@@ -49,7 +49,7 @@ impl GrpcDiscoveryActionAdapter {
         client: &Client,
         player: &Player,
         targets: &mut Vec<Target>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AdapterError> {
         let request = tonic::Request::new(ApplyRequest {
             client: Some(client.clone().into()),
             player: Some(player.clone().into()),
@@ -60,7 +60,7 @@ impl GrpcDiscoveryActionAdapter {
                 .clone()
                 .apply(request)
                 .await
-                .map_err(|err| Error::FailedFetch {
+                .map_err(|err| AdapterError::FailedFetch {
                     adapter_type: ADAPTER_TYPE,
                     cause: err.into(),
                 })?;
@@ -88,7 +88,7 @@ impl DiscoveryActionAdapter for GrpcDiscoveryActionAdapter {
         client: &Client,
         player: &Player,
         targets: &mut Vec<Target>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AdapterError> {
         let start = Instant::now();
         let target = self.apply(client, player, targets).await;
         metrics::adapter_duration::record(ADAPTER_TYPE, start);

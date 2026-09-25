@@ -4,7 +4,7 @@
 /// that occur during the initialization of the adapters. Those errors can correlate with the type
 /// of adapter that is used but can also occur regardless of adapter choice.
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
+pub enum AdapterError {
     /// The adapter could not be initialized because of a problem.
     #[error("failed to initialize {adapter_type} adapter: {cause}")]
     FailedInitialization {
@@ -49,21 +49,48 @@ pub enum Error {
     },
 }
 
-/// Constructs a [`Error::Rejected`] without a reason.
-pub fn reject(adapter_type: &'static str) -> Error {
-    Error::Rejected {
+impl AdapterError {
+    pub fn is_rejected(&self) -> bool {
+        matches!(self, AdapterError::Rejected { .. })
+    }
+
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            AdapterError::Rejected { reason, .. } => reason.as_deref(),
+            _ => None,
+        }
+    }
+
+    pub fn reject(adapter_type: &'static str) -> Self {
+        AdapterError::Rejected {
+            adapter_type,
+            reason: None,
+        }
+    }
+
+    pub fn reject_reason(adapter_type: &'static str, reason: impl Into<String>) -> Self {
+        AdapterError::Rejected {
+            adapter_type,
+            reason: Some(reason.into()),
+        }
+    }
+}
+
+/// Constructs a [`AdapterError::Rejected`] without a reason.
+pub fn reject(adapter_type: &'static str) -> AdapterError {
+    AdapterError::Rejected {
         adapter_type,
         reason: None,
     }
 }
 
-/// Constructs a [`Error::Rejected`] with a localizable message key as the reason.
-pub fn reject_reason(adapter_type: &'static str, reason: impl Into<String>) -> Error {
-    Error::Rejected {
+/// Constructs a [`AdapterError::Rejected`] with a localizable message key as the reason.
+pub fn reject_reason(adapter_type: &'static str, reason: impl Into<String>) -> AdapterError {
+    AdapterError::Rejected {
         adapter_type,
         reason: Some(reason.into()),
     }
 }
 
 /// Convenience alias for `Result<T, passage_adapters::Error>`.
-pub type Result<T, E = Error> = std::result::Result<T, E>;
+pub type Result<T, E = AdapterError> = std::result::Result<T, E>;

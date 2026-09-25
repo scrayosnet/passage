@@ -7,6 +7,7 @@ use passage_adapters_grpc::GrpcStatusAdapter;
 use passage_adapters_http::HttpStatusAdapter;
 use serde_json::value::RawValue;
 use std::fmt::{Display, Formatter};
+use passage_core::ProtocolVersion;
 
 /// Runtime-selected status adapter.
 ///
@@ -62,7 +63,7 @@ impl DynStatusAdapter {
                     Some(ServerStatus {
                         version: ServerVersion {
                             name: config.name,
-                            protocol: 0,
+                            protocol: ProtocolVersion::UNKNOWN,
                         },
                         players: None,
                         description,
