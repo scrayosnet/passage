@@ -41,12 +41,13 @@ impl Phase {
     }
 }
 
+/// The phase a handshake leads into. A transfer is a login: the client that was sent here logs in
+/// again, and only what the server does with it differs.
 impl From<State> for Phase {
     fn from(value: State) -> Self {
         match value {
             State::Status => Phase::Status,
-            State::Login => Phase::Login,
-            State::Transfer => Phase::Configuration,
+            State::Login | State::Transfer => Phase::Login,
         }
     }
 }
@@ -63,5 +64,14 @@ mod tests {
             assert_eq!(phase.index(), index, "{phase:?}");
         }
         assert_eq!(Phase::COUNT, Phase::ALL.len());
+    }
+
+    #[test]
+    fn a_transfer_logs_in_like_anything_else() {
+        // The intent decides what the server does about authentication, not which packets it
+        // routes: a transferred client sends a login start like any other.
+        assert_eq!(Phase::from(State::Status), Phase::Status);
+        assert_eq!(Phase::from(State::Login), Phase::Login);
+        assert_eq!(Phase::from(State::Transfer), Phase::Login);
     }
 }

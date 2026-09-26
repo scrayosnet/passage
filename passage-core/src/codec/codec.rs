@@ -194,6 +194,7 @@ impl<C: Cipher> Encoder<Frame> for FrameCodec<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codec::Aes128Cfb8;
     use crate::common::Phase;
     use crate::common::versions;
     use crate::wire::WireResult;
@@ -437,6 +438,43 @@ mod tests {
             ),
             "{err}"
         );
+    }
+
+    #[test]
+    fn a_real_cipher_frames_a_conversation_the_other_side_can_read() {
+        // The cipher a Minecraft connection actually switches to, driven through the codec both
+        // ways: each side encrypts with its own half and reads the other's.
+        let secret = b"0123456789abcdef";
+        let mut server: FrameCodec<Aes128Cfb8> = FrameCodec::new(Options::default());
+        let mut client: FrameCodec<Aes128Cfb8> = FrameCodec::new(Options::default());
+        server.set_cipher(Aes128Cfb8::new(secret).expect("a key"));
+        client.set_cipher(Aes128Cfb8::new(secret).expect("a key"));
+
+        let mut to_client = BytesMut::new();
+        server
+            .encode(frame(0x02, b"login success"), &mut to_client)
+            .expect("encodes");
+        assert!(
+            !to_client.windows(13).any(|w| w == b"login success"),
+            "the payload is on the wire encrypted",
+        );
+
+        let decoded = client
+            .decode(&mut to_client)
+            .expect("decodes")
+            .expect("complete");
+        assert_eq!(&decoded.payload[1..], b"login success");
+
+        // And back the other way, which uses the halves the first frame did not.
+        let mut to_server = BytesMut::new();
+        client
+            .encode(frame(0x03, b"login acknowledged"), &mut to_server)
+            .expect("encodes");
+        let decoded = server
+            .decode(&mut to_server)
+            .expect("decodes")
+            .expect("complete");
+        assert_eq!(&decoded.payload[1..], b"login acknowledged");
     }
 
     #[test]

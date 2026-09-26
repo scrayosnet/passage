@@ -8,6 +8,6 @@ mod cipher;
 mod codec;
 mod error;
 
-pub use cipher::{Cipher, NoCipher};
+pub use cipher::{Aes128Cfb8, Cipher, NoCipher, SECRET_LEN};
 pub use codec::{Frame, FrameCodec, UNKNOWN_PACKET_NAME};
 pub use error::{CodecError, Result};

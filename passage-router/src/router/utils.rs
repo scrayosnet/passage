@@ -1,20 +1,22 @@
-use std::sync::Arc;
-use anyhow::anyhow;
-use tokio::sync::oneshot;
-use tracing::{debug, warn};
-use passage_adapters::{AdapterError, AuthenticationAdapter, Client, LocalizationAdapter, Player, ServerStatus, StatusAdapter, Target};
-use passage_adapters::authentication::Profile;
-use passage_core::connection::{ConnRef, DispatchError};
-use passage_core::packet::{configuration, login};
-use passage_core::Phase;
-use passage_core::wire::ByteString;
 use crate::cookie::Cookie;
 use crate::crypto;
 use crate::router::{DynRoute, State};
+use anyhow::anyhow;
+use passage_adapters::authentication::Profile;
+use passage_adapters::{
+    AdapterError, AuthenticationAdapter, Client, LocalizationAdapter, Player, ServerStatus,
+    StatusAdapter, Target,
+};
+use passage_core::Phase;
+use passage_core::connection::{ConnRef, DispatchError};
+use passage_core::packet::{configuration, login};
+use passage_core::wire::ByteString;
+use std::sync::Arc;
+use tokio::sync::oneshot;
+use tracing::{debug, warn};
 
 /// [`ConnRefExt`] provides a set of convenience methods for interacting with a connection of [`State`].
 pub(crate) trait ConnRefExt {
-
     /// The route selected by the connection. Returns `None` if no route is selected.
     fn route(&self) -> Option<Arc<DynRoute>>;
 
@@ -31,12 +33,15 @@ pub(crate) trait ConnRefExt {
 
     /// Queries the status adapter based on the selected route. The connection state is not updated.
     /// Any adapter errors are passed on. Returns a fetch error if no route is selected.
-    fn status(&self) -> impl Future<Output =crate::Result<Option<ServerStatus>, AdapterError>>;
+    fn status(&self) -> impl Future<Output = crate::Result<Option<ServerStatus>, AdapterError>>;
 
     /// Authorizes the current connection information using the authentication adapter. The connection
     /// state is not updated. Any adapter errors are passed on. Returns a fetch error if no route is
     /// selected.
-    fn authorize(&self, shared_secret: &[u8]) -> impl Future<Output =crate::Result<Profile, AdapterError>>;
+    fn authorize(
+        &self,
+        shared_secret: &[u8],
+    ) -> impl Future<Output = crate::Result<Profile, AdapterError>>;
 
     /// Localizes a key using the localization adapter. The connection state is not updated. Any
     /// adapter errors are passed on. Returns a fetch error if no route is selected.
@@ -48,12 +53,12 @@ pub(crate) trait ConnRefExt {
 
     /// Selects a target using the target adapter. The connection state is not updated. Any adapter
     /// errors are passed on. Returns a fetch error if no route is selected.
-    fn target(&self) -> impl Future<Output =crate::Result<Target, AdapterError>>;
+    fn target(&self) -> impl Future<Output = crate::Result<Target, AdapterError>>;
 
     /// Queries the client for a cookie and waits for the cookie channel to be filled by any cookie
     /// handler. Supports both login and configuration phase. The connection is temporarily set to
     /// accept additional packets until the cookie is received (resetting to previous state).
-    fn cookie<C: Cookie>(&self) -> impl Future<Output =crate::Result<Option<C>, DispatchError>>;
+    fn cookie<C: Cookie>(&self) -> impl Future<Output = crate::Result<Option<C>, DispatchError>>;
 }
 
 impl ConnRefExt for ConnRef<'_, State> {
@@ -74,7 +79,8 @@ impl ConnRefExt for ConnRef<'_, State> {
     }
 
     async fn status(&self) -> crate::Result<Option<ServerStatus>, AdapterError> {
-        let status = self.route()
+        let status = self
+            .route()
             .ok_or(AdapterError::reject_reason("router", "No route selected"))?
             .status_adapter
             .status(&self.client())
@@ -83,19 +89,21 @@ impl ConnRefExt for ConnRef<'_, State> {
     }
 
     async fn authorize(&self, shared_secret: &[u8]) -> crate::Result<Profile, AdapterError> {
-        let profile = self.route()
+        let profile = self
+            .route()
             .ok_or(AdapterError::reject_reason("router", "No route selected"))?
             .authentication_adapter
-            .authenticate(&self.client(), &self.player(), shared_secret, &crypto::ENCODED_PUB)
+            .authenticate(
+                &self.client(),
+                &self.player(),
+                shared_secret,
+                &crypto::ENCODED_PUB,
+            )
             .await?;
         Ok(profile)
     }
 
-    async fn localize(
-        &self,
-        key: &str,
-        params: &[(&'static str, String)],
-    ) -> ByteString {
+    async fn localize(&self, key: &str, params: &[(&'static str, String)]) -> ByteString {
         let Some(route) = self.route() else {
             return ByteString::from(key);
         };
@@ -105,9 +113,7 @@ impl ConnRefExt for ConnRef<'_, State> {
             .localize(self.locale().as_deref(), key, params)
             .await;
         match message {
-            Ok(message) => {
-                message.try_into().expect("infallible")
-            }
+            Ok(message) => message.try_into().expect("infallible"),
             Err(err) if err.is_rejected() => {
                 debug!(err = %err, "rejected to localize key");
                 ByteString::from(key)
@@ -120,7 +126,8 @@ impl ConnRefExt for ConnRef<'_, State> {
     }
 
     async fn target(&self) -> crate::Result<Target, AdapterError> {
-        let target = self.route()
+        let target = self
+            .route()
             .ok_or(AdapterError::reject_reason("router", "No route selected"))?
             .select(&self.client(), &self.player())
             .await?;
@@ -139,15 +146,24 @@ impl ConnRefExt for ConnRef<'_, State> {
 
             // Create a new channel and send the packet.
             let (tx, rx) = oneshot::channel();
-            c.state.cookie = Some(tx);
+            c.state.cookie = Some((C::KEY, tx));
             match c.phase() {
                 Phase::Login => {
-                    c.send(login::ServerCookieRequestPacket { key: C::KEY.try_into().expect("infallible") })?;
+                    c.send(login::ServerCookieRequestPacket {
+                        key: C::KEY.try_into().expect("infallible"),
+                    })?;
                 }
                 Phase::Configuration => {
-                    c.send(configuration::ServerCookieRequestPacket { key: C::KEY.try_into().expect("infallible") })?;
+                    c.send(configuration::ServerCookieRequestPacket {
+                        key: C::KEY.try_into().expect("infallible"),
+                    })?;
                 }
-                _ => return Err(DispatchError::internal("cookie_invalid_phase", anyhow!("Invalid phase"))),
+                _ => {
+                    return Err(DispatchError::internal(
+                        "cookie_invalid_phase",
+                        anyhow!("Invalid phase"),
+                    ));
+                }
             };
 
             // Allow the connection to receive the cookie packet. In general, this allows packets other
@@ -158,7 +174,8 @@ impl ConnRefExt for ConnRef<'_, State> {
         })?;
 
         // Wait for the cookie to be received. Then immediately reset the connection gated state.
-        let payload = rx.await
+        let payload = rx
+            .await
             .map_err(|_| DispatchError::internal("cookie_error", anyhow!("Cookie never received")));
         if gated {
             self.with(|c| c.gate());

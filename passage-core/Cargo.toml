@@ -22,6 +22,8 @@ serde_json = { workspace = true, features = ["std"] }
 fastnbt = { workspace = true }
 num-bigint = { workspace = true }
 sha1 = { workspace = true }
+aes = { workspace = true }
+cfb8 = { workspace = true }
 opentelemetry = { workspace = true }
 
 [dev-dependencies]

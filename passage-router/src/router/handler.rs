@@ -1,16 +1,21 @@
 use crate::cookie::{AuthCookie, Cookie, SessionCookie};
-use crate::crypto;
 use crate::router::state::{State, Step};
 use crate::router::utils::ConnRefExt;
+use crate::{crypto, metrics};
 use anyhow::{Context, anyhow};
-use passage_core::codec::NoCipher;
+use opentelemetry::global;
+use passage_core::codec::{Aes128Cfb8, SECRET_LEN};
 use passage_core::connection::{ConnRef, DispatchError};
 use passage_core::packet::{configuration, handshake, login, status};
-use passage_core::wire::ByteString;
+use passage_core::wire::{ByteString, Bytes};
 use passage_core::{Phase, versions};
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
+use uuid::Uuid;
 
 /// Fails unless the connection is at the step this handler answers.
 macro_rules! expect_step {
@@ -116,6 +121,7 @@ pub(crate) async fn on_handshake_intention_packet(
     conn: ConnRef<'_, State>,
     packet: handshake::ClientIntentionPacket,
 ) -> crate::Result<(), DispatchError> {
+    metrics::handshake_states::inc(packet.next_state);
     conn.with(|c| {
         // Ensure that the connection is in the right state.
         expect_step!(c, Step::Intention)?;
@@ -130,8 +136,73 @@ pub(crate) async fn on_handshake_intention_packet(
         c.state.client.protocol_version = packet.protocol_version;
         c.state.client.server_address = packet.server_address;
         c.state.client.server_port = packet.server_port;
+
+        // A hostname nobody configured has no adapters to answer it with, so there is nothing this
+        // connection could do from here on.
+        if c.state.route_index.is_none() {
+            return Err(DispatchError::peer(
+                "no_route",
+                anyhow!("no route matches `{}`", c.state.client.server_address),
+            ));
+        }
         Ok(())
     })
+}
+
+/// Hands a cookie the client sent back to whatever asked for it. A response for a key nobody asked
+/// for is ignored, so an unsolicited one cannot answer the next request.
+fn accept_cookie(
+    conn: ConnRef<'_, State>,
+    key: &str,
+    payload: Option<Bytes>,
+) -> crate::Result<(), DispatchError> {
+    conn.with(|c| {
+        let Some((expected, sender)) = c.state.cookie.take() else {
+            debug!(key, "received a cookie nobody asked for");
+            return Ok(());
+        };
+        if expected != key {
+            debug!(key, expected, "received a cookie for another key");
+            c.state.cookie = Some((expected, sender));
+            return Ok(());
+        }
+        let _ = sender.send(payload);
+        Ok(())
+    })
+}
+
+pub(crate) async fn on_login_cookie_response(
+    conn: ConnRef<'_, State>,
+    packet: login::ClientCookieResponsePacket,
+) -> crate::Result<(), DispatchError> {
+    accept_cookie(conn, &packet.key, packet.payload)
+}
+
+pub(crate) async fn on_configuration_cookie_response(
+    conn: ConnRef<'_, State>,
+    packet: configuration::ClientCookieResponsePacket,
+) -> crate::Result<(), DispatchError> {
+    accept_cookie(conn, &packet.key, packet.payload)
+}
+
+/// The brand and any other channel the client opens with. Passage answers none of them, but a
+/// client that sends one has not done anything wrong.
+pub(crate) async fn on_configuration_custom_payload(
+    conn: ConnRef<'_, State>,
+    packet: configuration::ClientCustomPayloadPacket,
+) -> crate::Result<(), DispatchError> {
+    let _ = conn;
+    debug!(channel = %packet.channel, "ignoring plugin message");
+    Ok(())
+}
+
+/// Passage pushes no resource packs, so an answer about one is ignored rather than refused.
+pub(crate) async fn on_configuration_resource_pack(
+    conn: ConnRef<'_, State>,
+    packet: configuration::ClientResourcePackPacket,
+) -> crate::Result<(), DispatchError> {
+    let _ = (conn, packet);
+    Ok(())
 }
 
 pub(crate) async fn on_status_request_packet(
@@ -171,7 +242,7 @@ pub(crate) async fn on_status_ping_request_packet(
 ) -> crate::Result<(), DispatchError> {
     conn.with(|c| {
         // Ensure that the connection is in the right state.
-        expect_step!(c, Step::Intention)?;
+        expect_step!(c, Step::StatusPingRequest)?;
         c.state.step = Step::Completed;
 
         // Send the pong response and close the connection.
@@ -200,9 +271,9 @@ pub(crate) async fn on_login_login_start(
         Ok::<_, DispatchError>((transfer, client_address, auth_cookie_expiry))
     })?;
 
-    // Ensure that the client supports the transfer packet. Otherwise, close the connection with a
-    // disconnect packet. The packet will tell the client which minecraft version they should use.
-    if conn.version() <= versions::V1_20_5 {
+    // The transfer packet arrived with the configuration phase in 1.20.5, so anything older is
+    // told which version to use instead.
+    if conn.version() < versions::V1_20_5 {
         let preferred = conn
             .status()
             .await
@@ -260,7 +331,7 @@ pub(crate) async fn on_login_login_start(
         c.send(login::ServerEncryptionRequestPacket {
             server_id: ByteString::new(),
             public_key: crypto::ENCODED_PUB.clone(),
-            verify_token: Default::default(),
+            verify_token: verify_token.clone(),
             should_authenticate: !authenticated,
         })?;
         c.state.step = Step::Encrypt {
@@ -288,9 +359,18 @@ pub(crate) async fn on_login_encryption_response(
     let decrypted_verify_token = crypto::decrypt(&crypto::KEY_PAIR.0, &packet.verify_token)
         .map_err(|err| DispatchError::internal("verify_token_decrypt_error", err))?;
 
-    // Encrypt the connection either way. Event if the secret is invalid, the client expects it to
-    // be encrypted with the secret key.
-    conn.with(|c| c.encrypt(Box::new(NoCipher)));
+    // Encrypt the connection either way: the client starts encrypting the moment it sent the
+    // response, so even a disconnect has to be encrypted to be readable.
+    let cipher = Aes128Cfb8::new(&shared_secret).ok_or_else(|| {
+        DispatchError::peer(
+            "invalid_shared_secret",
+            anyhow!(
+                "shared secret is {} bytes, expected {SECRET_LEN}",
+                shared_secret.len()
+            ),
+        )
+    })?;
+    conn.with(|c| c.encrypt(Box::new(cipher)));
 
     // Verify the shared secret against the keypair. If the secret is invalid, then we try to send
     // a disconnect packet. It is possible that the client cannot decrypt it, but that's still better
@@ -319,7 +399,7 @@ pub(crate) async fn on_login_encryption_response(
                 if !err.is_rejected() {
                     warn!(err = %err, "profile adapter error");
                 }
-                let reason = err.reason().unwrap_or("disconnect_error");
+                let reason = err.reason().unwrap_or("disconnect_unauthenticated");
                 let message = conn.localize(reason, &[]).await;
                 return conn.with(|c| {
                     c.state.step = Step::Completed;
@@ -336,9 +416,9 @@ pub(crate) async fn on_login_encryption_response(
         });
     }
 
-    // Get the session information of the client.
-    let session_cookie = conn.cookie::<SessionCookie>().await?;
-    // TODO also store session information
+    // Get the session information of the client. A client without one is given a new session once
+    // it is transferred.
+    let session = conn.cookie::<SessionCookie>().await?;
 
     // Complete the login phase and prepare the target selection.
     conn.with(|c| {
@@ -347,10 +427,10 @@ pub(crate) async fn on_login_encryption_response(
             name: c.state.player.name.as_str().into(),
             properties: c.state.player.profile_properties.clone(),
             strict_error_handling: Some(true),
-            session_id: session_cookie.as_ref().map(|cookie| cookie.id.clone()),
+            session_id: session.as_ref().map(|cookie| cookie.id),
         })?;
+        c.state.session = session;
         c.state.step = Step::LoginAck;
-        c.release();
         Ok::<_, DispatchError>(())
     })
 }
@@ -360,21 +440,23 @@ pub(crate) async fn on_login_login_acknowledged(
     _: login::ClientLoginAcknowledgedPacket,
 ) -> crate::Result<(), DispatchError> {
     // Ensure that the connection is in the right state.
-    conn.with(|c| {
+    let informed = conn.with(|c| {
         expect_step!(c, Step::LoginAck)?;
         c.set_phase(Phase::Configuration);
         c.state.step = Step::Transfer;
-        Ok::<(), DispatchError>(())
+        Ok::<_, DispatchError>(Arc::clone(&c.state.informed))
     })?;
 
-    // Wait for a target to be selected.
-    let target = match conn.target().await {
+    // Select a target while the client sends its information. The client information packet is what
+    // carries the locale, so waiting for it is what lets a rejection be localized.
+    let (target, ()) = tokio::join!(conn.target(), informed.notified());
+    let target = match target {
         Ok(target) => target,
         Err(err) => {
             if !err.is_rejected() {
                 warn!(err = %err, "target selection error");
             }
-            let reason = err.reason().unwrap_or("disconnect_error");
+            let reason = err.reason().unwrap_or("disconnect_no_target");
             let message = conn.localize(reason, &[]).await;
             return conn.with(|c| {
                 c.state.step = Step::Completed;
@@ -415,6 +497,35 @@ pub(crate) async fn on_login_login_acknowledged(
         })
     })?;
 
+    // Give the client a session if it had none, so the next connection it makes is recognisable as
+    // the same one. It carries the current trace, which is what links the two together.
+    conn.with(|c| {
+        if c.state.session.is_some() {
+            return Ok(());
+        }
+        let mut extra = HashMap::new();
+        global::get_text_map_propagator(|propagator| {
+            propagator.inject_context(&tracing::Span::current().context(), &mut extra);
+        });
+        let cookie = SessionCookie {
+            id: Uuid::new_v4(),
+            server_address: c.state.client.server_address.to_string(),
+            server_port: c.state.client.server_port,
+            extra,
+        };
+        let encoded = match cookie.encode(None) {
+            Ok(encoded) => encoded,
+            Err(err) => {
+                warn!(err = %err, "failed to encode session cookie, skipping");
+                return Ok(());
+            }
+        };
+        c.send(configuration::ServerStoreCookiePacket {
+            key: SessionCookie::KEY.try_into().expect("infallible"),
+            payload: encoded,
+        })
+    })?;
+
     conn.with(|c| {
         c.state.step = Step::Completed;
         c.send(configuration::ServerTransferPacket {
@@ -430,9 +541,14 @@ pub(crate) async fn on_configuration_client_information(
     conn: ConnRef<'_, State>,
     packet: configuration::ClientClientInformationPacket,
 ) -> crate::Result<(), DispatchError> {
+    metrics::client_locales::inc(packet.locale.to_string());
+    metrics::client_view_distances::record(packet.view_distance.max(0) as u64);
     conn.with(|c| {
         expect_step!(c, Step::Transfer)?;
         c.state.locale = Some(packet.locale.to_string());
+
+        // The target selection waits for this, because a rejection is localized with it.
+        c.state.informed.notify_one();
         Ok(())
     })
 }

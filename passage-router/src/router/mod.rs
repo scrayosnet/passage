@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod flow;
 mod handler;
 mod state;
 mod utils;
@@ -12,6 +14,7 @@ use crate::router::handler::*;
 use crate::router::state::State;
 use passage_core::router::Router;
 use passage_core::server::Server;
+use passage_core::wire::Bytes;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
@@ -31,11 +34,22 @@ type DynRoutes = Arc<[Arc<DynRoute>]>;
 
 pub struct Passage {
     routes: DynRoutes,
+
+    /// The secret the auth cookie is signed with. Without one, a transferring client is
+    /// authenticated against the authentication adapter like any other.
+    secret: Option<Bytes>,
+
+    /// How long an auth cookie stays valid, in seconds.
+    auth_cookie_expiry: u64,
 }
 
 impl Passage {
-    pub fn new(routes: DynRoutes) -> Self {
-        Self { routes }
+    pub fn new(routes: DynRoutes, secret: Option<Bytes>, auth_cookie_expiry: u64) -> Self {
+        Self {
+            routes,
+            secret,
+            auth_cookie_expiry,
+        }
     }
 
     // TODO pass adapters or config?
@@ -51,8 +65,14 @@ impl Passage {
             .on(on_login_login_start)?
             .on(on_login_encryption_response)?
             .on(on_login_login_acknowledged)?
+            .on(on_login_cookie_response)?
             .on(on_configuration_client_information)?
             .on(on_configuration_keep_alive)?
+            .on(on_configuration_cookie_response)?
+            // packets the client may send that Passage has no answer for. Without a handler they
+            // would end the connection, which is what `UnknownPolicy::Reject` is for.
+            .on(on_configuration_custom_payload)?
+            .on(on_configuration_resource_pack)?
             .build();
         Ok(Arc::new(router))
     }
@@ -62,7 +82,14 @@ impl Passage {
         let listener = TcpListener::bind("").await?;
         Server::new(listener)
             .dispatch(router)
-            .state(move |addr| State::new(self.routes.clone(), addr.clone()))
+            .state(move |addr| {
+                State::new(
+                    self.routes.clone(),
+                    *addr,
+                    self.secret.clone(),
+                    self.auth_cookie_expiry,
+                )
+            })
             .serve()
             .await;
         Ok(())
