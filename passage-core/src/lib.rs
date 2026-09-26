@@ -1,8 +1,8 @@
 //! A general-purpose backbone for the Minecraft (Java) protocol.
 //!
-//! The crate does four things: it frames packets, dispatches them to handlers, ticks, and shuts
-//! down. It knows nothing about authentication, routing, resource packs or transfers -- those are
-//! handlers written on top of it.
+//! The crate does three things: it frames packets, dispatches them to handlers, and shuts down.
+//! It knows nothing about authentication, routing, resource packs or transfers -- those are
+//! handlers written on top of it, and so is anything that has to happen on a clock.
 //!
 //! | Module              | Role                                                              |
 //! |---------------------|-------------------------------------------------------------------|

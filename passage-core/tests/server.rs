@@ -324,9 +324,8 @@ async fn an_ordinary_ending_is_reported_quietly() {
 
 #[tokio::test(start_paused = true)]
 async fn shutdown_stops_accepting_and_ends_the_connections_it_already_has() {
-    // Cancelling the server cancels its connections: each one still gets its `close_timeout` to say
-    // goodbye, and `drain_timeout` bounds how long the server waits for all of them. The
-    // alternative -- connections on a token of their own -- means a restart waits twice.
+    // Cancelling the server cancels its connections, and `drain_timeout` bounds how long the
+    // server waits for all of them.
     let running = Harness::new(status_server()).start();
 
     // A connection that is live and has been answered, but not closed.
@@ -370,7 +369,6 @@ async fn the_drain_timeout_bounds_how_long_the_server_waits() {
             .server
             .drain_timeout(Some(Duration::from_secs(10)))
             .max_lifetime(None)
-            .close_timeout(None)
             .serve(),
     );
 

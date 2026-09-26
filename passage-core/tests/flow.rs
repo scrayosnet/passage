@@ -146,7 +146,7 @@ async fn gated_for_a_while(
 /// Answers the login, then takes its time finding somewhere to send the player.
 ///
 /// The gate is never shut, so this is the handler that has to overlap with further traffic: the
-/// loop keeps reading frames and firing ticks for the whole forty seconds it waits.
+/// loop keeps reading frames and running the keep-alive for the whole forty seconds it waits.
 async fn slow_transfer(conn: ConnRef<'_, Notes>, packet: LoginStart) -> Result<(), DispatchError> {
     // Answering and moving both sides on happens before the first await, so the client is already
     // in the configuration phase by the time the next frame is routed.
@@ -289,21 +289,15 @@ async fn a_handler_that_re_pins_the_version_answers_in_it() {
 }
 
 #[tokio::test]
-async fn what_a_handler_queued_before_it_failed_is_discarded() {
-    // A handler that answers an error itself must not also fail with one. `on_error` gets a fresh
-    // queue precisely so that nothing a failing handler left behind can interleave with the last
-    // word -- so "send this, then fail" sends nothing, and the hook below is what the peer hears.
+async fn what_a_handler_queued_before_it_failed_is_still_written() {
+    // Failing ends the connection once the round has been drained, so a handler that answers the
+    // peer and then fails gets both: the message goes out, and the failure is what is reported.
     let server = router()
         .handle::<Handshake>(on_handshake)
         .handle::<LoginStart>(|conn, _packet| {
             conn.send(Disconnect::text("go away"))?;
             Err(DispatchError::peer("refused", anyhow::anyhow!("not today")))
         })
-        .on_error(errors(|conn, error| {
-            conn.send(Disconnect::text(error.reason()))?;
-            conn.close();
-            Ok(())
-        }))
         .build();
     let client = router()
         .on_open(opens(|conn| {
@@ -321,8 +315,7 @@ async fn what_a_handler_queued_before_it_failed_is_discarded() {
 
     assert_eq!(
         meeting.client_saw(),
-        [r#"Disconnect { reason: "refused" }"#],
-        "the hook's answer, not the one the failing handler queued",
+        [r#"Disconnect { reason: "go away" }"#],
     );
     assert_eq!(meeting.server_ending(), Some("refused"));
     assert!(meeting.server_blamed_peer());
@@ -362,38 +355,51 @@ async fn a_handler_that_answers_an_error_itself_closes_rather_than_failing() {
     );
 }
 
+/// Waits until shortly before the connection's deadline, then tells the peer why it is going.
+///
+/// A named `async fn` rather than a closure: a closure whose future captures the connection cannot
+/// be inferred as higher-ranked over its lifetime.
+async fn warn_before_the_deadline(conn: ConnRef<'_, Notes>) -> Result<(), DispatchError> {
+    let Some(deadline) = conn.with(|c| c.deadline()) else {
+        return Ok(());
+    };
+    tokio::time::sleep_until(deadline - Duration::from_millis(20)).await;
+
+    // The grace that is left bounds the write, so nothing here can outlive the deadline.
+    conn.with(|c| {
+        c.state.push("ending");
+        c.send(Disconnect::text("we are restarting"))?;
+        c.fail(DispatchError::peer(
+            "told_the_peer",
+            anyhow::anyhow!("out of time"),
+        ));
+        Ok(())
+    })
+}
+
 #[tokio::test]
-async fn the_error_hook_gets_the_last_word() {
-    // Every ending that is not a handler closing the connection arrives here, which is where a
-    // disconnect message comes from. It is a last word, not a veto: the connection ends either way.
+async fn a_handler_can_answer_the_deadline_before_it_runs_out() {
+    // The deadline itself leaves no time to say anything, so a driver that wants the peer told
+    // reads it and wakes before it.
     let server = router()
         .handle::<Handshake>(on_handshake)
-        .on_error(errors(|conn, error| {
-            conn.state.push(format!("ending {}", error.reason()));
-            if error.can_reply() {
-                conn.send(Disconnect::text("we are restarting"))?;
-                conn.close();
-            }
-            Ok(())
-        }))
+        .on_open(warn_before_the_deadline)
         .build();
     let client = router()
         .on_open(opening(Intent::Login))
         .note_and_close::<Disconnect>()
         .build();
 
-    let shutdown = CancellationToken::new();
     let meeting = Scenario::new(server, client)
         .version(versions::V26_1)
         .server_config(|config| config.max_lifetime = Some(Duration::from_millis(50)))
-        .shutdown(shutdown)
         .run()
         .await;
 
-    assert_eq!(meeting.server_ending(), Some("peer-timeout"));
+    assert_eq!(meeting.server_ending(), Some("told_the_peer"));
     assert_eq!(
         meeting.server_saw(),
-        ["handshake mc.justchunks.net Login", "ending peer-timeout"]
+        ["handshake mc.justchunks.net Login", "ending"]
     );
     assert_eq!(
         meeting.client_saw(),
@@ -403,32 +409,17 @@ async fn the_error_hook_gets_the_last_word() {
 }
 
 #[tokio::test]
-async fn an_answer_that_cannot_be_sent_does_not_replace_the_reason() {
-    // If the last word fails -- and the commonest way is a packet that does not exist in a version
-    // the handshake never pinned -- the connection still reports what it was ending for. Reporting
-    // the failed apology instead would lose the diagnosis exactly when it is most wanted.
-    let server = router()
-        .handle::<Handshake>(|_conn, _packet: Handshake| {
-            Err(DispatchError::peer(
-                "the_real_reason",
-                anyhow::anyhow!("what actually went wrong"),
-            ))
-        })
-        .on_error(errors(|conn, _error| {
-            // `Transfer` does not exist at the version this connection never got past.
-            conn.send(Transfer {
-                host: "nowhere".into(),
-                port: 1,
-            })?;
-            Ok(())
-        }))
-        .build();
+async fn a_deadline_nobody_answers_just_ends_the_connection() {
+    let server = router().handle::<Handshake>(on_handshake).build();
+    let client = router().on_open(opening(Intent::Login)).build();
 
-    let meeting = Scenario::new(server, router().on_open(opening(Intent::Login)).build())
+    let meeting = Scenario::new(server, client)
+        .version(versions::V26_1)
+        .server_config(|config| config.max_lifetime = Some(Duration::from_millis(50)))
         .run()
         .await;
 
-    assert_eq!(meeting.server_ending(), Some("the_real_reason"));
+    assert_eq!(meeting.server_ending(), Some("peer-timeout"));
 }
 
 #[tokio::test]
@@ -450,14 +441,13 @@ async fn a_hangup_is_an_ending_but_not_a_failure_worth_reporting() {
     assert_eq!(meeting.server_ending(), Some("peer-closed"));
     let error = meeting.server.error.expect("an ending");
     assert!(error.is_peer_error(), "ordinary weather, not a problem");
-    assert!(!error.can_reply(), "there is nobody left to read an answer");
 }
 
 #[tokio::test]
 async fn state_is_recorded_before_the_packet_that_announces_it() {
     // The state is written where the handler writes it, and the packet only leaves once the round
     // is drained -- so by the time the peer has the packet, the update is long since applied. That
-    // is what a tick or a later handler would observe.
+    // is what a keep-alive or a later handler would observe.
     let server = router()
         .handle::<Handshake>(on_handshake)
         .handle::<LoginStart>(|conn, packet| {
@@ -599,8 +589,8 @@ async fn a_hangup_during_an_exclusive_task_ends_the_connection_at_once() {
 
 #[tokio::test(start_paused = true)]
 async fn spawned_work_runs_while_keep_alives_are_exchanged() {
-    // Work that must overlap with further traffic is spawned rather than exclusive, so the gate
-    // stays open and the tick handler keeps the connection alive while it runs.
+    // Work that must overlap with further traffic leaves the gate open, so the keep-alive loop
+    // keeps the connection alive while it runs.
     let server = router()
         .handle::<Handshake>(on_handshake)
         .handle_async(slow_transfer)
@@ -608,13 +598,7 @@ async fn spawned_work_runs_while_keep_alives_are_exchanged() {
             conn.state.push(format!("alive {}", packet.id));
             Ok(())
         })
-        .on_tick(ticks(|conn| {
-            // Only once the connection has something to wait for.
-            if conn.phase() == Phase::Configuration {
-                conn.send(KeepAlive { id: 1 })?;
-            }
-            Ok(())
-        }))
+        .on_open(keeps_alive(Duration::from_secs(16)))
         .build();
     let client = router()
         .on_open(opens(|conn| {
@@ -635,10 +619,7 @@ async fn spawned_work_runs_while_keep_alives_are_exchanged() {
 
     let meeting = Scenario::new(server, client)
         .version(versions::V26_1)
-        .server_config(|config| {
-            config.tick_interval = Some(Duration::from_secs(16));
-            config.max_lifetime = Some(Duration::from_secs(120));
-        })
+        .server_config(|config| config.max_lifetime = Some(Duration::from_secs(120)))
         .run()
         .await;
 

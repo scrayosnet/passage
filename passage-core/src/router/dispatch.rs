@@ -1,5 +1,5 @@
 use crate::common::ProtocolVersion;
-use crate::connection::{ConnRef, ConnectionError, DispatchError, Dispatcher, MakeDispatcher};
+use crate::connection::{ConnRef, DispatchError, Dispatcher, MakeDispatcher};
 use crate::router::{Router, UnknownPolicy};
 use anyhow::anyhow;
 use bytes::Bytes;
@@ -65,12 +65,10 @@ impl<S: 'static> MakeDispatcher<S> for Arc<Router<S>> {
 }
 
 impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
-    fn on_open(&mut self, conn: ConnRef<'_, S>) -> Result<(), DispatchError> {
-        let version = conn.version();
-        self.table = (version, self.router.table(version));
+    fn on_open<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<(), DispatchError>> {
         match &self.router.on_open {
             Some(handler) => handler(conn),
-            None => Ok(()),
+            None => ready(Ok(())),
         }
     }
 
@@ -107,27 +105,8 @@ impl<S: 'static> Dispatcher<S> for RouterDispatcher<S> {
         trace!(packet = entry.name, ?phase, "dispatching packet");
         (entry.dispatch)(conn, payload)
     }
-
-    fn on_tick<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<(), DispatchError>> {
-        match &self.router.tick {
-            Some(handler) => handler(conn),
-            None => ready(Ok(())),
-        }
-    }
-
-    fn on_error(
-        &self,
-        conn: ConnRef<'_, S>,
-        error: &mut ConnectionError,
-    ) -> Result<(), DispatchError> {
-        match &self.router.on_error {
-            Some(handler) => handler(conn, error),
-            None => Ok(()),
-        }
-    }
 }
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,7 +193,7 @@ mod tests {
         let cell = cell(versions::V26_1);
         let mut dispatcher = router(UnknownPolicy::Reject).make();
 
-        dispatcher.on_open(cell.as_ref()).expect("opens");
+        dispatcher.on_version(cell.as_ref()).expect("binds");
         let frame = payload(0x05, |w| w.string("text", "hello").expect("writes"));
         dispatcher
             .on_frame(cell.as_ref(), 0x05, frame.clone())
@@ -225,15 +204,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn opening_binds_the_table_to_the_version_the_connection_starts_at() {
-        // A client knows its version before it says anything, so nothing ever changes it. If
-        // opening did not bind the table, the whole connection would dispatch against the floor --
-        // where this packet does not exist at all.
+    async fn the_table_is_bound_to_the_version_the_connection_starts_at() {
+        // A client knows its version before it says anything, so nothing ever changes it. The
+        // connection binds the table once before it dispatches anything, or the whole connection
+        // would run against the floor -- where this packet does not exist at all.
         let cell = cell(versions::V26_1);
         let mut dispatcher = router(UnknownPolicy::Reject).make();
         assert_eq!(dispatcher.table, (ProtocolVersion::UNKNOWN, 0));
 
-        dispatcher.on_open(cell.as_ref()).expect("opens");
+        dispatcher.on_version(cell.as_ref()).expect("binds");
         assert_eq!(dispatcher.table.0, versions::V26_1);
 
         let frame = payload(0x05, |w| w.string("text", "bound").expect("writes"));
@@ -297,7 +276,7 @@ mod tests {
                 .build(),
         );
         let mut dispatcher = router.make();
-        dispatcher.on_open(cell.as_ref()).expect("opens");
+        dispatcher.on_version(cell.as_ref()).expect("binds");
 
         let frame = payload(0x05, |w| w.string("text", "after").expect("writes"));
         let mut handled = dispatcher.on_frame(cell.as_ref(), 0x05, frame.clone());
@@ -347,7 +326,7 @@ mod tests {
         // failing on, and the failure names the packet rather than the byte.
         let cell = cell(versions::V26_1);
         let mut dispatcher = router(UnknownPolicy::Reject).make();
-        dispatcher.on_open(cell.as_ref()).expect("opens");
+        dispatcher.on_version(cell.as_ref()).expect("binds");
 
         let mut frame = BytesMut::from(payload(0x05, |w| {
             w.string("text", "hello").expect("writes")
@@ -364,72 +343,31 @@ mod tests {
     #[tokio::test]
     async fn a_router_without_hooks_answers_them_all_with_nothing() {
         let cell = cell(versions::V26_1);
-        let mut dispatcher = RouterDispatcher::new(Arc::new(Router::<Seen>::builder().build()));
+        let dispatcher = RouterDispatcher::new(Arc::new(Router::<Seen>::builder().build()));
 
-        dispatcher.on_open(cell.as_ref()).expect("nothing to do");
         dispatcher
-            .on_tick(cell.as_ref())
+            .on_open(cell.as_ref())
             .await
-            .expect("nothing to do");
-        let mut error = ConnectionError::shutdown();
-        dispatcher
-            .on_error(cell.as_ref(), &mut error)
             .expect("nothing to do");
     }
 
     #[tokio::test]
-    async fn the_hooks_a_router_does_have_are_the_ones_it_runs() {
-        async fn ticked(conn: ConnRef<'_, Seen>) -> Result<(), DispatchError> {
+    async fn the_hook_a_router_does_have_is_the_one_it_runs() {
+        async fn opened(conn: ConnRef<'_, Seen>) -> Result<(), DispatchError> {
             conn.with(|c| {
                 c.state
                     .lock()
                     .expect("not poisoned")
-                    .push("tick".to_owned())
+                    .push("open".to_owned())
             });
             Ok(())
         }
 
         let cell = cell(versions::V26_1);
-        let router = Arc::new(
-            Router::<Seen>::builder()
-                .on_open(|conn: ConnRef<'_, Seen>| {
-                    conn.with(|c| {
-                        c.state
-                            .lock()
-                            .expect("not poisoned")
-                            .push("open".to_owned())
-                    });
-                    Ok(())
-                })
-                .on_tick(ticked)
-                .on_error(|conn: ConnRef<'_, Seen>, error: &mut ConnectionError| {
-                    conn.with(|c| {
-                        c.state
-                            .lock()
-                            .expect("not poisoned")
-                            .push(error.reason().to_owned());
-                    });
-                    Ok(())
-                })
-                .build(),
-        );
-        let mut dispatcher = router.make();
+        let router = Arc::new(Router::<Seen>::builder().on_open(opened).build());
 
-        dispatcher.on_open(cell.as_ref()).expect("opens");
-        dispatcher.on_tick(cell.as_ref()).await.expect("ticks");
-        let mut error = ConnectionError::timeout();
-        dispatcher
-            .on_error(cell.as_ref(), &mut error)
-            .expect("reports");
-
-        assert_eq!(
-            seen(&cell),
-            vec![
-                "open".to_owned(),
-                "tick".to_owned(),
-                "peer-timeout".to_owned()
-            ],
-        );
+        router.make().on_open(cell.as_ref()).await.expect("opens");
+        assert_eq!(seen(&cell), vec!["open".to_owned()]);
     }
 
     #[test]

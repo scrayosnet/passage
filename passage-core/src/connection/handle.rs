@@ -1,10 +1,14 @@
 use crate::codec::{Cipher, Frame};
 use crate::common::Phase;
 use crate::common::ProtocolVersion;
+use crate::connection::DispatchError;
 use crate::connection::error::Result;
 use crate::packet::packet::Packet;
 use crate::wire::Options;
 use std::sync::{Mutex, TryLockError};
+use std::time::Duration;
+use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 /// An operation that should be applied to the outgoing socket in order. This only applies to socket
 /// operations which are order-sensitive (e.g., send before encrypt).
@@ -48,11 +52,22 @@ pub struct Conn<S> {
     options: Options,
 
     /// Whether the peer is expected to stay quiet. A frame arriving while this is set is a protocol
-    /// break rather than input to be handled later. Enabled by default.
+    /// break rather than input to be handled later. Open to begin with, because a server reads the
+    /// handshake before any handler of its own has run.
     gated: bool,
 
     /// Whether the connection should end once the queue has been cleared.
     closing: bool,
+
+    /// When the connection gives up on its own, if it has a deadline at all. Re-read every round.
+    deadline: Option<Instant>,
+
+    /// The token that ends the connection from outside.
+    shutdown: CancellationToken,
+
+    /// What the connection is ending for, if it is ending for a failure. It is what the
+    /// [`Outcome`](crate::connection::Outcome) reports.
+    error: Option<DispatchError>,
 }
 
 impl<S> Conn<S> {
@@ -86,6 +101,40 @@ impl<S> Conn<S> {
         self.phase = phase;
     }
 
+    /// When the connection gives up on its own, if it has a deadline at all.
+    #[must_use]
+    pub fn deadline(&self) -> Option<Instant> {
+        self.deadline
+    }
+
+    /// Moves (or removes) the deadline. It is read again every round, so it takes effect on the
+    /// next one.
+    pub fn set_deadline(&mut self, deadline: Option<Instant>) {
+        self.deadline = deadline;
+    }
+
+    /// Sets the deadline to `after` from now.
+    pub fn expire_in(&mut self, after: Duration) {
+        self.deadline = Some(Instant::now() + after);
+    }
+
+    /// The token the connection ends on. A handler may await it to answer a shutdown itself.
+    #[must_use]
+    pub fn shutdown(&self) -> &CancellationToken {
+        &self.shutdown
+    }
+
+    /// Replaces the shutdown token, so the connection ends on `shutdown` from here on.
+    pub fn set_shutdown(&mut self, shutdown: CancellationToken) {
+        self.shutdown = shutdown;
+    }
+
+    /// Replaces the shutdown token with a fresh one. A handler answering a cancellation needs this,
+    /// or the same cancellation cuts off what it writes.
+    pub fn detach(&mut self) {
+        self.shutdown = CancellationToken::new();
+    }
+
     /// Encodes a packet against the current version and queues it for the wire.
     ///
     /// # Errors
@@ -103,31 +152,55 @@ impl<S> Conn<S> {
         self.out.push(Out::Cipher(cipher));
     }
 
-    /// Disables reading new packet frames until [`release`](Conn::release) is called.
+    /// Requires the peer to stay quiet until [`release`](Conn::release) is called: work it is
+    /// expected to wait for, such as an authentication round trip.
+    ///
+    /// The socket is still read, so a hangup is still noticed. A frame that arrives while the gate
+    /// is shut ends the connection with
+    /// [`ConnectionError::EarlyPacket`](crate::connection::ConnectionError::EarlyPacket).
     pub fn gate(&mut self) {
         self.gated = true;
     }
 
-    /// Enables reading new packet frames after [`gate`](Conn::gate) was called.
+    /// Lets the peer speak again after [`gate`](Conn::gate) was called.
     pub fn release(&mut self) {
         self.gated = false;
     }
 
-    /// Whether new packet frames will currently be read.
+    /// Whether the peer is currently required to stay quiet.
     #[must_use]
     pub fn gated(&self) -> bool {
         self.gated
     }
 
-    /// Schedules the connection to end after the queue has been cleared.
+    /// Ends the connection, once everything queued has been written.
     pub fn close(&mut self) {
         self.closing = true;
     }
 
-    /// Whether the connection is scheduled to end.
+    /// Ends the connection with a reason, once everything queued has been written. The first
+    /// failure is the one reported; later ones are its wake and are dropped.
+    pub fn fail(&mut self, error: DispatchError) {
+        self.error.get_or_insert(error);
+        self.closing = true;
+    }
+
+    /// Whether the connection is ending.
     #[must_use]
     pub fn closing(&self) -> bool {
         self.closing
+    }
+
+    /// Takes what the connection is ending for, if it is ending for a failure.
+    pub(crate) fn take_error(&mut self) -> Option<DispatchError> {
+        self.error.take()
+    }
+
+    /// Whether anything is waiting for the wire. The loop asks after polling its handlers, so that
+    /// one which queued a packet and then went back to waiting does not hold it until the next
+    /// event.
+    pub(crate) fn queued(&self) -> bool {
+        !self.out.is_empty()
     }
 
     /// Swaps the outbox to the loop, leaving `spare`'s allocation behind.
@@ -142,8 +215,11 @@ pub struct ConnCell<S> {
 }
 
 impl<S> ConnCell<S> {
-    /// Creates a cell holding `state`, starting in `version` and `phase`. The connections starts gated
-    /// by default.
+    /// Creates a cell holding `state`, starting in `version` and `phase`.
+    ///
+    /// It starts with no deadline and a token nobody else holds; the connection arms both from its
+    /// own configuration before it runs. The peer is free to speak: a handler shuts the gate when
+    /// it wants it quiet.
     pub(crate) fn new(state: S, version: ProtocolVersion, phase: Phase, options: Options) -> Self {
         Self {
             inner: Mutex::new(Conn {
@@ -152,8 +228,11 @@ impl<S> ConnCell<S> {
                 version,
                 phase,
                 options,
-                gated: true,
+                gated: false,
                 closing: false,
+                deadline: None,
+                shutdown: CancellationToken::new(),
+                error: None,
             }),
         }
     }
@@ -266,11 +345,12 @@ impl<'a, S> ConnRef<'a, S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::NoCipher;
     use super::*;
+    use crate::codec::NoCipher;
     use crate::common::versions;
     use crate::connection::ConnectionError;
     use crate::wire::{Reader, WireResult, Writer};
+    use anyhow::anyhow;
 
     /// A packet that exists only from 26.1 on, so sending it at an older version is a mistake the
     /// encoder can catch.
@@ -371,8 +451,8 @@ mod tests {
 
     #[test]
     fn one_closure_is_one_indivisible_change() {
-        // What `Batch` used to be for. A tick handler cannot land a keep-alive between the
-        // disconnect message and the close, because it cannot run until this closure returns.
+        // A keep-alive handler cannot land a packet between the disconnect message and the
+        // close, because it cannot run until this closure returns.
         let cell = cell();
         let conn = cell.as_ref();
 
@@ -391,6 +471,7 @@ mod tests {
 
     #[test]
     fn the_gate_is_a_flag_the_loop_reads_not_a_lock() {
+        // It starts open: a server reads the handshake before any handler has run.
         let cell = cell();
         let conn = cell.as_ref();
 
@@ -432,6 +513,69 @@ mod tests {
         let cell = cell();
         let conn = cell.as_ref();
         conn.with(|_| conn.with(|_| ()));
+    }
+
+    #[test]
+    fn the_limits_are_the_handlers_to_move() {
+        // A handler that says goodbye before the deadline reads it and gives itself room.
+        let cell = cell();
+        let conn = cell.as_ref();
+
+        assert_eq!(conn.with(|c| c.deadline()), None);
+        let at = Instant::now() + Duration::from_secs(30);
+        conn.with(|c| c.set_deadline(Some(at)));
+        assert_eq!(conn.with(|c| c.deadline()), Some(at));
+
+        conn.with(|c| c.expire_in(Duration::from_secs(5)));
+        let moved = conn.with(|c| c.deadline()).expect("a deadline");
+        assert!(moved < at, "five seconds from now, not thirty");
+
+        conn.with(|c| c.set_deadline(None));
+        assert_eq!(conn.with(|c| c.deadline()), None, "and it can be removed");
+    }
+
+    #[test]
+    fn detaching_leaves_the_cancellation_behind_rather_than_ignoring_it() {
+        // A cancelled token stays cancelled, so a handler answering one takes a fresh token
+        // instead; the loop reads back what it took.
+        let cell = cell();
+        let conn = cell.as_ref();
+
+        let shutdown = CancellationToken::new();
+        conn.with(|c| c.set_shutdown(shutdown.clone()));
+        shutdown.cancel();
+        assert!(conn.with(|c| c.shutdown().is_cancelled()));
+
+        conn.with(Conn::detach);
+        assert!(!conn.with(|c| c.shutdown().is_cancelled()));
+        assert!(shutdown.is_cancelled(), "the old one is untouched");
+    }
+
+    #[test]
+    fn the_first_failure_is_the_one_the_connection_ends_for() {
+        // Everything after the first is its wake: a write to a socket nobody is reading, another
+        // handler noticing the same hangup.
+        let cell = cell();
+        let conn = cell.as_ref();
+        assert!(!conn.with(|c| c.closing()));
+
+        conn.with(|c| c.fail(DispatchError::peer("refused", anyhow!("not today"))));
+        conn.with(|c| c.fail(DispatchError::internal("broke", anyhow!("and then this"))));
+        assert!(conn.with(|c| c.closing()));
+        assert_eq!(
+            conn.with(|c| c.take_error()).map(|error| error.reason()),
+            Some("refused"),
+        );
+    }
+
+    #[test]
+    fn closing_ends_the_connection_without_a_reason_to_report() {
+        let cell = cell();
+        let conn = cell.as_ref();
+
+        conn.with(Conn::close);
+        assert!(conn.with(|c| c.closing()));
+        assert!(conn.with(|c| c.take_error()).is_none());
     }
 
     #[test]

@@ -114,21 +114,9 @@ impl<L: Listener, F, M, A: Layer<L::Io, L::Addr>> Server<L, F, M, A> {
         self
     }
 
-    /// Sets the tick interval for the connection config.
-    pub fn tick_interval(mut self, interval: Option<Duration>) -> Self {
-        self.config.tick_interval = interval;
-        self
-    }
-
     /// Sets the max lifetime of the connection config.
     pub fn max_lifetime(mut self, after: Option<Duration>) -> Self {
         self.config.max_lifetime = after;
-        self
-    }
-
-    /// Sets the graceful shutdown timeout of the connection config.
-    pub fn close_timeout(mut self, after: Option<Duration>) -> Self {
-        self.config.close_timeout = after;
         self
     }
 
@@ -206,8 +194,7 @@ where
     /// canceled.
     ///
     /// Every connection holds a child of the shutdown token, so cancelling the server stops the
-    /// accept loop *and* every live connection at once. Each connection then gets its
-    /// [`close_timeout`](crate::connection::Options::close_timeout) to say goodbye;
+    /// accept loop *and* every live connection at once.
     /// [`drain_timeout`](Server::drain_timeout) bounds how long the server waits for all of them.
     pub async fn serve(mut self) {
         // The shared server state, used to create new connections.

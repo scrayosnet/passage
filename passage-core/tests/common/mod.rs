@@ -30,11 +30,13 @@ pub use notes::Notes;
 pub use raw::RawClient;
 pub use scenario::{Meeting, Scenario, Served, Side, TestClient, client};
 
+use futures::future::BoxFuture;
 use packets::{Handshake, Intent};
-use passage_core::connection::{Conn, ConnRef, ConnectionError, DispatchError};
+use passage_core::connection::{Conn, ConnRef, DispatchError};
 use passage_core::router::{Handler, Router, RouterBuilder};
 use passage_core::{Packet, Phase};
 use std::fmt::Debug;
+use std::time::Duration;
 
 /// Starts a router whose state is a set of [`Notes`].
 pub fn router() -> RouterBuilder<Notes> {
@@ -101,18 +103,9 @@ impl Routes for RouterBuilder<Notes> {
     }
 }
 
-/// Wraps an open hook written against the connection directly.
-///
-/// The hook itself is handed a [`ConnRef`], because it is free to await; every hook in this suite
-/// is synchronous, so the suite writes the `with` once here instead of in each of them.
+/// Wraps an open hook written against the connection directly. The hook itself is handed a
+/// [`ConnRef`] because it is free to await; the ones that do not are written like this.
 pub fn opens(
-    hook: impl Fn(&mut Conn<Notes>) -> Result<(), DispatchError> + Send + Sync + 'static,
-) -> impl for<'a> Fn(ConnRef<'a, Notes>) -> Result<(), DispatchError> + Send + Sync + 'static {
-    move |conn| conn.with(|conn| hook(conn))
-}
-
-/// Wraps a tick hook written against the connection directly.
-pub fn ticks(
     hook: impl Fn(&mut Conn<Notes>) -> Result<(), DispatchError> + Send + Sync + 'static,
 ) -> impl for<'a> Fn(ConnRef<'a, Notes>) -> std::future::Ready<Result<(), DispatchError>>
 + Send
@@ -121,17 +114,24 @@ pub fn ticks(
     move |conn: ConnRef<'_, Notes>| std::future::ready(conn.with(|conn| hook(conn)))
 }
 
-/// Wraps an error hook written against the connection directly.
-pub fn errors(
-    hook: impl Fn(&mut Conn<Notes>, &mut ConnectionError) -> Result<(), DispatchError>
-    + Send
-    + Sync
-    + 'static,
-) -> impl for<'a> Fn(ConnRef<'a, Notes>, &mut ConnectionError) -> Result<(), DispatchError>
+/// A keep-alive loop, as an open hook: the shape a driver's clock takes.
+pub fn keeps_alive(
+    every: Duration,
+) -> impl for<'a> Fn(ConnRef<'a, Notes>) -> BoxFuture<'a, Result<(), DispatchError>>
 + Send
 + Sync
 + 'static {
-    move |conn, error| conn.with(|conn| hook(conn, error))
+    move |conn: ConnRef<'_, Notes>| {
+        Box::pin(async move {
+            loop {
+                tokio::time::sleep(every).await;
+                // Only once the connection has something to wait for.
+                if conn.phase() == Phase::Configuration {
+                    conn.send(packets::KeepAlive { id: 1 })?;
+                }
+            }
+        })
+    }
 }
 
 /// The phase an intent leads to.
@@ -173,6 +173,11 @@ pub fn greet(conn: &mut Conn<Notes>, intent: Intent) -> Result<(), DispatchError
 }
 
 /// The open hook for a client that has nothing to add to its greeting.
-pub fn opening(intent: Intent) -> impl for<'a> Fn(ConnRef<'a, Notes>) -> Result<(), DispatchError> {
-    move |conn| conn.with(|conn| greet(conn, intent))
+pub fn opening(
+    intent: Intent,
+) -> impl for<'a> Fn(ConnRef<'a, Notes>) -> std::future::Ready<Result<(), DispatchError>>
++ Send
++ Sync
++ 'static {
+    opens(move |conn| greet(conn, intent))
 }

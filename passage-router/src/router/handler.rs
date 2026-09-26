@@ -1,15 +1,16 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-use anyhow::Context;
-use tracing::{debug, info, warn};
-use passage_core::codec::NoCipher;
-use passage_core::connection::{ConnRef, ConnectionError, DispatchError};
-use passage_core::packet::{configuration, handshake, login, status};
-use passage_core::{versions, Phase};
-use passage_core::wire::ByteString;
 use crate::cookie::{AuthCookie, Cookie, SessionCookie};
 use crate::crypto;
-use crate::router::state::{Step, State};
+use crate::router::state::{State, Step};
 use crate::router::utils::ConnRefExt;
+use anyhow::{Context, anyhow};
+use passage_core::codec::NoCipher;
+use passage_core::connection::{ConnRef, DispatchError};
+use passage_core::packet::{configuration, handshake, login, status};
+use passage_core::wire::ByteString;
+use passage_core::{Phase, versions};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::time::Instant;
+use tracing::{debug, info, warn};
 
 /// Fails unless the connection is at the step this handler answers.
 macro_rules! expect_step {
@@ -29,40 +30,86 @@ macro_rules! expect_step {
     };
 }
 
-pub(crate) fn on_open(conn: ConnRef<'_, State>) -> crate::Result<(), DispatchError> {
-    let _ = conn;
-    // TODO log the connection
-    Ok(())
+/// The interval between keep alive packets. The client drops the connection after 20 seconds
+/// without one.
+const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(16);
+
+/// How long before the connection's deadline the client is told that it ran out of time.
+const GRACE: Duration = Duration::from_secs(1);
+
+/// Everything this connection does on a clock: keep the client alive while it waits for a target,
+/// and tell it why if the connection is about to go away. The connection has no timer of its own
+/// beyond its deadline, so this runs for as long as the connection does.
+pub(crate) async fn on_open(conn: ConnRef<'_, State>) -> crate::Result<(), DispatchError> {
+    let shutdown = conn.with(|c| c.shutdown().clone());
+    let deadline = conn.with(|c| c.deadline());
+
+    let reason = tokio::select! {
+        result = keep_alives(conn) => return result,
+        () = shutdown.cancelled() => "disconnect_restart",
+        () = expiring(deadline) => "disconnect_timeout",
+    };
+    farewell(conn, reason).await
 }
 
-pub(crate) async fn on_tick(conn: ConnRef<'_, State>) -> crate::Result<(), DispatchError> {
-    let (keep_alive_id, phase) = conn.with(|c| (c.state.keep_alive_id.clone(), c.phase()));
-    if phase != Phase::Configuration {
-        return Ok(())
-    }
+/// Exchanges keep alives while the client waits for its target.
+async fn keep_alives(conn: ConnRef<'_, State>) -> crate::Result<(), DispatchError> {
+    loop {
+        tokio::time::sleep(KEEP_ALIVE_INTERVAL).await;
 
-    // If the last keep alive sent was not cleared (received back), then the connection has timed out
-    // and should be closed.
-    if keep_alive_id.is_some() {
-        let message = conn.localize("disconnect_timeout", &[]).await;
-        return conn.with(|c| {
-            c.send(configuration::ServerDisconnectPacket::text(message))?;
-            c.close();
-            Ok(())
-        })
-    }
+        // Keep alives are only exchanged while the client is waiting for its target.
+        let (phase, pending) = conn.with(|c| (c.phase(), c.state.keep_alive_id));
+        if phase != Phase::Configuration {
+            continue;
+        }
 
-    // Send the next keep alive packet.
-    let id = crypto::generate_keep_alive();
-    conn.send(configuration::ServerKeepAlivePacket::new(id))?;
-    Ok(())
+        // A keep alive that was never answered means the client is gone.
+        if pending.is_some() {
+            return farewell(conn, "disconnect_timeout").await;
+        }
+
+        // Send the next keep alive packet, and remember what the client has to answer with.
+        let id = crypto::generate_keep_alive();
+        conn.with(|c| {
+            c.send(configuration::ServerKeepAlivePacket::new(id))?;
+            c.state.keep_alive_id = Some(id);
+            Ok::<_, DispatchError>(())
+        })?;
+    }
 }
 
-// TODO has to be async!
-pub(crate) fn on_error(conn: ConnRef<'_, State>, error: &mut ConnectionError) -> crate::Result<(), DispatchError> {
-    let _ = (conn, error);
-    // TODO log the error, send disconnect packet, and close connection
-    Ok(())
+/// Resolves [`GRACE`] before `deadline`, or never if there is none.
+async fn expiring(deadline: Option<Instant>) {
+    match deadline {
+        Some(at) => tokio::time::sleep_until(at - GRACE).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Tells the client why it is being disconnected, then ends the connection with `reason`.
+///
+/// The phase decides which disconnect packet to use; a connection that never got past the handshake
+/// has none to use, so it is simply dropped.
+async fn farewell(
+    conn: ConnRef<'_, State>,
+    reason: &'static str,
+) -> crate::Result<(), DispatchError> {
+    let phase = conn.phase();
+    if !matches!(phase, Phase::Login | Phase::Configuration) {
+        return Err(DispatchError::peer(reason, anyhow!("{reason}")));
+    }
+
+    let message = conn.localize(reason, &[]).await;
+    conn.with(|c| {
+        // A cancelled shutdown token would otherwise refuse the write it caused.
+        c.detach();
+        match phase {
+            Phase::Login => c.send(login::ServerDisconnectPacket::text(message))?,
+            _ => c.send(configuration::ServerDisconnectPacket::text(message))?,
+        }
+        c.fail(DispatchError::peer(reason, anyhow!("{reason}")));
+        Ok(())
+    })
 }
 
 pub(crate) async fn on_handshake_intention_packet(
@@ -107,7 +154,7 @@ pub(crate) async fn on_status_request_packet(
                 warn!(err = %err, "status adapter error");
             }
             conn.close();
-            return Ok(())
+            return Ok(());
         }
     };
 
@@ -156,7 +203,13 @@ pub(crate) async fn on_login_login_start(
     // Ensure that the client supports the transfer packet. Otherwise, close the connection with a
     // disconnect packet. The packet will tell the client which minecraft version they should use.
     if conn.version() <= versions::V1_20_5 {
-        let preferred = conn.status().await.unwrap_or_default().unwrap_or_default().version.name;
+        let preferred = conn
+            .status()
+            .await
+            .unwrap_or_default()
+            .unwrap_or_default()
+            .version
+            .name;
         let reason = conn
             .localize("disconnect_unsupported", &[("preferred", preferred)])
             .await;
@@ -170,7 +223,8 @@ pub(crate) async fn on_login_login_start(
     'transfer: {
         let has_secret = conn.with(|c| c.state.secret.is_some());
         if has_secret && transfer {
-            let auth_cookie = conn.cookie::<AuthCookie>()
+            let auth_cookie = conn
+                .cookie::<AuthCookie>()
                 .await
                 .context("Failed to get the auth cookie")?;
             let Some(auth_cookie) = auth_cookie else {
@@ -182,7 +236,9 @@ pub(crate) async fn on_login_login_start(
                 .duration_since(UNIX_EPOCH)
                 .expect("time error")
                 .as_secs();
-            if auth_cookie.client_addr.ip() != client_address.ip() || (auth_cookie.timestamp + cookie_expiry) < now {
+            if auth_cookie.client_addr.ip() != client_address.ip()
+                || (auth_cookie.timestamp + cookie_expiry) < now
+            {
                 debug!("invalid auth cookie payload received, skipping auth cookie");
                 break 'transfer;
             }
@@ -207,7 +263,10 @@ pub(crate) async fn on_login_login_start(
             verify_token: Default::default(),
             should_authenticate: !authenticated,
         })?;
-        c.state.step = Step::Encrypt { verify_token, authenticated };
+        c.state.step = Step::Encrypt {
+            verify_token,
+            authenticated,
+        };
         Ok::<_, DispatchError>(())
     })?;
     Ok(())

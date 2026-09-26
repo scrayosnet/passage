@@ -208,5 +208,5 @@ async fn a_peer_that_vanishes_is_noticed_rather_than_waited_for() {
     let outcome = server.await.expect("no panic");
     let error = outcome.error.expect("an ending");
     assert_eq!(error.reason(), "peer-closed");
-    assert!(!error.can_reply(), "there is nobody left to read an answer");
+    assert!(error.is_peer_error(), "ordinary weather, not a problem");
 }

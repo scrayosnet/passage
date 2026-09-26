@@ -88,21 +88,9 @@ impl<C: Connector, F, M, A: Layer<C::Io, C::Addr>> Client<C, F, M, A> {
         self
     }
 
-    /// Sets the tick interval for the connection config.
-    pub fn tick_interval(mut self, interval: Option<Duration>) -> Self {
-        self.config.tick_interval = interval;
-        self
-    }
-
     /// Sets the max lifetime of the connection config.
     pub fn max_lifetime(mut self, after: Option<Duration>) -> Self {
         self.config.max_lifetime = after;
-        self
-    }
-
-    /// Sets the graceful shutdown timeout of the connection config.
-    pub fn close_timeout(mut self, after: Option<Duration>) -> Self {
-        self.config.close_timeout = after;
         self
     }
 

@@ -1,3 +1,4 @@
+use crate::codec::CodecError;
 use crate::connection::{ConnRef, ConnectionError};
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -63,6 +64,13 @@ impl DispatchError {
         }
     }
 
+    /// The stable, low-cardinality label this failure is counted under. Never peer-controlled. A
+    /// handler that does not classify its own gets `dispatch`.
+    #[must_use]
+    pub fn reason(&self) -> &'static str {
+        self.label
+    }
+
     /// Whether the peer is to blame for this error.
     #[must_use]
     pub fn is_peer_error(&self) -> bool {
@@ -94,7 +102,6 @@ impl From<anyhow::Error> for DispatchError {
     }
 }
 
-// TODO remove this if possible
 /// So that a handler can `?` what it does to its own connection -- `conn.send(..)` and friends
 /// return a [`ConnectionError`]. The classification the connection already made is carried across
 /// rather than flattened to the default.
@@ -112,6 +119,14 @@ impl From<ConnectionError> for DispatchError {
     }
 }
 
+/// So that the socket's own failures reach the same place by the same route. A codec error is a
+/// connection error before it is anything else, which is what decides whether the peer is to blame.
+impl From<CodecError> for DispatchError {
+    fn from(error: CodecError) -> Self {
+        ConnectionError::from(error).into()
+    }
+}
+
 /// The dispatch result type, defaulting to [`DispatchError`]. Private, so that the crate has one
 /// exported `Result` alias ([`ConnectionError`]'s) rather than two that shadow each other.
 type Result<T, E = DispatchError> = std::result::Result<T, E>;
@@ -126,18 +141,12 @@ fn done<'a>() -> BoxFuture<'a, Result<()>> {
 ///
 /// Every method has a default that does nothing, so an implementation only writes the hooks it
 /// cares about.
+///
+/// [`on_open`](Dispatcher::on_open) and [`on_frame`](Dispatcher::on_frame) hand back a future the
+/// connection drives alongside everything else it is doing. One that resolves without waiting
+/// finishes at dispatch, before the next frame is read; one that waits keeps running until it is
+/// done or the connection ends.
 pub trait Dispatcher<S> {
-    /// Called once, before the connection reads or writes anything.
-    ///
-    /// # Errors
-    ///
-    /// Returns whatever the implementation raises. An error here fails the connection before the
-    /// first frame, and [`on_error`](Dispatcher::on_error) still gets the last word.
-    fn on_open(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
-        let _ = conn;
-        Ok(())
-    }
-
     /// Called when the connection changes the protocol version. This can be used to update internal
     /// dispatch tables.
     ///
@@ -150,12 +159,26 @@ pub trait Dispatcher<S> {
         Ok(())
     }
 
+    /// Handles the connection opening. Called once, before the connection reads the first frame.
+    ///
+    /// The connection has no clock of its own beyond its deadline, so a future that keeps running
+    /// is where a driver puts its keep-alives, and where it answers a shutdown or a deadline it
+    /// wants the peer to be told about.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever the handler raises. An error here ends the connection.
+    fn on_open<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<()>> {
+        let _ = conn;
+        done()
+    }
+
     /// Handles an incoming packet. `payload` leads with the ID varint the frame was routed by.
     ///
     /// # Errors
     ///
-    /// Returns whatever the handler raises. An error here fails the connection, and
-    /// [`on_error`](Dispatcher::on_error) gets the last word before the socket goes away.
+    /// Returns whatever the handler raises. An error here ends the connection. A handler that wants
+    /// the peer told why sends the message itself before it returns.
     fn on_frame<'a>(
         &self,
         conn: ConnRef<'a, S>,
@@ -165,45 +188,17 @@ pub trait Dispatcher<S> {
         let _ = (conn, id, payload);
         done()
     }
-
-    /// Handles a tick event.
-    ///
-    /// # Errors
-    ///
-    /// Returns whatever the tick handler raises. An error here fails the connection.
-    fn on_tick<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<()>> {
-        let _ = conn;
-        done()
-    }
-
-    /// Handles a connection error. It is called before the connection is closed and should be used
-    /// to send custom disconnect packets to the peer.
-    ///
-    /// It is a last word, not a veto: whether the connection ends was decided before it was called,
-    /// and the error it returns is logged rather than reported. It may rewrite `error`, which is
-    /// what the connection then reports. Check
-    /// [`ConnectionError::can_reply`] before composing a message: after a hangup there is nobody
-    /// left to read it.
-    ///
-    /// # Errors
-    ///
-    /// Returns whatever the hook raises. The failure is logged and does not replace the ending the
-    /// connection already had.
-    fn on_error(&self, conn: ConnRef<'_, S>, error: &mut ConnectionError) -> Result<()> {
-        let _ = (conn, error);
-        Ok(())
-    }
 }
 
 impl<S> Dispatcher<S> for () {}
 
 impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
-    fn on_open(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
-        (**self).on_open(conn)
-    }
-
     fn on_version(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
         (**self).on_version(conn)
+    }
+
+    fn on_open<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<()>> {
+        (**self).on_open(conn)
     }
 
     fn on_frame<'a>(
@@ -214,33 +209,24 @@ impl<S, D: Dispatcher<S> + ?Sized> Dispatcher<S> for Box<D> {
     ) -> BoxFuture<'a, Result<()>> {
         (**self).on_frame(conn, id, payload)
     }
-
-    fn on_tick<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<()>> {
-        (**self).on_tick(conn)
-    }
-
-    fn on_error(&self, conn: ConnRef<'_, S>, error: &mut ConnectionError) -> Result<()> {
-        (**self).on_error(conn, error)
-    }
 }
 
 // There is deliberately no impl for `Arc<D>`. `on_version` takes `&mut self`, so a shared dispatcher
 // could not rebind its table -- it would silently keep serving every connection from the table it
 // started on, which is exactly the bug the connection calls `on_version` to prevent.
-
 impl<S, D: Dispatcher<S>> Dispatcher<S> for Option<D> {
-    fn on_open(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
-        let Some(this) = self else {
-            return Ok(());
-        };
-        this.on_open(conn)
-    }
-
     fn on_version(&mut self, conn: ConnRef<'_, S>) -> Result<()> {
         let Some(this) = self else {
             return Ok(());
         };
         this.on_version(conn)
+    }
+
+    fn on_open<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<()>> {
+        let Some(this) = self else {
+            return done();
+        };
+        this.on_open(conn)
     }
 
     fn on_frame<'a>(
@@ -253,20 +239,6 @@ impl<S, D: Dispatcher<S>> Dispatcher<S> for Option<D> {
             return done();
         };
         this.on_frame(conn, id, payload)
-    }
-
-    fn on_tick<'a>(&self, conn: ConnRef<'a, S>) -> BoxFuture<'a, Result<()>> {
-        let Some(this) = self else {
-            return done();
-        };
-        this.on_tick(conn)
-    }
-
-    fn on_error(&self, conn: ConnRef<'_, S>, error: &mut ConnectionError) -> Result<()> {
-        let Some(this) = self else {
-            return Ok(());
-        };
-        this.on_error(conn, error)
     }
 }
 
@@ -310,7 +282,7 @@ pub fn make_with<F>(make: F) -> MakeDispatcherFn<F> {
 mod tests {
     use super::*;
     use crate::common::Phase;
-    use crate::common::{ProtocolVersion, versions};
+    use crate::common::versions;
     use crate::connection::ConnCell;
     use crate::wire::Options;
     use anyhow::anyhow;
@@ -329,14 +301,14 @@ mod tests {
     }
 
     impl Dispatcher<()> for Recorder {
-        fn on_open(&mut self, _conn: ConnRef<'_, ()>) -> Result<()> {
-            self.note("open");
-            Ok(())
-        }
-
         fn on_version(&mut self, _conn: ConnRef<'_, ()>) -> Result<()> {
             self.note("version");
             Ok(())
+        }
+
+        fn on_open<'a>(&self, _conn: ConnRef<'a, ()>) -> BoxFuture<'a, Result<()>> {
+            self.note("open");
+            done()
         }
 
         fn on_frame<'a>(
@@ -348,16 +320,6 @@ mod tests {
             self.note("frame");
             done()
         }
-
-        fn on_tick<'a>(&self, _conn: ConnRef<'a, ()>) -> BoxFuture<'a, Result<()>> {
-            self.note("tick");
-            done()
-        }
-
-        fn on_error(&self, _conn: ConnRef<'_, ()>, _error: &mut ConnectionError) -> Result<()> {
-            self.note("error");
-            Ok(())
-        }
     }
 
     /// Runs every hook on `dispatcher`, so a test only has to say what it expects to be recorded.
@@ -365,15 +327,12 @@ mod tests {
         let cell = ConnCell::new((), versions::V26_1, Phase::Login, Options::default());
         let conn = cell.as_ref();
 
-        dispatcher.on_open(conn).expect("opens");
+        dispatcher.on_open(conn).await.expect("opens");
         dispatcher.on_version(conn).expect("rebinds");
         dispatcher
             .on_frame(conn, 0x00, Bytes::new())
             .await
             .expect("dispatches");
-        dispatcher.on_tick(conn).await.expect("ticks");
-        let mut error = ConnectionError::shutdown();
-        dispatcher.on_error(conn, &mut error).expect("reports");
     }
 
     #[tokio::test]
@@ -394,7 +353,7 @@ mod tests {
         run_every_hook(dispatcher).await;
         assert_eq!(
             *seen.lock().expect("not poisoned"),
-            vec!["open", "version", "frame", "tick", "error"],
+            vec!["open", "version", "frame"],
         );
     }
 
@@ -407,13 +366,13 @@ mod tests {
         .await;
         assert_eq!(
             *seen.lock().expect("not poisoned"),
-            vec!["open", "version", "frame", "tick", "error"],
+            vec!["open", "version", "frame"],
         );
 
         run_every_hook(None::<Recorder>).await;
         assert_eq!(
             seen.lock().expect("not poisoned").len(),
-            5,
+            3,
             "nothing was added"
         );
     }
@@ -462,23 +421,5 @@ mod tests {
 
         // And a connection that handles nothing needs no dispatcher at all.
         MakeDispatcher::<()>::make(&());
-    }
-
-    #[test]
-    fn a_version_the_dispatcher_never_hears_about_is_the_bug_on_open_prevents() {
-        // Documented here because it is the whole reason `on_open` takes `&mut self`: a dispatcher
-        // that binds a version-dependent table only on `on_version` never binds it for a client.
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let mut dispatcher = Recorder {
-            seen: Arc::clone(&seen),
-        };
-        let cell = ConnCell::new(
-            (),
-            ProtocolVersion::UNKNOWN,
-            Phase::Handshake,
-            Options::default(),
-        );
-        dispatcher.on_open(cell.as_ref()).expect("opens");
-        assert_eq!(*seen.lock().expect("not poisoned"), vec!["open"]);
     }
 }

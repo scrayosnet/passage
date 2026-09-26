@@ -105,7 +105,6 @@ async fn a_client_with_no_open_hook_says_nothing_at_all() {
     let mut peer = RawClient::new(server_io);
 
     let outcome = client(client_io, router().build())
-        .close_timeout(None)
         .max_lifetime(Some(std::time::Duration::from_millis(50)))
         .connect()
         .await

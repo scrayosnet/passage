@@ -12,13 +12,13 @@ use common::*;
 use futures::future::BoxFuture;
 use passage_core::client::{Client, Connected};
 use passage_core::connection::{
-    ConnRef, ConnectionError, DispatchError, Dispatcher, MakeDispatcher, Options, Outcome,
-    make_with,
+    ConnRef, DispatchError, Dispatcher, MakeDispatcher, Options, Outcome, make_with,
 };
 use passage_core::{Phase, ProtocolVersion, versions};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 /// What a dispatcher was asked to do, in order.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -26,8 +26,7 @@ struct Log {
     opened: Vec<ProtocolVersion>,
     versions: Vec<ProtocolVersion>,
     frames: Vec<(i32, usize)>,
-    ticks: usize,
-    endings: Vec<&'static str>,
+    keep_alives: usize,
 }
 
 /// A dispatcher with no router behind it: it records what it is handed, and on the frame at
@@ -36,23 +35,47 @@ struct Log {
 struct Recorder {
     log: Arc<Mutex<Log>>,
     close_after: usize,
+    keep_alive: Option<Duration>,
 }
 
 impl Recorder {
     fn new(close_after: usize) -> (Arc<Mutex<Log>>, Self) {
         let log = Arc::new(Mutex::new(Log::default()));
-        (Arc::clone(&log), Self { log, close_after })
+        (
+            Arc::clone(&log),
+            Self {
+                log,
+                close_after,
+                keep_alive: None,
+            },
+        )
+    }
+
+    /// The same recorder, with a keep-alive of its own every `every`.
+    fn every(mut self, every: Duration) -> Self {
+        self.keep_alive = Some(every);
+        self
     }
 }
 
 impl Dispatcher<()> for Recorder {
-    fn on_open(&mut self, conn: ConnRef<'_, ()>) -> Result<(), DispatchError> {
-        self.log
-            .lock()
-            .expect("not poisoned")
-            .opened
-            .push(conn.version());
-        Ok(())
+    fn on_open<'a>(&self, conn: ConnRef<'a, ()>) -> BoxFuture<'a, Result<(), DispatchError>> {
+        {
+            let mut log = self.log.lock().expect("not poisoned");
+            log.opened.push(conn.version());
+        }
+
+        // A clock of the connection's own: a handler that runs as long as the connection does.
+        let Some(every) = self.keep_alive else {
+            return Box::pin(std::future::ready(Ok(())));
+        };
+        let log = Arc::clone(&self.log);
+        Box::pin(async move {
+            loop {
+                tokio::time::sleep(every).await;
+                log.lock().expect("not poisoned").keep_alives += 1;
+            }
+        })
     }
 
     fn on_version(&mut self, conn: ConnRef<'_, ()>) -> Result<(), DispatchError> {
@@ -90,24 +113,6 @@ impl Dispatcher<()> for Recorder {
         });
         Box::pin(std::future::ready(Ok(())))
     }
-
-    fn on_tick<'a>(&self, _conn: ConnRef<'a, ()>) -> BoxFuture<'a, Result<(), DispatchError>> {
-        self.log.lock().expect("not poisoned").ticks += 1;
-        Box::pin(std::future::ready(Ok(())))
-    }
-
-    fn on_error(
-        &self,
-        _conn: ConnRef<'_, ()>,
-        error: &mut ConnectionError,
-    ) -> Result<(), DispatchError> {
-        self.log
-            .lock()
-            .expect("not poisoned")
-            .endings
-            .push(error.reason());
-        Ok(())
-    }
 }
 
 /// Runs a connection over a socket pair with `dispatcher` in the router's place.
@@ -142,14 +147,13 @@ async fn a_connection_runs_on_a_dispatcher_that_is_not_a_router() {
     assert_eq!(
         *log.lock().expect("not poisoned"),
         Log {
-            // Opened at the configured version, then what the dispatcher itself asked for -- which
-            // it learns about the same way a router does, through the connection.
+            // Opened at the configured version, then what the dispatcher itself asked for. The
+            // first version is the one it starts at, told before anything is dispatched.
             opened: vec![ProtocolVersion::UNKNOWN],
-            versions: vec![versions::V26_1],
+            versions: vec![ProtocolVersion::UNKNOWN, versions::V26_1],
             // The payload leads with the ID, so a two byte body is three bytes here.
             frames: vec![(7, 3), (9, 1)],
-            ticks: 0,
-            endings: vec![],
+            keep_alives: 0,
         },
     );
 }
@@ -179,12 +183,13 @@ async fn a_dispatcher_is_opened_at_the_version_the_connection_starts_with() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_dispatcher_is_ticked_on_the_configured_interval_and_not_otherwise() {
+async fn a_clock_is_the_dispatchers_to_keep_and_the_connection_runs_it() {
+    // The connection has no timer beyond its deadline, so a dispatcher that wants one writes it
+    // as a handler that keeps running. The deadline ends it whatever it is in the middle of.
     let (log, recorder) = Recorder::new(usize::MAX);
     let (mut peer, server) = connect(
-        make_with(move || recorder.clone()),
+        make_with(move || recorder.clone().every(Duration::from_secs(1))),
         Options {
-            tick_interval: Some(Duration::from_secs(1)),
             max_lifetime: Some(Duration::from_secs(10)),
             ..Options::default()
         },
@@ -194,26 +199,21 @@ async fn a_dispatcher_is_ticked_on_the_configured_interval_and_not_otherwise() {
     let outcome = server.await.expect("no panic");
 
     // Ten intervals, give or take the one the deadline lands on.
-    let ticked = log.lock().expect("not poisoned").ticks;
-    assert!((9..=11).contains(&ticked), "ticked {ticked} times");
+    let ticked = log.lock().expect("not poisoned").keep_alives;
+    assert!((9..=11).contains(&ticked), "ran {ticked} times");
     assert_eq!(
         outcome.error.map(|error| error.reason()),
         Some("peer-timeout"),
     );
-    assert_eq!(
-        log.lock().expect("not poisoned").endings,
-        vec!["peer-timeout"]
-    );
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_connection_without_an_interval_is_never_ticked() {
-    // `tick_interval: None` is the opt-out, and it is the caller's to set.
+async fn a_dispatcher_that_wants_no_clock_is_given_none() {
+    // Nothing in the connection ticks by itself.
     let (log, recorder) = Recorder::new(usize::MAX);
     let (mut peer, server) = connect(
         make_with(move || recorder.clone()),
         Options {
-            tick_interval: None,
             max_lifetime: Some(Duration::from_secs(30)),
             ..Options::default()
         },
@@ -221,7 +221,7 @@ async fn a_connection_without_an_interval_is_never_ticked() {
 
     peer.send_raw(0x01, &[]).await;
     let _ = server.await.expect("no panic");
-    assert_eq!(log.lock().expect("not poisoned").ticks, 0);
+    assert_eq!(log.lock().expect("not poisoned").keep_alives, 0);
 }
 
 #[tokio::test]
@@ -249,18 +249,17 @@ async fn a_dispatcher_can_be_chosen_at_runtime() {
         vec![versions::V1_20_5],
         "through the box as well"
     );
-    assert_eq!(log.versions, vec![versions::V26_1]);
+    assert_eq!(log.versions, vec![versions::V1_20_5, versions::V26_1]);
 }
 
 #[tokio::test]
-async fn a_failure_the_hook_cannot_answer_still_reports_what_it_was() {
-    // `on_error` is a last word, not a second cause: if it fails, the connection still reports what
-    // it was ending for. Reporting the failed apology instead would lose the diagnosis exactly when
-    // it is most wanted.
+async fn a_handler_failure_is_what_the_connection_reports() {
+    // A handler that cannot answer the peer says so by failing, and the label it chose is what the
+    // outcome and the metrics are keyed by.
     #[derive(Clone)]
-    struct Unhelpful;
+    struct Refuses;
 
-    impl Dispatcher<()> for Unhelpful {
+    impl Dispatcher<()> for Refuses {
         fn on_frame<'a>(
             &self,
             _conn: ConnRef<'a, ()>,
@@ -272,20 +271,9 @@ async fn a_failure_the_hook_cannot_answer_still_reports_what_it_was() {
                 anyhow::anyhow!("what actually went wrong"),
             ))))
         }
-
-        fn on_error(
-            &self,
-            _conn: ConnRef<'_, ()>,
-            _error: &mut ConnectionError,
-        ) -> Result<(), DispatchError> {
-            Err(DispatchError::internal(
-                "the_answer_broke",
-                anyhow::anyhow!("and nobody needs to know"),
-            ))
-        }
     }
 
-    let (mut peer, server) = connect(make_with(|| Unhelpful), Options::default());
+    let (mut peer, server) = connect(make_with(|| Refuses), Options::default());
     peer.send_raw(0x00, &[]).await;
 
     let outcome = server.await.expect("no panic");
@@ -295,15 +283,13 @@ async fn a_failure_the_hook_cannot_answer_still_reports_what_it_was() {
 }
 
 #[tokio::test]
-async fn a_peer_that_vanishes_mid_flight_still_runs_the_hook() {
-    // A client drops while work it asked for is still running. If that ending never reached
-    // `on_error`, whatever the work reserved would be reserved forever -- the connection is gone,
-    // so no packet is ever dispatched again and no handler could catch it.
-    let (log, recorder) = Recorder::new(usize::MAX);
+async fn a_peer_that_vanishes_mid_flight_ends_the_connection() {
+    // A client drops while work it asked for is still running. Nothing is dispatched again, and the
+    // hangup is what the outcome reports.
+    let (_log, recorder) = Recorder::new(usize::MAX);
     let (mut peer, server) = connect(make_with(move || recorder.clone()), Options::default());
 
     peer.send_raw(0x00, &[]).await;
-    // Let the frame be dispatched, then vanish.
     tokio::task::yield_now().await;
     drop(peer);
 
@@ -312,8 +298,52 @@ async fn a_peer_that_vanishes_mid_flight_still_runs_the_hook() {
         outcome.error.map(|error| error.reason()),
         Some("peer-closed"),
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_handler_can_answer_a_shutdown_before_the_connection_ends_on_it() {
+    // The connection ends on a cancelled token, but a handler awaiting the token gets there
+    // first, with the phase and version in hand.
+    async fn farewell(conn: ConnRef<'_, ()>) -> Result<(), DispatchError> {
+        let shutdown = conn.with(|c| c.shutdown().clone());
+        shutdown.cancelled().await;
+        conn.with(|c| {
+            // Without this the cancellation that woke us also refuses the write.
+            c.detach();
+            c.set_phase(Phase::Login);
+            c.send(packets::Disconnect::text("restarting"))?;
+            c.fail(DispatchError::peer(
+                "said_goodbye",
+                anyhow::anyhow!("restarting"),
+            ));
+            Ok(())
+        })
+    }
+
+    struct Farewell;
+
+    impl Dispatcher<()> for Farewell {
+        fn on_open<'a>(&self, conn: ConnRef<'a, ()>) -> BoxFuture<'a, Result<(), DispatchError>> {
+            Box::pin(farewell(conn))
+        }
+    }
+
+    let (server_io, client_io) = tokio::io::duplex(4096);
+    let shutdown = CancellationToken::new();
+    let connection = Client::new(Connected::new(server_io, Side::Server))
+        .state(|_: &Side| ())
+        .dispatch(make_with(|| Farewell))
+        .graceful_shutdown(shutdown.clone());
+    let server = tokio::spawn(async move { connection.connect().await.expect("preconnected") });
+
+    let mut peer = RawClient::new(client_io);
+    shutdown.cancel();
+
+    let goodbye = peer.expect::<packets::Disconnect>().await;
+    assert_eq!(goodbye.reason, "restarting");
+    let outcome = server.await.expect("no panic");
     assert_eq!(
-        log.lock().expect("not poisoned").endings,
-        vec!["peer-closed"]
+        outcome.error.map(|error| error.reason()),
+        Some("said_goodbye"),
     );
 }

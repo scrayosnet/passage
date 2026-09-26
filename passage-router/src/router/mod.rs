@@ -1,6 +1,6 @@
 mod handler;
-mod utils;
 mod state;
+mod utils;
 
 use crate::adapter::adapter::Route;
 use crate::adapter::authentication::DynAuthenticationAdapter;
@@ -9,11 +9,11 @@ use crate::adapter::localization::DynLocalizationAdapter;
 use crate::adapter::status::DynStatusAdapter;
 use crate::error::Result;
 use crate::router::handler::*;
+use crate::router::state::State;
 use passage_core::router::Router;
 use passage_core::server::Server;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use crate::router::state::State;
 
 /// This crate uses enum dispatch to select the adapters at runtime.
 type DynRoute = Route<
@@ -44,8 +44,6 @@ impl Passage {
         let router = Router::builder()
             // general handlers
             .on_open(on_open)
-            .on_tick(on_tick)
-            .on_error(on_error)
             // packet handlers
             .on(on_handshake_intention_packet)?
             .on(on_status_request_packet)?

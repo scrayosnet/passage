@@ -1,9 +1,7 @@
 use crate::common::ProtocolVersion;
-use crate::connection::{ConnRef, ConnectionError, DispatchError};
+use crate::connection::{ConnRef, DispatchError};
 use crate::packet::packet::{Packet, check_ids_unordered};
-use crate::router::{
-    Entry, ErasedHandler, ErrorHandler, OpenHandler, RouterError, Table, TickHandler,
-};
+use crate::router::{Entry, ErasedHandler, Hook, RouterError, Table};
 use crate::wire::{Options, Reader};
 use anyhow::anyhow;
 use bytes::Bytes;
@@ -71,16 +69,16 @@ where
     }
 }
 
-/// The same bridge for the tick hook, which has no packet to hand over.
-pub trait TickHandlerFn<'a, S: 'a>: Send + Sync + 'static {
+/// The same bridge for the hooks that have no packet to hand over.
+pub trait HookFn<'a, S: 'a>: Send + Sync + 'static {
     /// The future this handler returns.
     type Future: Future<Output = Result<(), DispatchError>> + Send + 'a;
 
-    /// Handles one tick.
+    /// Handles the connection itself.
     fn call(&self, conn: ConnRef<'a, S>) -> Self::Future;
 }
 
-impl<'a, S: 'a, F, Fut> TickHandlerFn<'a, S> for F
+impl<'a, S: 'a, F, Fut> HookFn<'a, S> for F
 where
     F: Fn(ConnRef<'a, S>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(), DispatchError>> + Send + 'a,
@@ -113,13 +111,7 @@ pub struct RouterBuilder<S> {
     entries: Vec<Entry<S>>,
 
     /// The open handler.
-    on_open: Option<OpenHandler<S>>,
-
-    /// The tick handler.
-    tick: Option<TickHandler<S>>,
-
-    /// The error handler.
-    on_error: Option<ErrorHandler<S>>,
+    on_open: Option<Hook<S>>,
 }
 
 impl<S> std::fmt::Debug for RouterBuilder<S> {
@@ -128,8 +120,6 @@ impl<S> std::fmt::Debug for RouterBuilder<S> {
             .field("unknown", &self.unknown)
             .field("packets", &self.entries.len())
             .field("handles_open", &self.on_open.is_some())
-            .field("ticks", &self.tick.is_some())
-            .field("handles_errors", &self.on_error.is_some())
             .finish()
     }
 }
@@ -187,42 +177,17 @@ impl<S: 'static> RouterBuilder<S> {
         Ok(self)
     }
 
-    /// Registers the open handler, used by client implementations to send the initial packet.
+    /// Registers the open handler: the first thing dispatched, and where a client sends the packet
+    /// it dials with.
     ///
-    /// It is synchronous: it runs before the connection reads or writes anything, so there is
-    /// nothing for it to overlap with.
+    /// It is a handler like any other, so a router that wants a clock -- keep-alives, a deadline of
+    /// its own -- writes it as a loop here and the connection drives it alongside the traffic.
     #[must_use]
-    pub fn on_open(
-        mut self,
-        handler: impl for<'a> Fn(ConnRef<'a, S>) -> Result<(), DispatchError> + Send + Sync + 'static,
-    ) -> Self {
-        self.on_open = Some(Arc::new(handler));
-        self
-    }
-
-    /// Registers the tick handler, used for keep alive packets and deadlines.
-    #[must_use]
-    pub fn on_tick<H>(mut self, handler: H) -> Self
+    pub fn on_open<H>(mut self, handler: H) -> Self
     where
-        H: for<'a> TickHandlerFn<'a, S>,
+        H: for<'a> HookFn<'a, S>,
     {
-        self.tick = Some(Arc::new(move |conn| Box::pin(handler.call(conn))));
-        self
-    }
-
-    /// Registers the error handler, used to track errors and send (unexpected) disconnect packets.
-    ///
-    /// It is synchronous: by the time it runs every other writer has been dropped, and a last word
-    /// that had to wait for something could not be bounded.
-    #[must_use]
-    pub fn on_error(
-        mut self,
-        handler: impl for<'a> Fn(ConnRef<'a, S>, &mut ConnectionError) -> Result<(), DispatchError>
-        + Send
-        + Sync
-        + 'static,
-    ) -> Self {
-        self.on_error = Some(Arc::new(handler));
+        self.on_open = Some(Arc::new(move |conn| Box::pin(handler.call(conn))));
         self
     }
 
@@ -240,8 +205,6 @@ impl<S: 'static> RouterBuilder<S> {
             entries,
             tables: tables.into_boxed_slice(),
             on_open: self.on_open,
-            tick: self.tick,
-            on_error: self.on_error,
         }
     }
 }
@@ -261,13 +224,7 @@ pub struct Router<S> {
     pub(crate) tables: Box<[(ProtocolVersion, Table)]>,
 
     /// The open handler.
-    pub(crate) on_open: Option<OpenHandler<S>>,
-
-    /// The tick handler.
-    pub(crate) tick: Option<TickHandler<S>>,
-
-    /// The error handler.
-    pub(crate) on_error: Option<ErrorHandler<S>>,
+    pub(crate) on_open: Option<Hook<S>>,
 }
 
 impl<S> std::fmt::Debug for Router<S> {
@@ -277,8 +234,6 @@ impl<S> std::fmt::Debug for Router<S> {
             .field("packets", &self.entries.len())
             .field("tables", &self.tables.len())
             .field("handles_open", &self.on_open.is_some())
-            .field("ticks", &self.tick.is_some())
-            .field("handles_errors", &self.on_error.is_some())
             .finish()
     }
 }
@@ -291,8 +246,6 @@ impl<S: 'static> Router<S> {
             unknown: UnknownPolicy::default(),
             entries: Vec::new(),
             on_open: None,
-            tick: None,
-            on_error: None,
         }
     }
 
@@ -382,7 +335,7 @@ mod tests {
         Ok(())
     }
 
-    async fn ticks(_conn: ConnRef<'_, ()>) -> Result<(), DispatchError> {
+    async fn hook(_conn: ConnRef<'_, ()>) -> Result<(), DispatchError> {
         Ok(())
     }
 
@@ -466,24 +419,17 @@ mod tests {
     fn the_hooks_a_router_has_are_visible_on_it() {
         let bare = Router::<()>::builder().build();
         assert!(bare.on_open.is_none());
-        assert!(bare.tick.is_none());
-        assert!(bare.on_error.is_none());
         assert_eq!(bare.unknown, UnknownPolicy::Reject, "the safe default");
         assert_eq!(
             format!("{bare:?}"),
-            "Router { unknown: Reject, packets: 0, tables: 1, handles_open: false, ticks: false, \
-             handles_errors: false }",
+            "Router { unknown: Reject, packets: 0, tables: 1, handles_open: false }",
         );
 
         let full = Router::<()>::builder()
             .unknown(UnknownPolicy::Ignore)
-            .on_open(|_conn: ConnRef<'_, ()>| Ok(()))
-            .on_tick(ticks)
-            .on_error(|_conn: ConnRef<'_, ()>, _error: &mut ConnectionError| Ok(()))
+            .on_open(hook)
             .build();
         assert!(full.on_open.is_some());
-        assert!(full.tick.is_some());
-        assert!(full.on_error.is_some());
         assert_eq!(full.unknown, UnknownPolicy::Ignore);
     }
 }

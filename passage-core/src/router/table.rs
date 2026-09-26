@@ -1,6 +1,6 @@
 use crate::common::Phase;
 use crate::common::ProtocolVersion;
-use crate::connection::{ConnRef, ConnectionError, DispatchError};
+use crate::connection::{ConnRef, DispatchError};
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -11,18 +11,9 @@ pub type ErasedHandler<S> = Box<
     dyn for<'a> Fn(ConnRef<'a, S>, Bytes) -> BoxFuture<'a, Result<(), DispatchError>> + Send + Sync,
 >;
 
-/// The open handler type, called once before the connection reads or writes anything.
-pub type OpenHandler<S> =
-    Arc<dyn for<'a> Fn(ConnRef<'a, S>) -> Result<(), DispatchError> + Send + Sync>;
-
-/// The tick handler type.
-pub type TickHandler<S> =
+/// The handler type for the open hook, which has no packet to hand over.
+pub type Hook<S> =
     Arc<dyn for<'a> Fn(ConnRef<'a, S>) -> BoxFuture<'a, Result<(), DispatchError>> + Send + Sync>;
-
-/// The error handler type.
-pub type ErrorHandler<S> = Arc<
-    dyn for<'a> Fn(ConnRef<'a, S>, &mut ConnectionError) -> Result<(), DispatchError> + Send + Sync,
->;
 
 /// A packet handler entry. It contains the packet meta and dispatch handler.
 pub struct Entry<S> {

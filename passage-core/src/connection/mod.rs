@@ -32,20 +32,30 @@
 //! # The loop
 //!
 //! ```text
+//! before the first round:
+//!   bind the dispatcher to the version the connection starts at
+//!   dispatch on_open
+//!
 //! each round:
-//!   rebind if a handler moved the version
+//!   rebind if a handler moved the version, re-arm if one moved the deadline
 //!   write the outbox, then flush
-//!   stop if a handler asked to close
+//!   stop if the connection is ending
 //!   biased select:
-//!     1. finished handler futures
+//!     1. a finished handler future, or output a running one queued
 //!     2. shutdown
 //!     3. the lifetime deadline
-//!     4. tick            (keep-alives; not while the peer must stay quiet)
-//!     5. the next frame  (dispatched, polled once, deferred only if it parks)
+//!     4. the next frame  (dispatched, polled once, deferred only if it parks)
 //! ```
 //!
 //! A handler that never awaits finishes at dispatch, before the next frame is read -- so the phase
 //! and version it set are already true for the packet after it.
+//!
+//! # There is no clock
+//!
+//! Beyond its deadline, the connection has no timer. A driver that wants one writes it as a handler
+//! that keeps running: a loop in [`Dispatcher::on_open`] that sleeps, sends a keep-alive, and sleeps
+//! again. What such a handler queues is written in the round it queued it, so it does not wait for
+//! the peer to say something first.
 //!
 //! # The read gate
 //!
@@ -56,15 +66,16 @@
 //!
 //! # Ending
 //!
-//! A handler that calls [`Conn::close`] ends the connection with no error, after everything it
-//! queued before that has been written. Everything else -- a hangup, a deadline, a cancelled token,
-//! a failure -- goes to [`Dispatcher::on_error`], which is where a disconnect message comes from.
+//! [`Conn::close`] ends the connection with nothing to report, [`Conn::fail`] ends it with a
+//! reason, and both take effect once everything queued before them has been written. A hangup, a
+//! cancelled token, an expired deadline and a handler that returns an error all end it the same
+//! way; the first failure is what the [`Outcome`] reports.
 //!
-//! Before that hook runs, the task set is dropped and the outbox is cleared: no other writer can
-//! exist, and what the failing handler queued this round must not precede the last word. The hook
-//! gets a clock of its own ([`Options::close_timeout`]) and a fresh token, so neither an expired
-//! lifetime nor a cancelled token -- two of the reasons there is something left to say -- can cut
-//! it short.
+//! Nothing is dispatched for the ending itself. A disconnect message is sent *before* it, by a
+//! handler that awaits [`Conn::shutdown`] or wakes before [`Conn::deadline`] -- it is the only
+//! place that knows the phase, the version and the locale to send one in. Such a handler
+//! [detaches](Conn::detach) from the token, or pushes the deadline out, so that what it is
+//! answering does not cut off what it writes.
 
 mod connection;
 mod dispatch;
