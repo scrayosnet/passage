@@ -36,11 +36,29 @@ pub(crate) fn on_open(conn: ConnRef<'_, State>) -> crate::Result<(), DispatchErr
 }
 
 pub(crate) async fn on_tick(conn: ConnRef<'_, State>) -> crate::Result<(), DispatchError> {
-    let _ = conn;
-    // TODO send keep alive packets, check for timeout, and close connection if so
+    let (keep_alive_id, phase) = conn.with(|c| (c.state.keep_alive_id.clone(), c.phase()));
+    if phase != Phase::Configuration {
+        return Ok(())
+    }
+
+    // If the last keep alive sent was not cleared (received back), then the connection has timed out
+    // and should be closed.
+    if keep_alive_id.is_some() {
+        let message = conn.localize("disconnect_timeout", &[]).await;
+        return conn.with(|c| {
+            c.send(configuration::ServerDisconnectPacket::text(message))?;
+            c.close();
+            Ok(())
+        })
+    }
+
+    // Send the next keep alive packet.
+    let id = crypto::generate_keep_alive();
+    conn.send(configuration::ServerKeepAlivePacket::new(id))?;
     Ok(())
 }
 
+// TODO has to be async!
 pub(crate) fn on_error(conn: ConnRef<'_, State>, error: &mut ConnectionError) -> crate::Result<(), DispatchError> {
     let _ = (conn, error);
     // TODO log the error, send disconnect packet, and close connection

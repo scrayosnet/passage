@@ -27,8 +27,8 @@ static TIME_ANCHOR: LazyLock<Instant> = LazyLock::new(Instant::now);
 /// Generates a random id for a keep alive packet. Just like vanilla servers, it uses a
 /// system-dependent time in milliseconds to generate the keep alive ID value.
 #[must_use]
-pub fn generate_keep_alive() -> u64 {
-    TIME_ANCHOR.elapsed().as_millis() as u64
+pub fn generate_keep_alive() -> i64 {
+    TIME_ANCHOR.elapsed().as_millis() as i64
 }
 
 /// Generates a new RSA keypair.
