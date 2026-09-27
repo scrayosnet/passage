@@ -1,5 +1,14 @@
 [package]
 name = "passage-core"
+description = "Minecraft Protocol Toolkit"
+authors = [
+    "Joshua Dean Küpper <admin@joshua-kuepper.de>",
+    "Paul Wagner <contact@paulwagner.dev>",
+]
+license = "MIT"
+readme = "../README.md"
+keywords = ["minecraft", "opentelemetry", "monitoring", "package"]
+categories = ["emulators", "network-programming"]
 version.workspace = true
 repository.workspace = true
 documentation.workspace = true
