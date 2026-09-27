@@ -72,9 +72,9 @@ impl TryFrom<Profile> for passage_adapters::authentication::Profile {
 
         Ok(Self {
             id: user_id,
-            name: value.name,
+            name: value.name.into(),
             properties: value.properties.into_iter().map(Into::into).collect(),
-            profile_actions: value.profile_actions,
+            profile_actions: value.profile_actions.into_iter().map(Into::into).collect(),
         })
     }
 }
@@ -82,9 +82,9 @@ impl TryFrom<Profile> for passage_adapters::authentication::Profile {
 impl From<ProfileProperty> for passage_adapters::authentication::ProfileProperty {
     fn from(value: ProfileProperty) -> Self {
         Self {
-            name: value.name,
-            value: value.value,
-            signature: value.signature,
+            name: value.name.into(),
+            value: value.value.into(),
+            signature: value.signature.map(Into::into),
         }
     }
 }
@@ -130,7 +130,7 @@ impl From<ProtocolVersion> for ServerVersion {
     fn from(value: ProtocolVersion) -> Self {
         Self {
             name: value.name,
-            protocol: value.protocol,
+            protocol: value.protocol.into(),
         }
     }
 }
@@ -188,7 +188,7 @@ impl From<Client> for ClientInfo {
                 hostname: value.server_address.to_string(),
                 port: u32::from(value.server_port),
             }),
-            protocol_version: value.protocol_version as u64,
+            protocol_version: value.protocol_version.get() as u64,
         }
     }
 }

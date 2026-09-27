@@ -49,7 +49,7 @@ impl GrpcStatusAdapter {
                 hostname: client.server_address.to_string(),
                 port: u32::from(client.server_port),
             }),
-            protocol: client.protocol_version as u64,
+            protocol: client.protocol_version.get() as u64,
         });
 
         self.client

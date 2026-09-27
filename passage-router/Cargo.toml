@@ -47,7 +47,3 @@ criterion = { workspace = true, features = ["async_tokio"] }
 [[bench]]
 name = "rate_limiter"
 harness = false
-
-[[bench]]
-name = "status_ping"
-harness = false
