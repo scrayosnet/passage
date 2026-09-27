@@ -1,7 +1,6 @@
 use crate::metrics;
 use passage_core::router::Layer;
 use std::collections::HashMap;
-use std::fmt::Debug;
 use std::hash::Hash;
 use std::net::{IpAddr, SocketAddr};
 use tokio::io::{AsyncRead, AsyncWrite};

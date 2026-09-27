@@ -206,6 +206,10 @@ impl<'a> Writer<'a> {
         Ok(())
     }
 
+    /// Writes a value that knows how to write itself, naming it `field` in whatever it fails with.
+    ///
+    /// The counterpart of [`Reader::property`](crate::wire::Reader::property), and the version is
+    /// handed on for the same reason.
     pub fn property<T: Property>(
         &mut self,
         version: ProtocolVersion,

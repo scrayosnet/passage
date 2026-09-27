@@ -493,6 +493,9 @@ async fn a_cookie_for_a_key_nobody_asked_for_is_refused() {
 
 #[tokio::test]
 async fn a_cookie_nobody_asked_for_at_all_is_refused() {
+    // Refused by the step rather than by the cookie handler, so the reason is `unexpected_step` and
+    // not the `unexpected_cookie` above: no cookie was outstanding, so this is a packet arriving
+    // where it does not belong rather than the wrong answer to a question that was asked.
     let (mut client, served) = serve();
 
     client
@@ -511,7 +514,7 @@ async fn a_cookie_nobody_asked_for_at_all_is_refused() {
         .await;
 
     client.expect_eof().await;
-    assert_eq!(served.await.expect("no panic"), Some("unexpected_cookie"));
+    assert_eq!(served.await.expect("no panic"), Some("unexpected_step"));
 }
 
 #[tokio::test]

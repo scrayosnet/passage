@@ -11,7 +11,7 @@
 //! made.
 //!
 //! A [`Reader`] owns the frame it reads, so a field a packet keeps whole is a slice of that frame
-//! rather than a copy of it: `Bytes` for bytes, and [`ByteString`](bytestring::ByteString) -- bytes
+//! rather than a copy of it: `Bytes` for bytes, and [`bytestring::ByteString`] -- bytes
 //! that are known to be UTF-8 -- for strings. Decoding a packet therefore allocates only for what
 //! it reshapes, which is NBT and JSON, and what a handler keeps holds its frame alive.
 

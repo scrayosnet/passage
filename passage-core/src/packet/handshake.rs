@@ -1,3 +1,10 @@
+//! The one packet of the handshake phase, which every connection begins with.
+//!
+//! It is the only packet whose ID is fixed across all versions, and it has to be: it is what
+//! *tells* the connection which version the client speaks, so nothing before it can depend on one.
+//! The intent it carries decides what the connection becomes -- a status ping, a login, or a
+//! transfer arriving from another server.
+
 use crate::common::State;
 use crate::wire::{Reader, WireError, Writer};
 use crate::{Packet, Phase, ProtocolVersion};

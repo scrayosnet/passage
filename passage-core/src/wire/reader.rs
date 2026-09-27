@@ -384,6 +384,10 @@ impl Reader {
         Ok(values)
     }
 
+    /// Reads a value that knows how to read itself, naming it `field` in whatever it fails with.
+    ///
+    /// The version is handed on because a [`Property`] may be encoded differently in different
+    /// versions, and the value is the only thing that knows whether it is.
     pub fn property<T: Property>(
         &mut self,
         version: ProtocolVersion,

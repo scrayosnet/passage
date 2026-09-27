@@ -1,3 +1,9 @@
+//! The instruments this crate records, one module per metric.
+//!
+//! These cover the protocol itself -- what was read off a socket and what it cost -- and nothing
+//! above it. A router's own metrics belong to the router; see `passage-router`'s `metrics` for
+//! those.
+
 use opentelemetry::metrics::Meter;
 use opentelemetry::{InstrumentationScope, global};
 use std::sync::LazyLock;

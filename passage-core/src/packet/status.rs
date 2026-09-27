@@ -1,3 +1,10 @@
+//! The packets of the status phase, which is what fills in a server's row in the multiplayer list.
+//!
+//! The exchange is two round trips and then the socket closes: the client asks for the status,
+//! then pings with a payload the server echoes back so the client can time it. Nothing here is
+//! version-dependent -- the IDs have been the same since the phase existed -- which is why a status
+//! ping is answerable from a client whose version Passage does not otherwise support.
+
 use crate::common::VarInt;
 use crate::wire::{Reader, WireError, Writer};
 use crate::{Packet, Phase, ProtocolVersion};

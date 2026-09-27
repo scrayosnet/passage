@@ -11,7 +11,7 @@ use std::fmt::{Display, Formatter};
 /// Runtime-selected authentication adapter.
 ///
 /// Wraps every built-in and feature-gated [`AuthenticationAdapter`] implementation behind a single
-/// enum so they can be stored uniformly in a [`Route`](passage_router::routes::Route).
+/// enum so they can be stored uniformly in a [`Route`](crate::adapter::Route).
 #[derive(Debug)]
 pub enum DynAuthenticationAdapter {
     /// Accepts all players without verification.

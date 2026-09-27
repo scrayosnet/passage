@@ -1,3 +1,10 @@
+//! What makes a type a packet, and the ID table that places it in the protocol's history.
+//!
+//! [`Packet`] is the trait every packet in the sibling modules implements. Its centrepiece is
+//! [`Packet::IDS`]: a packet's ID in each version that changed it, as *data* rather than a lookup
+//! function, so that the router can read the thresholds out of it and build one dispatch table per
+//! change in the protocol's shape.
+
 use crate::common::ProtocolVersion;
 use crate::common::{Phase, VarInt};
 use crate::wire::{Reader, WireError, Writer};

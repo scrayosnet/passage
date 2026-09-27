@@ -108,7 +108,7 @@ impl Property for State {
         &self,
         w: &mut Writer<'_>,
         _: ProtocolVersion,
-        field: &'static str,
+        _: &'static str,
     ) -> Result<(), WireError> {
         let val = match self {
             State::Status => 1,
@@ -166,7 +166,7 @@ impl Property for ResourcePackResult {
         &self,
         w: &mut Writer<'_>,
         _: ProtocolVersion,
-        field: &'static str,
+        _: &'static str,
     ) -> Result<(), WireError> {
         let val = match self {
             ResourcePackResult::Success => 0,
@@ -214,7 +214,7 @@ impl Property for ChatMode {
         &self,
         w: &mut Writer<'_>,
         _: ProtocolVersion,
-        field: &'static str,
+        _: &'static str,
     ) -> Result<(), WireError> {
         let val = match self {
             ChatMode::Enabled => 0,
@@ -244,36 +244,43 @@ impl Display for ChatMode {
 pub struct DisplayedSkinParts(pub u8);
 
 impl DisplayedSkinParts {
+    /// Whether the cape layer is shown.
     #[must_use]
     pub fn cape_enabled(&self) -> bool {
         self.0 & 0x01 != 0
     }
 
+    /// Whether the jacket layer is shown.
     #[must_use]
     pub fn jacket_enabled(&self) -> bool {
         self.0 & 0x02 != 0
     }
 
+    /// Whether the left sleeve layer is shown.
     #[must_use]
     pub fn left_sleeve_enabled(&self) -> bool {
         self.0 & 0x04 != 0
     }
 
+    /// Whether the right sleeve layer is shown.
     #[must_use]
     pub fn right_sleeve_enabled(&self) -> bool {
         self.0 & 0x08 != 0
     }
 
+    /// Whether the left trouser leg layer is shown.
     #[must_use]
     pub fn left_pants_enabled(&self) -> bool {
         self.0 & 0x10 != 0
     }
 
+    /// Whether the right trouser leg layer is shown.
     #[must_use]
     pub fn right_pants_enabled(&self) -> bool {
         self.0 & 0x20 != 0
     }
 
+    /// Whether the hat layer is shown.
     #[must_use]
     pub fn hat_enabled(&self) -> bool {
         self.0 & 0x40 != 0
@@ -317,7 +324,7 @@ impl Property for MainHand {
         &self,
         w: &mut Writer<'_>,
         _: ProtocolVersion,
-        field: &'static str,
+        _: &'static str,
     ) -> Result<(), WireError> {
         let val = match self {
             MainHand::Left => 0,
@@ -369,7 +376,7 @@ impl Property for ParticleStatus {
         &self,
         w: &mut Writer<'_>,
         _: ProtocolVersion,
-        field: &'static str,
+        _: &'static str,
     ) -> Result<(), WireError> {
         let val = match self {
             ParticleStatus::All => 0,
