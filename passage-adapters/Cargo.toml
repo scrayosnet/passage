@@ -17,9 +17,11 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+passage-core = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+bytestring = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 num-bigint = { workspace = true }
@@ -31,4 +33,4 @@ opentelemetry = { workspace = true, features = ["metrics"] }
 schemars = { workspace = true, features = ["default", "uuid1"], optional = true }
 
 [features]
-config-schema = ["dep:schemars"]
+config-schema = ["dep:schemars", "passage-core/config-schema"]

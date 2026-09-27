@@ -1,7 +1,7 @@
 use crate::proto::LocalizationRequest;
 use crate::proto::localization_client::LocalizationClient;
 use passage_adapters::localization::LocalizationAdapter;
-use passage_adapters::{Error, metrics};
+use passage_adapters::{AdapterError, metrics};
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
 use tonic::transport::Channel;
@@ -24,14 +24,14 @@ impl Debug for GrpcLocalizationAdapter {
 
 impl GrpcLocalizationAdapter {
     /// Connects to the gRPC service at `address` and returns an initialized adapter.
-    pub async fn new<D>(address: D) -> Result<Self, Error>
+    pub async fn new<D>(address: D) -> Result<Self, AdapterError>
     where
         D: TryInto<tonic::transport::Endpoint>,
         D::Error: Into<tonic::codegen::StdError>,
     {
         Ok(Self {
             client: LocalizationClient::connect(address).await.map_err(|err| {
-                Error::FailedInitialization {
+                AdapterError::FailedInitialization {
                     adapter_type: ADAPTER_TYPE,
                     cause: err.into(),
                 }
@@ -54,15 +54,12 @@ impl GrpcLocalizationAdapter {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
         });
-        let response =
-            self.client
-                .clone()
-                .localize(request)
-                .await
-                .map_err(|err| Error::FailedFetch {
-                    adapter_type: ADAPTER_TYPE,
-                    cause: err.into(),
-                })?;
+        let response = self.client.clone().localize(request).await.map_err(|err| {
+            AdapterError::FailedFetch {
+                adapter_type: ADAPTER_TYPE,
+                cause: err.into(),
+            }
+        })?;
 
         // return the result right away
         Ok(response.into_inner().message)

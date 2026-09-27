@@ -789,14 +789,12 @@
         },
         "max_version": {
           "description": "The maximum protocol version supported by the server.",
-          "type": "integer",
-          "format": "int32",
+          "$ref": "#/$defs/ProtocolVersion",
           "default": 1000
         },
         "min_version": {
           "description": "The minimum protocol version supported by the server.",
-          "type": "integer",
-          "format": "int32",
+          "$ref": "#/$defs/ProtocolVersion",
           "default": 0
         },
         "name": {
@@ -806,8 +804,7 @@
         },
         "preferred_version": {
           "description": "The preferred protocol version of the server.",
-          "type": "integer",
-          "format": "int32",
+          "$ref": "#/$defs/ProtocolVersion",
           "default": 769
         }
       }
@@ -1149,6 +1146,11 @@
         "name",
         "value"
       ]
+    },
+    "ProtocolVersion": {
+      "description": "A Minecraft (Java) protocol version, as sent in the handshake `intention` packet. The handshake\nprotocol version is compared against a set of breakpoints which define breaking changes in the\nprotocol that have to be handled by the wire codec.",
+      "type": "integer",
+      "format": "int32"
     },
     "ProxyProtocol": {
       "description": "[`ProxyProtocol`] hold the PROXY protocol configuration.",

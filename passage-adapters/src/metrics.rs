@@ -31,9 +31,9 @@ pub mod adapter_duration {
     use std::sync::LazyLock;
     use tokio::time::Instant;
 
-    static INSTRUMENT: LazyLock<Histogram<u64>> = LazyLock::new(|| {
+    static INSTRUMENT: LazyLock<Histogram<f64>> = LazyLock::new(|| {
         METER
-            .u64_histogram("adapter_duration")
+            .f64_histogram("adapter_duration")
             .with_description("The time an adapter took to complete")
             .with_unit("seconds")
             .with_boundaries(exponential_buckets(0.1, 2.0, 10))
@@ -42,9 +42,12 @@ pub mod adapter_duration {
 
     /// Records the number of seconds elapsed by the given `started` instant. The `adapter_type` should
     /// be the name of the adapter, including the adapter type, e.g. `minecraft_auth_adapter`.
+    ///
+    /// Recorded as a fraction, not whole seconds: the buckets start at 100 ms, and an in-memory
+    /// adapter -- which is most of them -- returns far inside the first one.
     pub fn record(adapter_type: &'static str, started: Instant) {
         INSTRUMENT.record(
-            started.elapsed().as_secs(),
+            started.elapsed().as_secs_f64(),
             &[KeyValue::new("adapter", adapter_type)],
         )
     }

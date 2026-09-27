@@ -48,12 +48,12 @@ impl MojangAdapter {
             .get(&url)
             .send()
             .await
-            .map_err(|err| passage_adapters::Error::FailedFetch {
+            .map_err(|err| passage_adapters::AdapterError::FailedFetch {
                 adapter_type: ADAPTER_TYPE,
                 cause: Box::new(err),
             })?
             .error_for_status()
-            .map_err(|err| passage_adapters::Error::FailedFetch {
+            .map_err(|err| passage_adapters::AdapterError::FailedFetch {
                 adapter_type: ADAPTER_TYPE,
                 cause: Box::new(err),
             })?;
@@ -69,7 +69,7 @@ impl MojangAdapter {
             response
                 .json()
                 .await
-                .map_err(|err| passage_adapters::Error::FailedParse {
+                .map_err(|err| passage_adapters::AdapterError::FailedParse {
                     adapter_type: ADAPTER_TYPE,
                     cause: Box::new(err),
                 })?;

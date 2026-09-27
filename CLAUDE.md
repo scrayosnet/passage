@@ -45,8 +45,8 @@ The root `passage` binary plus 7 workspace member crates. The crates have clear 
 | Crate                     | Role                                                                             |
 |---------------------------|----------------------------------------------------------------------------------|
 | `passage`                 | Binary entry point: wires adapters together, loads config, starts the server     |
-| `passage-protocol`        | Core TCP listener, Minecraft protocol state machine, connection handling, crypto |
-| `passage-packets`         | Minecraft packet definitions and binary serialization/deserialization            |
+| `passage-router`          | Core TCP listener, Minecraft protocol state machine, connection handling, crypto |
+| `passage-core`            | Minecraft protocol toolkit.                                                      |
 | `passage-adapters`        | Adapter traits + built-in implementations (Fixed, Disabled)                      |
 | `passage-adapters-grpc`   | gRPC implementations of auth and discovery adapter traits                        |
 | `passage-adapters-http`   | HTTP-based Mojang authentication adapter                                         |
@@ -80,7 +80,7 @@ In `passage/src/adapter/mod.rs`, these are implemented as enums (`DynAuthenticat
 
 ### Route Matching
 
-`Routes<Stat, Disc, Auth, Loca>` in `passage-protocol` is parameterized by adapter types. Each `Route` holds a hostname regex pattern and one instance of each adapter, allowing different auth/discovery logic per virtual hostname.
+`Routes<Stat, Disc, Auth, Loca>` in `passage-router` is parameterized by adapter types. Each `Route` holds a hostname regex pattern and one instance of each adapter, allowing different auth/discovery logic per virtual hostname.
 
 ### Configuration
 

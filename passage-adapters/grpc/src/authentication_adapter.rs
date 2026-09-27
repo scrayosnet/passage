@@ -1,7 +1,7 @@
 use crate::proto::authentication_client::AuthenticationClient;
 use crate::proto::{AuthenticationRequest, authentication_response};
 use passage_adapters::authentication::{AuthenticationAdapter, Profile};
-use passage_adapters::{Client, Error, Player, metrics, reject, reject_reason};
+use passage_adapters::{AdapterError, Client, Player, metrics, reject, reject_reason};
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
 use tonic::transport::Channel;
@@ -27,7 +27,7 @@ impl Debug for GrpcAuthenticationAdapter {
 
 impl GrpcAuthenticationAdapter {
     /// Connects to the gRPC service at `address` and returns an initialized adapter.
-    pub async fn new<D>(address: D) -> Result<Self, Error>
+    pub async fn new<D>(address: D) -> Result<Self, AdapterError>
     where
         D: TryInto<tonic::transport::Endpoint>,
         D::Error: Into<tonic::codegen::StdError>,
@@ -35,7 +35,7 @@ impl GrpcAuthenticationAdapter {
         Ok(Self {
             client: AuthenticationClient::connect(address)
                 .await
-                .map_err(|err| Error::FailedInitialization {
+                .map_err(|err| AdapterError::FailedInitialization {
                     adapter_type: ADAPTER_TYPE,
                     cause: err.into(),
                 })?,
@@ -49,7 +49,7 @@ impl GrpcAuthenticationAdapter {
         player: &Player,
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> Result<Profile, Error> {
+    ) -> Result<Profile, AdapterError> {
         let request = tonic::Request::new(AuthenticationRequest {
             client: Some(client.clone().into()),
             player: Some(player.clone().into()),
@@ -61,7 +61,7 @@ impl GrpcAuthenticationAdapter {
             .clone()
             .authenticate(request)
             .await
-            .map_err(|err| Error::FailedFetch {
+            .map_err(|err| AdapterError::FailedFetch {
                 adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })?;
@@ -83,7 +83,7 @@ impl AuthenticationAdapter for GrpcAuthenticationAdapter {
         player: &Player,
         shared_secret: &[u8],
         encoded_public: &[u8],
-    ) -> Result<Profile, Error> {
+    ) -> Result<Profile, AdapterError> {
         let start = Instant::now();
         let profile = self
             .authenticate(client, player, shared_secret, encoded_public)

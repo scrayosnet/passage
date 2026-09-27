@@ -1,7 +1,7 @@
 use crate::proto::TargetRequest;
 use crate::proto::discovery_client::DiscoveryClient;
 use passage_adapters::discovery::DiscoveryAdapter;
-use passage_adapters::{Client, Error, Result, Target, metrics};
+use passage_adapters::{AdapterError, Client, Result, Target, metrics};
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
 use tonic::transport::Channel;
@@ -24,14 +24,14 @@ impl Debug for GrpcDiscoveryAdapter {
 
 impl GrpcDiscoveryAdapter {
     /// Connects to the gRPC service at `address` and returns an initialized adapter.
-    pub async fn new<D>(address: D) -> Result<Self, Error>
+    pub async fn new<D>(address: D) -> Result<Self, AdapterError>
     where
         D: TryInto<tonic::transport::Endpoint>,
         D::Error: Into<tonic::codegen::StdError>,
     {
         Ok(Self {
             client: DiscoveryClient::connect(address).await.map_err(|err| {
-                Error::FailedInitialization {
+                AdapterError::FailedInitialization {
                     adapter_type: ADAPTER_TYPE,
                     cause: err.into(),
                 }
@@ -50,7 +50,7 @@ impl GrpcDiscoveryAdapter {
             .clone()
             .get_targets(request)
             .await
-            .map_err(|err| Error::FailedFetch {
+            .map_err(|err| AdapterError::FailedFetch {
                 adapter_type: ADAPTER_TYPE,
                 cause: err.into(),
             })?;
