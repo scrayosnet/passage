@@ -3,6 +3,7 @@ use passage_core::router::Layer;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::net::{IpAddr, SocketAddr};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
@@ -79,14 +80,11 @@ where
     }
 }
 
-pub struct RateLimiterLayer<Addr> {
-    rate_limiter: Option<Mutex<RateLimiter<Addr>>>,
+pub struct RateLimiterLayer {
+    rate_limiter: Option<Mutex<RateLimiter<IpAddr>>>,
 }
 
-impl<Addr> RateLimiterLayer<Addr>
-where
-    Addr: Eq + Hash + Copy,
-{
+impl RateLimiterLayer {
     /// Builds the layer described by `config`. Without one the layer admits everything, which is
     /// what makes it safe to always stack.
     pub fn new(config: Option<crate::config::RateLimiter>) -> Self {
@@ -101,20 +99,19 @@ where
     }
 }
 
-impl<Io, Addr> Layer<Io, Addr> for RateLimiterLayer<Addr>
+impl<Io> Layer<Io, SocketAddr> for RateLimiterLayer
 where
     Io: AsyncRead + AsyncWrite + Send + Unpin + 'static,
-    Addr: Debug + Send + Sync + Eq + Hash + Copy + 'static,
 {
     type Io = Io;
 
-    async fn admit(&self, io: Io, addr: Addr) -> Option<(Self::Io, Addr)> {
+    async fn admit(&self, io: Io, addr: SocketAddr) -> Option<(Self::Io, SocketAddr)> {
         let Some(rate_limiter) = self.rate_limiter.as_ref() else {
             return Some((io, addr));
         };
 
         let mut rate_limiter = rate_limiter.lock().await;
-        if !rate_limiter.enqueue(addr) {
+        if !rate_limiter.enqueue(addr.ip()) {
             // Debug, not warn: a peer over its limit is what the limiter is for, and a burst would
             // otherwise be a burst of log lines too.
             debug!(?addr, "rate limited, connection closed");
