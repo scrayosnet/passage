@@ -5,9 +5,9 @@ use passage_adapters::{Client, FixedStatusAdapter, ServerStatus, ServerVersion};
 use passage_adapters_grpc::GrpcStatusAdapter;
 #[cfg(feature = "adapters-http")]
 use passage_adapters_http::HttpStatusAdapter;
+use passage_core::ProtocolVersion;
 use serde_json::value::RawValue;
 use std::fmt::{Display, Formatter};
-use passage_core::ProtocolVersion;
 
 /// Runtime-selected status adapter.
 ///
@@ -22,6 +22,9 @@ pub enum DynStatusAdapter {
     /// Periodically polls a remote HTTP endpoint for the server status.
     #[cfg(feature = "adapters-http")]
     Http(HttpStatusAdapter),
+    /// Answers only once told to, so that a test can hold a connection mid-adapter.
+    #[cfg(test)]
+    Held(crate::adapter::held::HeldStatusAdapter),
 }
 
 impl Display for DynStatusAdapter {
@@ -32,6 +35,8 @@ impl Display for DynStatusAdapter {
             Self::Grpc(_) => write!(f, "grpc"),
             #[cfg(feature = "adapters-http")]
             Self::Http(_) => write!(f, "http"),
+            #[cfg(test)]
+            Self::Held(_) => write!(f, "held"),
         }
     }
 }
@@ -44,6 +49,8 @@ impl StatusAdapter for DynStatusAdapter {
             DynStatusAdapter::Grpc(adapter) => adapter.status(client).await,
             #[cfg(feature = "adapters-http")]
             DynStatusAdapter::Http(adapter) => adapter.status(client).await,
+            #[cfg(test)]
+            DynStatusAdapter::Held(adapter) => adapter.status(client).await,
         }
     }
 }

@@ -7,6 +7,7 @@
 use crate::adapter::adapter::Route;
 use crate::adapter::authentication::DynAuthenticationAdapter;
 use crate::adapter::discovery::DynDiscoveryActionAdapter;
+use crate::adapter::held::{HeldAuthenticationAdapter, HeldStatusAdapter};
 use crate::adapter::localization::DynLocalizationAdapter;
 use crate::adapter::status::DynStatusAdapter;
 use crate::cookie::{AuthCookie, Cookie, SessionCookie};
@@ -14,6 +15,7 @@ use crate::crypto;
 use crate::router::state::State;
 use crate::router::{DynRoute, Passage};
 use futures::{SinkExt, StreamExt};
+use passage_adapters::authentication::Profile;
 use passage_adapters::{
     DisabledAuthenticationAdapter, FixedDiscoveryAdapter, FixedLocalizationAdapter,
     FixedStatusAdapter, Target,
@@ -44,6 +46,22 @@ const HOST: &str = "mc.justchunks.net";
 
 /// One route, answered entirely from memory: no session server, no discovery service.
 fn routes() -> Arc<[Arc<DynRoute>]> {
+    routes_with(
+        DynStatusAdapter::Fixed(FixedStatusAdapter::new(
+            None,
+            versions::V26_1,
+            versions::V1_20_5,
+            versions::V26_1,
+        )),
+        DynAuthenticationAdapter::Disabled(DisabledAuthenticationAdapter::new()),
+    )
+}
+
+/// The same route, with the two adapters a test may want to hold open.
+fn routes_with(
+    status_adapter: DynStatusAdapter,
+    authentication_adapter: DynAuthenticationAdapter,
+) -> Arc<[Arc<DynRoute>]> {
     let target = Target {
         identifier: "backend-1".to_owned(),
         address: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 25_566)),
@@ -52,18 +70,11 @@ fn routes() -> Arc<[Arc<DynRoute>]> {
     };
     let route = Route {
         hostname: Regex::new(HOST).expect("a pattern"),
-        status_adapter: DynStatusAdapter::Fixed(FixedStatusAdapter::new(
-            None,
-            versions::V26_1,
-            versions::V1_20_5,
-            versions::V26_1,
-        )),
+        status_adapter,
         discovery_adapter: DynDiscoveryActionAdapter::FixedDiscovery(FixedDiscoveryAdapter::new(
             vec![target],
         )),
-        authentication_adapter: DynAuthenticationAdapter::Disabled(
-            DisabledAuthenticationAdapter::new(),
-        ),
+        authentication_adapter,
         localization_adapter: DynLocalizationAdapter::Fixed(FixedLocalizationAdapter::new(
             "en_GB".to_owned(),
             Default::default(),
@@ -76,21 +87,33 @@ fn routes() -> Arc<[Arc<DynRoute>]> {
 /// The secret the auth cookie is signed with, for the transfer that presents one.
 const SECRET: &[u8] = b"a-shared-secret";
 
-/// Runs one connection against the router, and hands back the socket the client holds.
-fn serve() -> (TestClient, JoinHandle<()>) {
+/// Runs one connection against the router, and hands back the socket the client holds and what the
+/// connection ended for.
+fn serve() -> (TestClient, JoinHandle<Option<&'static str>>) {
     serve_with(None)
 }
 
 /// The same, for a router that signs auth cookies with `secret`.
-fn serve_with(secret: Option<&'static [u8]>) -> (TestClient, JoinHandle<()>) {
+fn serve_with(secret: Option<&'static [u8]>) -> (TestClient, JoinHandle<Option<&'static str>>) {
+    serve_routes(routes(), secret)
+}
+
+/// The same, over a route whose adapters the test built.
+fn serve_routes(
+    routes: Arc<[Arc<DynRoute>]>,
+    secret: Option<&'static [u8]>,
+) -> (TestClient, JoinHandle<Option<&'static str>>) {
     let (server_io, client_io) = tokio::io::duplex(8192);
     let secret = secret.map(Bytes::from_static);
-    let router = Passage::new(routes(), secret.clone(), 3_600)
+    let router = Passage::new(Arc::clone(&routes), secret.clone(), 3_600)
         .router()
         .expect("the router builds");
 
+    let state_routes = Arc::clone(&routes);
     let connection = Client::new(Connected::new(server_io, peer()))
-        .state(move |addr: &SocketAddr| State::new(routes(), *addr, secret.clone(), 3_600))
+        .state(move |addr: &SocketAddr| {
+            State::new(Arc::clone(&state_routes), *addr, secret.clone(), 3_600)
+        })
         .dispatch(router)
         .config(Options {
             initial_version: ProtocolVersion::UNKNOWN,
@@ -99,12 +122,13 @@ fn serve_with(secret: Option<&'static [u8]>) -> (TestClient, JoinHandle<()>) {
 
     let served = tokio::spawn(async move {
         let outcome = connection.connect().await.expect("preconnected");
-        if let Some(error) = outcome.error {
+        outcome.error.map(|error| {
             assert!(
                 error.is_peer_error(),
                 "the connection failed on our side: {error}",
             );
-        }
+            error.reason()
+        })
     });
     (TestClient::new(client_io), served)
 }
@@ -192,7 +216,7 @@ async fn a_status_ping_is_answered_and_the_connection_closed() {
     assert_eq!(pong.payload, 0x1234);
 
     client.expect_eof().await;
-    served.await.expect("no panic");
+    assert_eq!(served.await.expect("no panic"), None, "a clean ending");
 }
 
 #[tokio::test]
@@ -209,7 +233,7 @@ async fn a_hostname_no_route_matches_is_refused() {
         .await;
 
     client.expect_eof().await;
-    served.await.expect("no panic");
+    assert_eq!(served.await.expect("no panic"), Some("no_route"));
 }
 
 #[tokio::test]
@@ -302,7 +326,7 @@ async fn a_login_runs_to_the_transfer_packet() {
     assert_eq!(transfer.port, 25_566);
 
     client.expect_eof().await;
-    served.await.expect("no panic");
+    assert_eq!(served.await.expect("no panic"), None, "a clean ending");
 }
 
 #[tokio::test]
@@ -386,4 +410,202 @@ async fn a_transfer_with_a_valid_auth_cookie_skips_authentication() {
     );
     assert_eq!(success.uuid, Uuid::from_u128(7));
     served.abort();
+}
+
+/// Opens a login and stops at the point the server asks for the auth cookie.
+async fn awaiting_the_auth_cookie() -> (TestClient, JoinHandle<Option<&'static str>>) {
+    let (mut client, served) = serve_with(Some(SECRET));
+    client
+        .send(handshake::ClientIntentionPacket {
+            protocol_version: versions::V26_1,
+            server_address: HOST.into(),
+            server_port: 25_565,
+            next_state: Intent::Transfer,
+        })
+        .await;
+    client
+        .send(login::ClientLoginStartPacket {
+            name: "Hydrofin".into(),
+            uuid: Uuid::from_u128(7),
+        })
+        .await;
+    let request = client.expect::<login::ServerCookieRequestPacket>().await;
+    assert_eq!(request.key, AuthCookie::KEY);
+    (client, served)
+}
+
+#[tokio::test]
+async fn a_packet_that_is_not_what_the_step_waits_for_is_refused() {
+    // The step is what enforces the order, so a client that skips ahead is refused rather than
+    // being let into a handler that would have to notice for itself.
+    let (mut client, served) = serve();
+
+    client
+        .send(handshake::ClientIntentionPacket {
+            protocol_version: versions::V26_1,
+            server_address: HOST.into(),
+            server_port: 25_565,
+            next_state: Intent::Login,
+        })
+        .await;
+    client
+        .send(login::ClientEncryptionResponsePacket {
+            shared_secret: Bytes::from_static(b"nonsense"),
+            verify_token: Bytes::from_static(b"nonsense"),
+        })
+        .await;
+
+    client.expect_eof().await;
+    assert_eq!(served.await.expect("no panic"), Some("unexpected_step"));
+}
+
+#[tokio::test]
+async fn nothing_but_the_cookie_may_arrive_while_one_is_awaited() {
+    // What the read gate used to be for: the step that waits for a cookie waits for nothing else,
+    // so a client cannot start a second login underneath an outstanding request.
+    let (mut client, served) = awaiting_the_auth_cookie().await;
+
+    client
+        .send(login::ClientLoginStartPacket {
+            name: "Impostor".into(),
+            uuid: Uuid::from_u128(1),
+        })
+        .await;
+
+    client.expect_eof().await;
+    assert_eq!(served.await.expect("no panic"), Some("unexpected_step"));
+}
+
+#[tokio::test]
+async fn a_cookie_for_a_key_nobody_asked_for_is_refused() {
+    // The key is part of the step, so an answer to another question cannot be mistaken for the one
+    // that was asked.
+    let (mut client, served) = awaiting_the_auth_cookie().await;
+
+    client
+        .send(login::ClientCookieResponsePacket {
+            key: SessionCookie::KEY.into(),
+            payload: None,
+        })
+        .await;
+
+    client.expect_eof().await;
+    assert_eq!(served.await.expect("no panic"), Some("unexpected_cookie"));
+}
+
+#[tokio::test]
+async fn a_cookie_nobody_asked_for_at_all_is_refused() {
+    let (mut client, served) = serve();
+
+    client
+        .send(handshake::ClientIntentionPacket {
+            protocol_version: versions::V26_1,
+            server_address: HOST.into(),
+            server_port: 25_565,
+            next_state: Intent::Login,
+        })
+        .await;
+    client
+        .send(login::ClientCookieResponsePacket {
+            key: SessionCookie::KEY.into(),
+            payload: None,
+        })
+        .await;
+
+    client.expect_eof().await;
+    assert_eq!(served.await.expect("no panic"), Some("unexpected_cookie"));
+}
+
+#[tokio::test]
+async fn a_ping_may_not_overtake_the_status_it_is_timing() {
+    // The connection is held inside the status adapter, which is where a real one spends its time.
+    // A client that pipelines its ping is refused rather than being answered out of order -- before
+    // the step machine covered the adapter call, the pong was sent and the answer it was timing was
+    // dropped on the floor.
+    let (status, release) = HeldStatusAdapter::new();
+    let (mut client, served) = serve_routes(
+        routes_with(
+            DynStatusAdapter::Held(status),
+            DynAuthenticationAdapter::Disabled(DisabledAuthenticationAdapter::new()),
+        ),
+        None,
+    );
+
+    client
+        .send(handshake::ClientIntentionPacket {
+            protocol_version: versions::V26_1,
+            server_address: HOST.into(),
+            server_port: 25_565,
+            next_state: Intent::Status,
+        })
+        .await;
+    client.send(status::ClientStatusRequestPacket).await;
+    client
+        .send(status::ClientPingRequestPacket { payload: 0x1234 })
+        .await;
+
+    client.expect_eof().await;
+    assert_eq!(served.await.expect("no panic"), Some("unexpected_step"));
+    release.release();
+}
+
+#[tokio::test]
+async fn a_second_encryption_response_cannot_arrive_during_authentication() {
+    // The session server call is the longest wait in the flow. A duplicate response let through it
+    // would authenticate twice and, worse, switch the cipher a second time mid-stream.
+    let profile = Profile {
+        id: Uuid::from_u128(7),
+        name: "Hydrofin".into(),
+        properties: Vec::new(),
+        profile_actions: Vec::new(),
+    };
+    let (authentication, release) = HeldAuthenticationAdapter::new(profile);
+    let (mut client, served) = serve_routes(
+        routes_with(
+            DynStatusAdapter::Fixed(FixedStatusAdapter::new(
+                None,
+                versions::V26_1,
+                versions::V1_20_5,
+                versions::V26_1,
+            )),
+            DynAuthenticationAdapter::Held(authentication),
+        ),
+        None,
+    );
+
+    client
+        .send(handshake::ClientIntentionPacket {
+            protocol_version: versions::V26_1,
+            server_address: HOST.into(),
+            server_port: 25_565,
+            next_state: Intent::Login,
+        })
+        .await;
+    client
+        .send(login::ClientLoginStartPacket {
+            name: "Hydrofin".into(),
+            uuid: Uuid::from_u128(7),
+        })
+        .await;
+
+    let encryption = client
+        .expect::<login::ServerEncryptionRequestPacket>()
+        .await;
+    let public = crypto::KEY_PAIR.1.clone();
+    let secret = b"0123456789abcdef";
+    let response = login::ClientEncryptionResponsePacket {
+        shared_secret: crypto::encrypt(&public, secret).expect("encrypts").into(),
+        verify_token: crypto::encrypt(&public, &encryption.verify_token)
+            .expect("encrypts")
+            .into(),
+    };
+
+    // The first response starts the authentication, which is held. The second arrives while it is.
+    client.send(response.clone()).await;
+    client.encrypt(secret);
+    client.send(response).await;
+
+    client.expect_eof().await;
+    assert_eq!(served.await.expect("no panic"), Some("unexpected_step"));
+    release.release();
 }

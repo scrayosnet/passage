@@ -2,6 +2,9 @@ use regex::Regex;
 use uuid::Uuid;
 
 pub mod adapter;
+#[cfg(test)]
+pub mod held;
+
 pub mod authentication;
 pub mod discovery;
 pub mod localization;

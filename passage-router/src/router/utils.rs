@@ -1,5 +1,6 @@
 use crate::cookie::Cookie;
 use crate::crypto;
+use crate::router::state::Step;
 use crate::router::{DynRoute, State};
 use anyhow::anyhow;
 use passage_adapters::authentication::Profile;
@@ -135,54 +136,52 @@ impl ConnRefExt for ConnRef<'_, State> {
     }
 
     async fn cookie<C: Cookie>(&self) -> crate::Result<Option<C>, DispatchError> {
-        let (rx, secret, gated) = self.with(|c| {
-            // Ensure that no other cookie is currently awaited
-            if c.state.cookie.is_some() {
-                return Err(DispatchError::peer(
+        let (rx, secret) = self.with(|c| {
+            // Only one cookie can be awaited at a time: the step a request returns to is the one it
+            // interrupted, and a second request would lose it.
+            if matches!(c.state.step, Step::Cookie { .. }) {
+                return Err(DispatchError::internal(
                     "cookie_already_awaited",
-                    anyhow!("A cookie is already being awaited"),
+                    anyhow!("a cookie is already being awaited"),
                 ));
             }
 
-            // Create a new channel and send the packet.
-            let (tx, rx) = oneshot::channel();
-            c.state.cookie = Some((C::KEY, tx));
+            // Send the request first, so that a packet which does not encode leaves the step where
+            // it was.
             match c.phase() {
-                Phase::Login => {
-                    c.send(login::ServerCookieRequestPacket {
-                        key: C::KEY.try_into().expect("infallible"),
-                    })?;
-                }
-                Phase::Configuration => {
-                    c.send(configuration::ServerCookieRequestPacket {
-                        key: C::KEY.try_into().expect("infallible"),
-                    })?;
-                }
-                _ => {
+                Phase::Login => c.send(login::ServerCookieRequestPacket {
+                    key: C::KEY.try_into().expect("infallible"),
+                })?,
+                Phase::Configuration => c.send(configuration::ServerCookieRequestPacket {
+                    key: C::KEY.try_into().expect("infallible"),
+                })?,
+                phase => {
                     return Err(DispatchError::internal(
                         "cookie_invalid_phase",
-                        anyhow!("Invalid phase"),
+                        anyhow!("cookies cannot be requested in phase {phase:?}"),
                     ));
                 }
             };
 
-            // Allow the connection to receive the cookie packet. In general, this allows packets other
-            // than the cookie to be received. However, they will be blocked by the expect_step check.
-            let gated = c.gated();
-            c.release();
-            Ok((rx, c.state.secret.clone(), gated))
+            // Wait for the answer in a step of its own, which is what stops anything else from
+            // arriving meanwhile. The step it interrupted is what it returns to.
+            let (tx, rx) = oneshot::channel();
+            let resume = Box::new(c.state.swap_step(Step::Completed));
+            c.state.step = Step::Cookie {
+                key: C::KEY,
+                sender: tx,
+                resume,
+            };
+            Ok((rx, c.state.secret.clone()))
         })?;
 
-        // Wait for the cookie to be received. Then immediately reset the connection gated state.
+        // Wait for the cookie. The handler that answers it puts the step back.
         let payload = rx
             .await
             .map_err(|_| DispatchError::internal("cookie_error", anyhow!("Cookie never received")));
-        if gated {
-            self.with(|c| c.gate());
-        }
 
-        // Decode it with the secret. Some cookies require the secret to be present, while others ignore
-        // it. After the cookie is received, the connection is gated again.
+        // Decode it with the secret. Some cookies require the secret to be present, while others
+        // ignore it.
         let payload = match payload {
             Ok(Some(payload)) => payload,
             Ok(None) => return Ok(None),

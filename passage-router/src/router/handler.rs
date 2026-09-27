@@ -12,26 +12,25 @@ use passage_core::{Phase, versions};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::Notify;
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
-/// Fails unless the connection is at the step this handler answers.
+/// Expects the provided step, unwrapping it using the expression. The step is replaced with `working`
+/// and should be replaced with a different step before the client sends the next packet. Returns
+/// and `unexpected_step` is the step does not match.
 macro_rules! expect_step {
     // Match a pattern and return an expression built from its bindings
     ($conn:expr, $pat:pat => $out:expr) => {
-        match &$conn.state.step {
+        match $conn.state.set_working(stringify!($pat)) {
             $pat => Ok($out),
             other => Err(DispatchError::peer(
                 "unexpected_step",
                 anyhow::anyhow!("Expected step `{}`, got `{:?}`", stringify!($pat), other),
             )),
         }
-    };
-    // Just check the variant, no extraction
-    ($conn:expr, $pat:pat) => {
-        expect_step!($conn, $pat => ())
     };
 }
 
@@ -62,11 +61,13 @@ async fn keep_alives(conn: ConnRef<'_, State>) -> crate::Result<(), DispatchErro
     loop {
         tokio::time::sleep(KEEP_ALIVE_INTERVAL).await;
 
-        // Keep alives are only exchanged while the client is waiting for its target.
-        let (phase, pending) = conn.with(|c| (c.phase(), c.state.keep_alive_id));
-        if phase != Phase::Configuration {
+        // Keep alives belong to the step that waits for a target, and to no other.
+        let Some(pending) = conn.with(|c| match &c.state.step {
+            Step::Transfer { keep_alive, .. } => Some(*keep_alive),
+            _ => None,
+        }) else {
             continue;
-        }
+        };
 
         // A keep alive that was never answered means the client is gone.
         if pending.is_some() {
@@ -77,7 +78,11 @@ async fn keep_alives(conn: ConnRef<'_, State>) -> crate::Result<(), DispatchErro
         let id = crypto::generate_keep_alive();
         conn.with(|c| {
             c.send(configuration::ServerKeepAlivePacket::new(id))?;
-            c.state.keep_alive_id = Some(id);
+            let informed = expect_step!(c, Step::Transfer { informed, .. } => informed)?;
+            c.state.step = Step::Transfer {
+                keep_alive: Some(id),
+                informed,
+            };
             Ok::<_, DispatchError>(())
         })?;
     }
@@ -124,8 +129,7 @@ pub(crate) async fn on_handshake_intention_packet(
     metrics::handshake_states::inc(packet.next_state);
     conn.with(|c| {
         // Ensure that the connection is in the right state.
-        expect_step!(c, Step::Intention)?;
-        c.state.step = packet.next_state.into();
+        expect_step!(c, Step::Intention => ())?;
 
         // Update the connection state.
         c.set_version(packet.protocol_version);
@@ -145,27 +149,29 @@ pub(crate) async fn on_handshake_intention_packet(
                 anyhow!("no route matches `{}`", c.state.client.server_address),
             ));
         }
+        c.state.step = packet.next_state.into();
         Ok(())
     })
 }
 
-/// Hands a cookie the client sent back to whatever asked for it. A response for a key nobody asked
-/// for is ignored, so an unsolicited one cannot answer the next request.
+/// Hands a cookie the client sent back to the handler that asked for it, and returns the connection
+/// to the step that asked. A cookie nobody is waiting for, or one for another key, is the client
+/// speaking out of turn.
 fn accept_cookie(
     conn: ConnRef<'_, State>,
     key: &str,
     payload: Option<Bytes>,
 ) -> crate::Result<(), DispatchError> {
     conn.with(|c| {
-        let Some((expected, sender)) = c.state.cookie.take() else {
-            debug!(key, "received a cookie nobody asked for");
-            return Ok(());
-        };
+        let (expected, sender, resume) = expect_step!(c, Step::Cookie { key: expected, sender, resume } => (expected, sender, resume))?;
         if expected != key {
-            debug!(key, expected, "received a cookie for another key");
-            c.state.cookie = Some((expected, sender));
-            return Ok(());
-        }
+            return Err(DispatchError::peer(
+                "unexpected_cookie",
+                anyhow!("no cookie `{key}` was asked for at step `{resume:?}`"),
+            ))
+        };
+
+        c.state.step = *resume;
         let _ = sender.send(payload);
         Ok(())
     })
@@ -211,8 +217,7 @@ pub(crate) async fn on_status_request_packet(
 ) -> crate::Result<(), DispatchError> {
     conn.with(|c| {
         // Ensure that the connection is in the right state.
-        expect_step!(c, Step::StatusRequest)?;
-        c.state.step = Step::StatusPingRequest;
+        expect_step!(c, Step::StatusRequest => ())?;
         Ok::<(), DispatchError>(())
     })?;
 
@@ -229,11 +234,15 @@ pub(crate) async fn on_status_request_packet(
         }
     };
 
-    // Send the status response to the client.
+    // Send the status response to the client. Only then is a ping expected, so that a pong cannot
+    // overtake the answer it is timing.
     let packet = status::ServerStatusResponsePacket::try_from(&status)
         .map_err(|err| DispatchError::internal("status_encode_error", err))?;
-    conn.send(packet)?;
-    Ok(())
+    conn.with(|c| {
+        c.send(packet)?;
+        c.state.step = Step::StatusPingRequest;
+        Ok(())
+    })
 }
 
 pub(crate) async fn on_status_ping_request_packet(
@@ -242,14 +251,14 @@ pub(crate) async fn on_status_ping_request_packet(
 ) -> crate::Result<(), DispatchError> {
     conn.with(|c| {
         // Ensure that the connection is in the right state.
-        expect_step!(c, Step::StatusPingRequest)?;
-        c.state.step = Step::Completed;
+        expect_step!(c, Step::StatusPingRequest => ())?;
 
         // Send the pong response and close the connection.
         c.send(status::ServerPongResponsePacket {
             payload: packet.payload,
         })?;
         c.close();
+        c.state.step = Step::Completed;
         Ok(())
     })
 }
@@ -259,8 +268,9 @@ pub(crate) async fn on_login_login_start(
     packet: login::ClientLoginStartPacket,
 ) -> crate::Result<(), DispatchError> {
     let (transfer, client_address, cookie_expiry) = conn.with(|c| {
-        // Ensure that the connection is in the right state.
-        let transfer = *expect_step!(c, Step::LoginStart { transfer } => transfer)?;
+        // Ensure that the connection is in the right state. The client waits from here until the
+        // encryption request, apart from the cookie it may be asked for.
+        let transfer = expect_step!(c, Step::LoginStart { transfer } => transfer)?;
 
         // Update the custom state.
         c.state.player.name = packet.name.to_string();
@@ -284,9 +294,12 @@ pub(crate) async fn on_login_login_start(
         let reason = conn
             .localize("disconnect_unsupported", &[("preferred", preferred)])
             .await;
-        conn.send(login::ServerDisconnectPacket { reason })?;
-        conn.close();
-        return Ok(());
+        return conn.with(|c| {
+            c.state.step = Step::Completed;
+            c.send(login::ServerDisconnectPacket { reason })?;
+            c.close();
+            Ok(())
+        });
     };
 
     // Handle transfer by checking the auth cookie.
@@ -350,7 +363,8 @@ pub(crate) async fn on_login_encryption_response(
     // Ensure that the connection is in the right state. The step contains the generated verify-token
     // and the authentication status.
     let (verify_token, authenticated) = conn.with(|c| {
-        expect_step!(c, Step::Encrypt { verify_token, authenticated } => (verify_token.clone(), *authenticated))
+        let expected = expect_step!(c, Step::Encrypt { verify_token, authenticated } => (verify_token, authenticated))?;
+        Ok::<_, DispatchError>(expected)
     })?;
 
     // Decrypt the shared secret and the verify-token.
@@ -441,10 +455,14 @@ pub(crate) async fn on_login_login_acknowledged(
 ) -> crate::Result<(), DispatchError> {
     // Ensure that the connection is in the right state.
     let informed = conn.with(|c| {
-        expect_step!(c, Step::LoginAck)?;
+        expect_step!(c, Step::LoginAck => ())?;
         c.set_phase(Phase::Configuration);
-        c.state.step = Step::Transfer;
-        Ok::<_, DispatchError>(Arc::clone(&c.state.informed))
+        let informed = Arc::new(Notify::new());
+        c.state.step = Step::Transfer {
+            keep_alive: None,
+            informed: Arc::clone(&informed),
+        };
+        Ok::<_, DispatchError>(informed)
     })?;
 
     // Select a target while the client sends its information. The client information packet is what
@@ -467,13 +485,13 @@ pub(crate) async fn on_login_login_acknowledged(
         }
     };
 
-    // Send the new with cookie if enabled
+    // Store a fresh auth cookie, so the next transfer can skip authentication.
     conn.with(|c| {
         let Some(secret) = &c.state.secret else {
             return Ok(());
         };
         let cookie = AuthCookie {
-            client_addr: c.state.client.address.clone(),
+            client_addr: c.state.client.address,
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("time error")
@@ -484,7 +502,7 @@ pub(crate) async fn on_login_login_acknowledged(
             profile_properties: c.state.player.profile_properties.clone(),
             extra: Default::default(),
         };
-        let encoded = match cookie.encode(Some(&secret)) {
+        let encoded = match cookie.encode(Some(secret)) {
             Ok(encoded) => encoded,
             Err(err) => {
                 warn!(err = %err, "failed to encode auth cookie, skipping");
@@ -544,11 +562,12 @@ pub(crate) async fn on_configuration_client_information(
     metrics::client_locales::inc(packet.locale.to_string());
     metrics::client_view_distances::record(packet.view_distance.max(0) as u64);
     conn.with(|c| {
-        expect_step!(c, Step::Transfer)?;
+        let (informed, keep_alive) = expect_step!(c, Step::Transfer { informed, keep_alive } => (informed, keep_alive))?;
         c.state.locale = Some(packet.locale.to_string());
 
         // The target selection waits for this, because a rejection is localized with it.
-        c.state.informed.notify_one();
+        c.state.step = Step::Transfer { informed: Arc::clone(&informed), keep_alive };
+        informed.notify_one();
         Ok(())
     })
 }
@@ -558,13 +577,14 @@ pub(crate) async fn on_configuration_keep_alive(
     packet: configuration::ClientKeepAlivePacket,
 ) -> crate::Result<(), DispatchError> {
     conn.with(|c| {
-        expect_step!(c, Step::Transfer)?;
-        if c.state.keep_alive_id == Some(packet.id) {
-            c.state.keep_alive_id = None;
+        let (keep_alive, informed) = expect_step!(c, Step::Transfer { keep_alive, informed } => (keep_alive, informed))?;
+        if keep_alive == Some(packet.id) {
+            c.state.step = Step::Transfer { keep_alive: None, informed };
         } else {
+            c.state.step = Step::Transfer { keep_alive, informed };
             debug!(
-                sent = ?c.state.keep_alive_id,
-                recieved = ?packet.id,
+                sent = ?keep_alive,
+                received = ?packet.id,
                 "received keep alive packet with invalid id",
             );
         }

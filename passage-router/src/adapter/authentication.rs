@@ -24,6 +24,9 @@ pub enum DynAuthenticationAdapter {
     /// Validates players against the official Mojang session server.
     #[cfg(feature = "adapters-http")]
     Mojang(MojangAdapter),
+    /// Answers only once told to, so that a test can hold a connection mid-adapter.
+    #[cfg(test)]
+    Held(crate::adapter::held::HeldAuthenticationAdapter),
 }
 
 impl Display for DynAuthenticationAdapter {
@@ -35,6 +38,8 @@ impl Display for DynAuthenticationAdapter {
             Self::Grpc(_) => write!(f, "grpc"),
             #[cfg(feature = "adapters-http")]
             Self::Mojang(_) => write!(f, "mojang"),
+            #[cfg(test)]
+            Self::Held(_) => write!(f, "held"),
         }
     }
 }
@@ -66,6 +71,12 @@ impl AuthenticationAdapter for DynAuthenticationAdapter {
             }
             #[cfg(feature = "adapters-http")]
             DynAuthenticationAdapter::Mojang(adapter) => {
+                adapter
+                    .authenticate(client, player, shared_secret, encoded_public)
+                    .await
+            }
+            #[cfg(test)]
+            DynAuthenticationAdapter::Held(adapter) => {
                 adapter
                     .authenticate(client, player, shared_secret, encoded_public)
                     .await
