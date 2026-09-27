@@ -1,6 +1,8 @@
 use crate::proto::status_client::StatusClient;
 use crate::proto::{Address, StatusRequest};
-use passage_adapters::{Client, AdapterError, Result, ServerStatus, metrics, status::StatusAdapter};
+use passage_adapters::{
+    AdapterError, Client, Result, ServerStatus, metrics, status::StatusAdapter,
+};
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
 use tonic::transport::Channel;

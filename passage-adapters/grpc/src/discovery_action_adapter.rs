@@ -1,7 +1,7 @@
 use crate::proto::discovery_action_client::DiscoveryActionClient;
 use crate::proto::{ApplyRequest, Targets, apply_response};
 use passage_adapters::discovery_action::DiscoveryActionAdapter;
-use passage_adapters::{Client, AdapterError, Player, Target, metrics, reject_reason};
+use passage_adapters::{AdapterError, Client, Player, Target, metrics, reject_reason};
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
 use tonic::transport::Channel;

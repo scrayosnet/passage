@@ -54,15 +54,12 @@ impl GrpcLocalizationAdapter {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
         });
-        let response =
-            self.client
-                .clone()
-                .localize(request)
-                .await
-                .map_err(|err| AdapterError::FailedFetch {
-                    adapter_type: ADAPTER_TYPE,
-                    cause: err.into(),
-                })?;
+        let response = self.client.clone().localize(request).await.map_err(|err| {
+            AdapterError::FailedFetch {
+                adapter_type: ADAPTER_TYPE,
+                cause: err.into(),
+            }
+        })?;
 
         // return the result right away
         Ok(response.into_inner().message)

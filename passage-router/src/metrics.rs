@@ -1,7 +1,14 @@
+//! Every instrument Passage records, one module per metric.
+//!
+//! A metric is a module rather than a bare static so that the instrument, its description and the
+//! only ways to move it live together: a caller cannot record the wrong unit into it, because the
+//! module hands out the recording function and not the instrument.
+
 use opentelemetry::metrics::Meter;
 use opentelemetry::{InstrumentationScope, global};
 use std::sync::LazyLock;
 
+/// The meter every instrument below is built from.
 static METER: LazyLock<Meter> = LazyLock::new(|| {
     let scope = InstrumentationScope::builder(env!("CARGO_PKG_NAME"))
         .with_version(env!("CARGO_PKG_VERSION"))
@@ -91,9 +98,9 @@ pub(crate) mod connection_duration {
     use std::sync::LazyLock;
     use tokio::time::Instant;
 
-    static INSTRUMENT: LazyLock<Histogram<u64>> = LazyLock::new(|| {
+    static INSTRUMENT: LazyLock<Histogram<f64>> = LazyLock::new(|| {
         METER
-            .u64_histogram("connection_duration")
+            .f64_histogram("connection_duration")
             .with_description("The time a connection took complete")
             .with_unit("seconds")
             .with_boundaries(exponential_buckets(0.1, 2.0, 10))
@@ -101,8 +108,11 @@ pub(crate) mod connection_duration {
     });
 
     /// Records the number of seconds elapsed by the given `started` instant.
+    ///
+    /// Recorded as a fraction, not whole seconds: the first bucket is 100 ms, and a status ping --
+    /// which is most of what this sees -- is answered well inside it.
     pub(crate) fn record(started: Instant) {
-        INSTRUMENT.record(started.elapsed().as_secs(), &[])
+        INSTRUMENT.record(started.elapsed().as_secs_f64(), &[])
     }
 }
 
@@ -203,5 +213,286 @@ pub(crate) mod handshake_states {
             State::Transfer => "transfer",
         };
         INSTRUMENT.add(1, &[KeyValue::new("state", state)])
+    }
+}
+
+/// The metric `transfers` tracks the number of players that were actually sent on to a backend.
+///
+/// This is what Passage exists to do, so it is the metric a deployment is healthy by: every other
+/// counter here describes a way that did not happen.
+pub(crate) mod transfers {
+    use crate::metrics::METER;
+    use opentelemetry::metrics::Counter;
+    use std::sync::LazyLock;
+
+    static INSTRUMENT: LazyLock<Counter<u64>> = LazyLock::new(|| {
+        METER
+            .u64_counter("transfers")
+            .with_description("The number of players transferred to a backend")
+            .build()
+    });
+
+    /// Increments the counter.
+    pub(crate) fn inc() {
+        INSTRUMENT.add(1, &[])
+    }
+}
+
+/// The metric `disconnects` tracks the number of clients told why they are being disconnected.
+///
+/// Attributes:
+/// - `reason`: the localization key the client was disconnected with, e.g. `disconnect_no_target`
+///
+/// The reasons are a fixed set of keys, so the attribute is bounded no matter what clients do.
+pub(crate) mod disconnects {
+    use crate::metrics::METER;
+    use opentelemetry::KeyValue;
+    use opentelemetry::metrics::Counter;
+    use std::sync::LazyLock;
+
+    static INSTRUMENT: LazyLock<Counter<u64>> = LazyLock::new(|| {
+        METER
+            .u64_counter("disconnects")
+            .with_description("The number of clients disconnected with a reason")
+            .build()
+    });
+
+    /// Increments the counter for the given reason.
+    pub(crate) fn inc(reason: &'static str) {
+        INSTRUMENT.add(1, &[KeyValue::new("reason", reason)])
+    }
+}
+
+/// The set of system metrics. The system metrics have to be refreshed manually or by using
+/// [`system::Observer::new`], which starts a background task that periodically updates the metrics.
+pub mod system {
+    use std::time::Duration;
+    use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
+    use tokio::task::JoinHandle;
+    use tokio::time::MissedTickBehavior;
+    use tokio_util::sync::CancellationToken;
+    use tracing::{debug, info, warn};
+
+    /// The system observer wraps a periodic task that updates the system metrics.
+    pub struct Observer {
+        cancellation_token: CancellationToken,
+        handle: JoinHandle<()>,
+    }
+
+    impl Observer {
+        /// Starts a system observer that updates all system metrics periodically. This should only be
+        /// called once by the application (not the library).
+        pub fn new(duration: Duration) -> Self {
+            let cancellation_token = CancellationToken::new();
+            let stop = cancellation_token.clone();
+            let handle = tokio::spawn(async move {
+                info!(interval = ?duration, "starting system observer");
+                let mut interval = tokio::time::interval(duration);
+                interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+                let system_refresh = RefreshKind::nothing()
+                    .with_memory(MemoryRefreshKind::nothing().with_ram())
+                    .with_cpu(CpuRefreshKind::nothing().with_cpu_usage());
+                let mut system = System::new_with_specifics(system_refresh);
+                // The first CPU reading is meaningless: usage is the difference between two
+                // samples, and there has only been one.
+                tokio::time::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL).await;
+                loop {
+                    tokio::select! {
+                        () = stop.cancelled() => {
+                            info!("stopped system observer");
+                            return;
+                        },
+                        _ = interval.tick() => {
+                            system.refresh_specifics(system_refresh);
+                            cpu_usage::observe(system.global_cpu_usage());
+                            total_memory::observe(system.total_memory());
+                            free_memory::observe(system.free_memory());
+                            available_memory::observe(system.available_memory());
+                            used_memory::observe(system.used_memory());
+                            total_swap::observe(system.total_swap());
+                            free_swap::observe(system.free_swap());
+                            used_swap::observe(system.used_swap());
+                            debug!(
+                                cpu_usage = system.global_cpu_usage(),
+                                used_memory = system.used_memory(),
+                                "observed system metrics",
+                            );
+                        }
+                    }
+                }
+            });
+            Self {
+                handle,
+                cancellation_token,
+            }
+        }
+
+        /// Stops the system observer.
+        pub async fn shutdown(self) {
+            self.cancellation_token.cancel();
+            if let Err(err) = self.handle.await {
+                warn!(err = ?err, "failed to shut down the system observer");
+            }
+        }
+    }
+
+    /// The metric `cpu_usage` tracks the global CPU usage percentage (0-100%).
+    pub(crate) mod cpu_usage {
+        use crate::metrics::METER;
+        use opentelemetry::metrics::Gauge;
+        use std::sync::LazyLock;
+
+        static INSTRUMENT: LazyLock<Gauge<f64>> = LazyLock::new(|| {
+            METER
+                .f64_gauge("cpu_usage")
+                .with_description("The global CPU usage percentage (0-100%)")
+                .with_unit("percent")
+                .build()
+        });
+
+        /// Sets cpu_usage.
+        pub(crate) fn observe(amount: f32) {
+            INSTRUMENT.record(f64::from(amount), &[])
+        }
+    }
+
+    /// The metric `total_memory` tracks the total system memory in bytes.
+    pub(crate) mod total_memory {
+        use crate::metrics::METER;
+        use opentelemetry::metrics::Gauge;
+        use std::sync::LazyLock;
+
+        static INSTRUMENT: LazyLock<Gauge<u64>> = LazyLock::new(|| {
+            METER
+                .u64_gauge("total_memory")
+                .with_description("The total system memory")
+                .with_unit("bytes")
+                .build()
+        });
+
+        /// Sets total_memory.
+        pub(crate) fn observe(amount: u64) {
+            INSTRUMENT.record(amount, &[])
+        }
+    }
+
+    /// The metric `free_memory` tracks the free system memory in bytes.
+    pub(crate) mod free_memory {
+        use crate::metrics::METER;
+        use opentelemetry::metrics::Gauge;
+        use std::sync::LazyLock;
+
+        static INSTRUMENT: LazyLock<Gauge<u64>> = LazyLock::new(|| {
+            METER
+                .u64_gauge("free_memory")
+                .with_description("The free system memory")
+                .with_unit("bytes")
+                .build()
+        });
+
+        /// Sets free_memory.
+        pub(crate) fn observe(amount: u64) {
+            INSTRUMENT.record(amount, &[])
+        }
+    }
+
+    /// The metric `available_memory` tracks the available system memory in bytes.
+    pub(crate) mod available_memory {
+        use crate::metrics::METER;
+        use opentelemetry::metrics::Gauge;
+        use std::sync::LazyLock;
+
+        static INSTRUMENT: LazyLock<Gauge<u64>> = LazyLock::new(|| {
+            METER
+                .u64_gauge("available_memory")
+                .with_description("The available system memory")
+                .with_unit("bytes")
+                .build()
+        });
+
+        /// Sets available_memory.
+        pub(crate) fn observe(amount: u64) {
+            INSTRUMENT.record(amount, &[])
+        }
+    }
+
+    /// The metric `used_memory` tracks the memory used by the system in bytes.
+    pub(crate) mod used_memory {
+        use crate::metrics::METER;
+        use opentelemetry::metrics::Gauge;
+        use std::sync::LazyLock;
+
+        static INSTRUMENT: LazyLock<Gauge<u64>> = LazyLock::new(|| {
+            METER
+                .u64_gauge("used_memory")
+                .with_description("The memory used by the system")
+                .with_unit("bytes")
+                .build()
+        });
+
+        /// Sets used_memory.
+        pub(crate) fn observe(amount: u64) {
+            INSTRUMENT.record(amount, &[])
+        }
+    }
+
+    /// The metric `total_swap` tracks the total swap memory in bytes.
+    pub(crate) mod total_swap {
+        use crate::metrics::METER;
+        use opentelemetry::metrics::Gauge;
+        use std::sync::LazyLock;
+
+        static INSTRUMENT: LazyLock<Gauge<u64>> = LazyLock::new(|| {
+            METER
+                .u64_gauge("total_swap")
+                .with_description("The total swap memory")
+                .with_unit("bytes")
+                .build()
+        });
+
+        /// Sets total_swap.
+        pub(crate) fn observe(amount: u64) {
+            INSTRUMENT.record(amount, &[])
+        }
+    }
+
+    /// The metric `free_swap` tracks the free swap memory in bytes.
+    pub(crate) mod free_swap {
+        use crate::metrics::METER;
+        use opentelemetry::metrics::Gauge;
+        use std::sync::LazyLock;
+
+        static INSTRUMENT: LazyLock<Gauge<u64>> = LazyLock::new(|| {
+            METER
+                .u64_gauge("free_swap")
+                .with_description("The free swap memory")
+                .with_unit("bytes")
+                .build()
+        });
+
+        /// Sets free_swap.
+        pub(crate) fn observe(amount: u64) {
+            INSTRUMENT.record(amount, &[])
+        }
+    }
+
+    /// The metric `used_swap` tracks the used swap memory in bytes.
+    pub(crate) mod used_swap {
+        use crate::metrics::METER;
+        use opentelemetry::metrics::Gauge;
+        use std::sync::LazyLock;
+
+        static INSTRUMENT: LazyLock<Gauge<u64>> = LazyLock::new(|| {
+            METER
+                .u64_gauge("used_swap")
+                .with_description("The used swap memory")
+                .with_unit("bytes")
+                .build()
+        });
+
+        /// Sets used_swap.
+        pub(crate) fn observe(amount: u64) {
+            INSTRUMENT.record(amount, &[])
+        }
     }
 }

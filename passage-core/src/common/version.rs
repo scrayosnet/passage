@@ -10,6 +10,7 @@ const SNAPSHOT_BIT: i32 = 0x4000_0000;
 #[derive(
     Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Deserialize, Serialize,
 )]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 pub struct ProtocolVersion(i32);
 
 impl ProtocolVersion {

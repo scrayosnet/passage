@@ -1,5 +1,4 @@
 use hmac::{Hmac, KeyInit, Mac};
-use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 pub mod auth;
@@ -51,7 +50,9 @@ pub fn verify<'a>(signed: &'a [u8], secret: &[u8]) -> Option<&'a [u8]> {
 
     let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size!");
     mac.update(&signed[HASH_LEN..]);
-    mac.verify_slice(&signed[..HASH_LEN]).ok().map(|_| &signed[HASH_LEN..])
+    mac.verify_slice(&signed[..HASH_LEN])
+        .ok()
+        .map(|_| &signed[HASH_LEN..])
 }
 
 #[cfg(test)]

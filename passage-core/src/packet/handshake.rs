@@ -1,4 +1,4 @@
-use crate::common::{State, VarInt};
+use crate::common::State;
 use crate::wire::{Reader, WireError, Writer};
 use crate::{Packet, Phase, ProtocolVersion};
 use bytestring::ByteString;

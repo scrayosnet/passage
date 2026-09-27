@@ -1,25 +1,28 @@
 pub mod error;
 
-use std::convert::Into;
 pub(crate) use crate::crypto::error::Error;
 use passage_core::common::VerifyToken;
+use passage_core::wire::Bytes;
 use rand::TryRng;
 use rand::rand_core::UnwrapErr;
 use rand::rngs::SysRng;
 use rsa::pkcs8::EncodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
+use std::convert::Into;
 use std::sync::LazyLock;
 use tokio::time::Instant;
 use tokio_util::bytes::BytesMut;
-use passage_core::wire::Bytes;
 
 /// The RSA keypair of the application.
 pub static KEY_PAIR: LazyLock<(RsaPrivateKey, RsaPublicKey)> =
     LazyLock::new(|| generate_keypair().expect("failed to generate keypair"));
 
 /// The encoded public key.
-pub static ENCODED_PUB: LazyLock<Bytes> =
-    LazyLock::new(|| encode_public_key(&KEY_PAIR.1).expect("failed to encode keypair").into());
+pub static ENCODED_PUB: LazyLock<Bytes> = LazyLock::new(|| {
+    encode_public_key(&KEY_PAIR.1)
+        .expect("failed to encode keypair")
+        .into()
+});
 
 /// A time anchor for generating keep alive packet IDs.
 static TIME_ANCHOR: LazyLock<Instant> = LazyLock::new(Instant::now);

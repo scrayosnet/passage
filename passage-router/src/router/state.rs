@@ -5,7 +5,6 @@ use passage_core::common;
 use passage_core::wire::Bytes;
 use std::sync::Arc;
 use tokio::sync::{Notify, oneshot};
-use passage_core::connection::DispatchError;
 
 /// Where the connection is in the protocol, and what only exists there.
 ///
@@ -32,7 +31,9 @@ pub enum Step {
     /// A handler is doing something the client has to wait for: an adapter call, a session server
     /// round trip. Nothing may arrive until it is done, and the handler names the step it leaves in.
     Working {
-        /// The task that is currently worked on. Used for debugging.
+        /// The task that is currently worked on. Read only through [`Debug`], which is what names
+        /// the step in the error a packet arriving mid-task is refused with.
+        #[allow(dead_code, reason = "read through the derived Debug impl")]
         task: &'static str,
     },
 
@@ -122,8 +123,10 @@ impl State {
         secret: Option<Bytes>,
         auth_cookie_expiry: u64,
     ) -> Self {
-        let mut client = Client::default();
-        client.address = address;
+        let client = Client {
+            address,
+            ..Client::default()
+        };
         Self {
             routes,
             route_index: None,

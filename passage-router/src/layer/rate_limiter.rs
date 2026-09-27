@@ -1,11 +1,12 @@
 use crate::metrics;
+use passage_core::router::Layer;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::hash::Hash;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
-use tracing::instrument;
-use passage_core::router::Layer;
+use tracing::{debug, instrument};
 
 /// [`RateLimiter`] tracks connections per client address over some (approximate) time window.
 pub struct RateLimiter<Addr> {
@@ -82,14 +83,20 @@ pub struct RateLimiterLayer<Addr> {
     rate_limiter: Option<Mutex<RateLimiter<Addr>>>,
 }
 
-impl<Addr> RateLimiterLayer<Addr> where
+impl<Addr> RateLimiterLayer<Addr>
+where
     Addr: Eq + Hash + Copy,
 {
+    /// Builds the layer described by `config`. Without one the layer admits everything, which is
+    /// what makes it safe to always stack.
     pub fn new(config: Option<crate::config::RateLimiter>) -> Self {
         Self {
             rate_limiter: config.map(|config| {
-                Mutex::new(RateLimiter::new(Duration::from_secs(config.duration), config.limit))
-            })
+                Mutex::new(RateLimiter::new(
+                    Duration::from_secs(config.duration),
+                    config.limit,
+                ))
+            }),
         }
     }
 }
@@ -97,17 +104,21 @@ impl<Addr> RateLimiterLayer<Addr> where
 impl<Io, Addr> Layer<Io, Addr> for RateLimiterLayer<Addr>
 where
     Io: AsyncRead + AsyncWrite + Send + Unpin + 'static,
-    Addr: Send + Sync + Eq + Hash + Copy + 'static,
+    Addr: Debug + Send + Sync + Eq + Hash + Copy + 'static,
 {
     type Io = Io;
 
     async fn admit(&self, io: Io, addr: Addr) -> Option<(Self::Io, Addr)> {
         let Some(rate_limiter) = self.rate_limiter.as_ref() else {
-            return Some((io, addr))
+            return Some((io, addr));
         };
 
         let mut rate_limiter = rate_limiter.lock().await;
         if !rate_limiter.enqueue(addr) {
+            // Debug, not warn: a peer over its limit is what the limiter is for, and a burst would
+            // otherwise be a burst of log lines too.
+            debug!(?addr, "rate limited, connection closed");
+            metrics::requests::reject();
             return None;
         }
         Some((io, addr))

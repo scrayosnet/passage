@@ -14,7 +14,7 @@ use passage_core::packet::{configuration, login};
 use passage_core::wire::ByteString;
 use std::sync::Arc;
 use tokio::sync::oneshot;
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 
 /// [`ConnRefExt`] provides a set of convenience methods for interacting with a connection of [`State`].
 pub(crate) trait ConnRefExt {
@@ -79,6 +79,7 @@ impl ConnRefExt for ConnRef<'_, State> {
         self.with(|c| c.state.locale.clone())
     }
 
+    #[instrument(skip_all)]
     async fn status(&self) -> crate::Result<Option<ServerStatus>, AdapterError> {
         let status = self
             .route()
@@ -89,6 +90,7 @@ impl ConnRefExt for ConnRef<'_, State> {
         Ok(status)
     }
 
+    #[instrument(skip_all, fields(player = %self.player().name))]
     async fn authorize(&self, shared_secret: &[u8]) -> crate::Result<Profile, AdapterError> {
         let profile = self
             .route()
@@ -114,7 +116,7 @@ impl ConnRefExt for ConnRef<'_, State> {
             .localize(self.locale().as_deref(), key, params)
             .await;
         match message {
-            Ok(message) => message.try_into().expect("infallible"),
+            Ok(message) => message.into(),
             Err(err) if err.is_rejected() => {
                 debug!(err = %err, "rejected to localize key");
                 ByteString::from(key)
@@ -126,6 +128,7 @@ impl ConnRefExt for ConnRef<'_, State> {
         }
     }
 
+    #[instrument(skip_all, fields(player = %self.player().name))]
     async fn target(&self) -> crate::Result<Target, AdapterError> {
         let target = self
             .route()
@@ -135,6 +138,7 @@ impl ConnRefExt for ConnRef<'_, State> {
         Ok(target)
     }
 
+    #[instrument(skip_all, fields(key = C::KEY))]
     async fn cookie<C: Cookie>(&self) -> crate::Result<Option<C>, DispatchError> {
         let (rx, secret) = self.with(|c| {
             // Only one cookie can be awaited at a time: the step a request returns to is the one it
@@ -149,12 +153,10 @@ impl ConnRefExt for ConnRef<'_, State> {
             // Send the request first, so that a packet which does not encode leaves the step where
             // it was.
             match c.phase() {
-                Phase::Login => c.send(login::ServerCookieRequestPacket {
-                    key: C::KEY.try_into().expect("infallible"),
-                })?,
-                Phase::Configuration => c.send(configuration::ServerCookieRequestPacket {
-                    key: C::KEY.try_into().expect("infallible"),
-                })?,
+                Phase::Login => c.send(login::ServerCookieRequestPacket { key: C::KEY.into() })?,
+                Phase::Configuration => {
+                    c.send(configuration::ServerCookieRequestPacket { key: C::KEY.into() })?
+                }
                 phase => {
                     return Err(DispatchError::internal(
                         "cookie_invalid_phase",

@@ -33,4 +33,4 @@ opentelemetry = { workspace = true, features = ["metrics"] }
 schemars = { workspace = true, features = ["default", "uuid1"], optional = true }
 
 [features]
-config-schema = ["dep:schemars"]
+config-schema = ["dep:schemars", "passage-core/config-schema"]

@@ -27,6 +27,7 @@ pub use localization::LocalizationAdapter;
 pub use status::StatusAdapter;
 
 // reexport adapters
+use crate::authentication::ProfileProperty;
 pub use authentication::disabled::DisabledAuthenticationAdapter;
 pub use authentication::fixed::FixedAuthenticationAdapter;
 pub use discovery::fixed::FixedDiscoveryAdapter;
@@ -37,7 +38,6 @@ pub use discovery_action::player_fill_strategy::PlayerFillStrategyAdapter;
 pub use localization::fixed::FixedLocalizationAdapter;
 use passage_core::{ProtocolVersion, versions};
 pub use status::fixed::FixedStatusAdapter;
-use crate::authentication::ProfileProperty;
 
 /// The Minecraft protocol version type.
 pub type Protocol = ProtocolVersion;

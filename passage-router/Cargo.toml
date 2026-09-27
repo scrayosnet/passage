@@ -19,15 +19,16 @@ rust-version.workspace = true
 [dependencies]
 passage-core = { workspace = true }
 passage-adapters = { workspace = true }
+passage-adapters-grpc = { workspace = true, optional = true }
+passage-adapters-agones = { workspace = true, optional = true }
+passage-adapters-http = { workspace = true, optional = true }
+passage-adapters-dns = { workspace = true, optional = true }
 
 thiserror = { workspace = true }
 anyhow = { workspace = true }
-tokio = { workspace = true, features = ["macros", "net", "signal"] }
+tokio = { workspace = true, features = ["rt", "macros", "net", "signal", "time", "io-util"] }
 tokio-util = { workspace = true, features = ["rt", "codec"] }
 proxy-header = { workspace = true }
-tracing = { workspace = true }
-tracing-opentelemetry = { workspace = true }
-opentelemetry = { workspace = true, features = ["trace", "metrics"] }
 uuid = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -39,10 +40,33 @@ cfb8 = { workspace = true }
 futures = { workspace = true }
 regex = { workspace = true }
 config = { workspace = true }
+sysinfo = { workspace = true }
+schemars = { workspace = true, features = ["default"], optional = true }
+
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+opentelemetry-appender-tracing = { workspace = true }
+opentelemetry = { workspace = true, features = ["trace", "metrics"] }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
+opentelemetry-otlp = { workspace = true, features = ["http-proto", "metrics", "trace"] }
+
+sentry = { workspace = true, features = ["backtrace", "contexts", "panic", "debug-images", "reqwest", "rustls", "tower"], optional = true }
+sentry-tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "rt-multi-thread", "time", "io-util"] }
 criterion = { workspace = true, features = ["async_tokio"] }
+
+[features]
+default = ["sentry", "adapters-grpc", "adapters-agones", "adapters-http", "adapters-dns"]
+sentry = ["dep:sentry", "dep:sentry-tracing"]
+adapters-grpc = ["dep:passage-adapters-grpc"]
+adapters-agones = ["dep:passage-adapters-agones"]
+adapters-http = ["dep:passage-adapters-http"]
+adapters-dns = ["dep:passage-adapters-dns"]
+config-schema = ["dep:schemars", "passage-adapters/config-schema"]
 
 [[bench]]
 name = "rate_limiter"

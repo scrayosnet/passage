@@ -46,9 +46,7 @@ where
     /// Returns `Err` if the pipeline produces no candidates.
     pub async fn select(&self, client: &Client, player: &Player) -> Result<Target> {
         let mut targets = Vec::new();
-        self.discovery
-            .apply(client, player, &mut targets)
-            .await?;
+        self.discovery.apply(client, player, &mut targets).await?;
         targets
             .into_iter()
             .next()
@@ -136,8 +134,6 @@ where
         key: &str,
         params: &[(&'static str, String)],
     ) -> Result<String> {
-        self.localization
-            .localize(locale, key, params)
-            .await
+        self.localization.localize(locale, key, params).await
     }
 }

@@ -3,10 +3,8 @@ pub mod fixed;
 
 use crate::{Client, Player, error::Result};
 use num_bigint::BigInt;
-use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::fmt::Debug;
-use uuid::Uuid;
 
 /// The [`AuthenticationAdapter`] is used to provide custom logic for validating a connecting player
 /// against an authentication authority. The default configuration intents using the HTTP adapter

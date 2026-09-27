@@ -1,6 +1,6 @@
 use crate::error::MissingFieldError;
 use passage_adapters::{
-    Client, AdapterError, Player, ServerPlayer, ServerPlayers, ServerStatus, ServerVersion,
+    AdapterError, Client, Player, ServerPlayer, ServerPlayers, ServerStatus, ServerVersion,
 };
 use serde_json::value::RawValue;
 use std::net::{IpAddr, SocketAddr};
@@ -62,13 +62,14 @@ impl TryFrom<Profile> for passage_adapters::authentication::Profile {
     type Error = AdapterError;
 
     fn try_from(value: Profile) -> Result<Self, Self::Error> {
-        let user_id = value
-            .id
-            .try_into()
-            .map_err(|err: uuid::Error| AdapterError::FailedParse {
-                adapter_type: "grpc",
-                cause: err.into(),
-            })?;
+        let user_id =
+            value
+                .id
+                .try_into()
+                .map_err(|err: uuid::Error| AdapterError::FailedParse {
+                    adapter_type: "grpc",
+                    cause: err.into(),
+                })?;
 
         Ok(Self {
             id: user_id,
@@ -112,12 +113,15 @@ impl TryFrom<StatusData> for ServerStatus {
             })?;
 
         Ok(Self {
-            version: value.version.map(Into::into).ok_or(AdapterError::FailedParse {
-                adapter_type: "grpc",
-                cause: Box::new(MissingFieldError {
-                    field: "status.version",
-                }),
-            })?,
+            version: value
+                .version
+                .map(Into::into)
+                .ok_or(AdapterError::FailedParse {
+                    adapter_type: "grpc",
+                    cause: Box::new(MissingFieldError {
+                        field: "status.version",
+                    }),
+                })?,
             players: value.players.map(Into::into),
             description,
             favicon,

@@ -1,6 +1,6 @@
 use crate::HTTP_CLIENT;
 use passage_adapters::status::StatusAdapter;
-use passage_adapters::{Client, AdapterError, ServerStatus, metrics};
+use passage_adapters::{AdapterError, Client, ServerStatus, metrics};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use std::time::Duration;

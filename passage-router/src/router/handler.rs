@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
 use tokio::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
@@ -110,6 +110,8 @@ async fn farewell(
     }
 
     let message = conn.localize(reason, &[]).await;
+    metrics::disconnects::inc(reason);
+    debug!(reason, ?phase, "disconnecting client");
     conn.with(|c| {
         // A cancelled shutdown token would otherwise refuse the write it caused.
         c.detach();
@@ -122,6 +124,14 @@ async fn farewell(
     })
 }
 
+#[instrument(
+    skip_all,
+    fields(
+        version = %packet.protocol_version,
+        hostname = %packet.server_address,
+        intent = ?packet.next_state,
+    ),
+)]
 pub(crate) async fn on_handshake_intention_packet(
     conn: ConnRef<'_, State>,
     packet: handshake::ClientIntentionPacket,
@@ -168,7 +178,7 @@ fn accept_cookie(
             return Err(DispatchError::peer(
                 "unexpected_cookie",
                 anyhow!("no cookie `{key}` was asked for at step `{resume:?}`"),
-            ))
+            ));
         };
 
         c.state.step = *resume;
@@ -263,6 +273,7 @@ pub(crate) async fn on_status_ping_request_packet(
     })
 }
 
+#[instrument(skip_all, fields(player = %packet.name, id = %packet.uuid))]
 pub(crate) async fn on_login_login_start(
     conn: ConnRef<'_, State>,
     packet: login::ClientLoginStartPacket,
@@ -356,6 +367,7 @@ pub(crate) async fn on_login_login_start(
     Ok(())
 }
 
+#[instrument(skip_all)]
 pub(crate) async fn on_login_encryption_response(
     conn: ConnRef<'_, State>,
     packet: login::ClientEncryptionResponsePacket,
@@ -449,6 +461,7 @@ pub(crate) async fn on_login_encryption_response(
     })
 }
 
+#[instrument(skip_all)]
 pub(crate) async fn on_login_login_acknowledged(
     conn: ConnRef<'_, State>,
     _: login::ClientLoginAcknowledgedPacket,
@@ -510,7 +523,7 @@ pub(crate) async fn on_login_login_acknowledged(
             }
         };
         c.send(configuration::ServerStoreCookiePacket {
-            key: AuthCookie::KEY.try_into().expect("infallible"),
+            key: AuthCookie::KEY.into(),
             payload: encoded,
         })
     })?;
@@ -539,7 +552,7 @@ pub(crate) async fn on_login_login_acknowledged(
             }
         };
         c.send(configuration::ServerStoreCookiePacket {
-            key: SessionCookie::KEY.try_into().expect("infallible"),
+            key: SessionCookie::KEY.into(),
             payload: encoded,
         })
     })?;
@@ -551,6 +564,14 @@ pub(crate) async fn on_login_login_acknowledged(
             port: target.address.port(),
         })?;
         c.close();
+        info!(
+            player = %c.state.player.name,
+            id = %c.state.player.id,
+            target = %target.identifier,
+            address = %target.address,
+            "transferred player",
+        );
+        metrics::transfers::inc();
         Ok(())
     })
 }
@@ -562,11 +583,15 @@ pub(crate) async fn on_configuration_client_information(
     metrics::client_locales::inc(packet.locale.to_string());
     metrics::client_view_distances::record(packet.view_distance.max(0) as u64);
     conn.with(|c| {
-        let (informed, keep_alive) = expect_step!(c, Step::Transfer { informed, keep_alive } => (informed, keep_alive))?;
+        let (informed, keep_alive) =
+            expect_step!(c, Step::Transfer { informed, keep_alive } => (informed, keep_alive))?;
         c.state.locale = Some(packet.locale.to_string());
 
         // The target selection waits for this, because a rejection is localized with it.
-        c.state.step = Step::Transfer { informed: Arc::clone(&informed), keep_alive };
+        c.state.step = Step::Transfer {
+            informed: Arc::clone(&informed),
+            keep_alive,
+        };
         informed.notify_one();
         Ok(())
     })
@@ -577,11 +602,18 @@ pub(crate) async fn on_configuration_keep_alive(
     packet: configuration::ClientKeepAlivePacket,
 ) -> crate::Result<(), DispatchError> {
     conn.with(|c| {
-        let (keep_alive, informed) = expect_step!(c, Step::Transfer { keep_alive, informed } => (keep_alive, informed))?;
+        let (keep_alive, informed) =
+            expect_step!(c, Step::Transfer { keep_alive, informed } => (keep_alive, informed))?;
         if keep_alive == Some(packet.id) {
-            c.state.step = Step::Transfer { keep_alive: None, informed };
+            c.state.step = Step::Transfer {
+                keep_alive: None,
+                informed,
+            };
         } else {
-            c.state.step = Step::Transfer { keep_alive, informed };
+            c.state.step = Step::Transfer {
+                keep_alive,
+                informed,
+            };
             debug!(
                 sent = ?keep_alive,
                 received = ?packet.id,

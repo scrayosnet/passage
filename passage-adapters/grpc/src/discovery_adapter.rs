@@ -1,7 +1,7 @@
 use crate::proto::TargetRequest;
 use crate::proto::discovery_client::DiscoveryClient;
 use passage_adapters::discovery::DiscoveryAdapter;
-use passage_adapters::{Client, AdapterError, Result, Target, metrics};
+use passage_adapters::{AdapterError, Client, Result, Target, metrics};
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
 use tonic::transport::Channel;

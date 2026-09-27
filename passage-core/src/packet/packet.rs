@@ -1,6 +1,6 @@
 use crate::common::ProtocolVersion;
 use crate::common::{Phase, VarInt};
-use crate::wire::{Reader, WireError, WireResult, Writer};
+use crate::wire::{Reader, WireError, Writer};
 
 /// A protocol packet.
 pub trait Packet: Sized + Send + Sync + 'static {

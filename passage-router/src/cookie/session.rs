@@ -1,9 +1,9 @@
 use crate::cookie::{Cookie, CookieError};
+use passage_core::wire::Bytes;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio_util::bytes::{BufMut, BytesMut};
 use uuid::Uuid;
-use passage_core::wire::Bytes;
 
 /// The session cookie key.
 pub const SESSION_COOKIE_KEY: &str = "passage:session";
@@ -35,7 +35,7 @@ impl Cookie for SessionCookie {
     fn encode(&self, _: Option<&[u8]>) -> Result<Bytes, CookieError> {
         let mut bytes = BytesMut::with_capacity(64);
         serde_json::to_writer((&mut bytes).writer(), self)?;
-        Ok(bytes.freeze().into())
+        Ok(bytes.freeze())
     }
 
     fn decode(_: Option<&[u8]>, signed: &[u8]) -> Result<Option<Self>, CookieError> {

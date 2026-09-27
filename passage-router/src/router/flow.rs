@@ -4,7 +4,7 @@
 //! protocol says to, and reads what comes back. Nothing here reaches into the handlers, so what is
 //! proven is the conversation rather than the code that produces it.
 
-use crate::adapter::adapter::Route;
+use crate::adapter::Route;
 use crate::adapter::authentication::DynAuthenticationAdapter;
 use crate::adapter::discovery::DynDiscoveryActionAdapter;
 use crate::adapter::held::{HeldAuthenticationAdapter, HeldStatusAdapter};
@@ -12,8 +12,8 @@ use crate::adapter::localization::DynLocalizationAdapter;
 use crate::adapter::status::DynStatusAdapter;
 use crate::cookie::{AuthCookie, Cookie, SessionCookie};
 use crate::crypto;
-use crate::router::state::State;
 use crate::router::DynRoute;
+use crate::router::state::State;
 use futures::{SinkExt, StreamExt};
 use passage_adapters::authentication::Profile;
 use passage_adapters::{
@@ -71,9 +71,9 @@ fn routes_with(
     let route = Route {
         hostname: Regex::new(HOST).expect("a pattern"),
         status: status_adapter,
-        discovery: DynDiscoveryActionAdapter::FixedDiscovery(FixedDiscoveryAdapter::new(
-            vec![target],
-        )),
+        discovery: vec![DynDiscoveryActionAdapter::FixedDiscovery(
+            FixedDiscoveryAdapter::new(vec![target]),
+        )],
         authentication: authentication_adapter,
         localization: DynLocalizationAdapter::Fixed(FixedLocalizationAdapter::new(
             "en_GB".to_owned(),
@@ -105,9 +105,7 @@ fn serve_routes(
 ) -> (TestClient, JoinHandle<Option<&'static str>>) {
     let (server_io, client_io) = tokio::io::duplex(8192);
     let secret = secret.map(Bytes::from_static);
-    let router = Passage::new(Arc::clone(&routes), secret.clone(), 3_600)
-        .router()
-        .expect("the router builds");
+    let router = Arc::new(crate::router::router().expect("the router builds"));
 
     let state_routes = Arc::clone(&routes);
     let connection = Client::new(Connected::new(server_io, peer()))

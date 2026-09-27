@@ -17,17 +17,21 @@ use uuid::Uuid;
 /// time, so it is kept as an array as that is what's specified in the JSON. The `profile_actions`
 /// are empty for non-sanctioned accounts.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
     /// The unique identifier of the Minecraft user profile.
     pub id: Uuid,
     /// The current visual name of the Minecraft user profile.
+    // `ByteString` is a string with a cheaper clone, and that is all a schema has to know.
+    #[cfg_attr(feature = "config-schema", schemars(with = "String"))]
     pub name: ByteString,
     /// The currently assigned properties of the Minecraft user profile.
     #[serde(default)]
     pub properties: Vec<ProfileProperty>,
     /// The pending imposed moderative actions of the Minecraft user profile.
     #[serde(default)]
+    #[cfg_attr(feature = "config-schema", schemars(with = "Vec<String>"))]
     pub profile_actions: Vec<ByteString>,
 }
 
@@ -41,14 +45,18 @@ pub struct Profile {
 /// `signature` of the property is signed with Yggdrasil's private key and therefore its
 /// authenticity can be verified by the Minecraft client.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileProperty {
     /// The unique, identifiable name of the profile property.
+    #[cfg_attr(feature = "config-schema", schemars(with = "String"))]
     pub name: ByteString,
     /// The base64 encoded value of the profile property.
+    #[cfg_attr(feature = "config-schema", schemars(with = "String"))]
     pub value: ByteString,
     /// The base64 encoded signature of the profile property.
     /// Only provided if `?unsigned=false` is appended to url
+    #[cfg_attr(feature = "config-schema", schemars(with = "Option<String>"))]
     pub signature: Option<ByteString>,
 }
 

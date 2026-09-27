@@ -69,12 +69,13 @@ impl AgonesDiscoveryAdapter {
     /// Creates a new adapter using the default in-cluster Kubernetes configuration.
     pub async fn new(config: AgonesDiscoveryAdapterConfig) -> Result<Self, AdapterError> {
         // Build the client from the default config.
-        let client = Client::try_default()
-            .await
-            .map_err(|err| AdapterError::FailedInitialization {
-                adapter_type: ADAPTER_TYPE,
-                cause: err.into(),
-            })?;
+        let client =
+            Client::try_default()
+                .await
+                .map_err(|err| AdapterError::FailedInitialization {
+                    adapter_type: ADAPTER_TYPE,
+                    cause: err.into(),
+                })?;
         Self::new_with_client(client, config).await
     }
 

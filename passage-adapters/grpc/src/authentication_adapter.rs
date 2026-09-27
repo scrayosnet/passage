@@ -1,7 +1,7 @@
 use crate::proto::authentication_client::AuthenticationClient;
 use crate::proto::{AuthenticationRequest, authentication_response};
 use passage_adapters::authentication::{AuthenticationAdapter, Profile};
-use passage_adapters::{Client, AdapterError, Player, metrics, reject, reject_reason};
+use passage_adapters::{AdapterError, Client, Player, metrics, reject, reject_reason};
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
 use tonic::transport::Channel;

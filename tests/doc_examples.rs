@@ -8,7 +8,7 @@
 //! the structural overview.
 
 use config::{File, FileFormat};
-use passage::config::Config;
+use passage_router::config::Config;
 use regex::Regex;
 use std::path::{Path, PathBuf};
 

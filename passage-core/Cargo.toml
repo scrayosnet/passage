@@ -25,7 +25,11 @@ sha1 = { workspace = true }
 aes = { workspace = true }
 cfb8 = { workspace = true }
 opentelemetry = { workspace = true }
+schemars = { workspace = true, features = ["default", "uuid1"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util", "sync"] }
 tracing-subscriber = { workspace = true }
+
+[features]
+config-schema = ["dep:schemars"]

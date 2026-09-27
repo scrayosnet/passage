@@ -1,9 +1,9 @@
 use crate::ProtocolVersion;
 use crate::common::{Nbt, TextComponent};
 use crate::wire::{Property, Reader, WireError, Writer};
+use bytes::Bytes;
 use bytestring::ByteString;
 use std::fmt::Display;
-use bytes::Bytes;
 
 /// The maximum length of an identifier (a namespaced key).
 pub(crate) const MAX_IDENTIFIER_LEN: usize = 32_767;

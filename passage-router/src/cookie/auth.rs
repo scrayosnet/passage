@@ -1,11 +1,11 @@
-use crate::cookie::{sign, Cookie, CookieError, HASH_LEN, verify};
+use crate::cookie::{Cookie, CookieError, HASH_LEN, sign, verify};
 use passage_adapters::authentication::ProfileProperty;
+use passage_core::wire::{ByteString, Bytes};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio_util::bytes::{BufMut, BytesMut};
 use uuid::Uuid;
-use passage_core::wire::{ByteString, Bytes};
 
 /// The auth cookie key.
 pub const AUTH_COOKIE_KEY: &str = "passage:authentication";
@@ -48,7 +48,7 @@ impl Cookie for AuthCookie {
 
     fn encode(&self, secret: Option<&[u8]>) -> Result<Bytes, CookieError> {
         let Some(secret) = secret else {
-            return Err(CookieError::SecretRequired)
+            return Err(CookieError::SecretRequired);
         };
 
         let mut bytes = BytesMut::with_capacity(HASH_LEN + 64);
@@ -60,12 +60,12 @@ impl Cookie for AuthCookie {
 
     fn decode(secret: Option<&[u8]>, signed: &[u8]) -> Result<Option<Self>, CookieError> {
         let Some(secret) = secret else {
-            return Err(CookieError::SecretRequired)
+            return Err(CookieError::SecretRequired);
         };
 
         let Some(bytes) = verify(signed, secret) else {
-            return Ok(None)
+            return Ok(None);
         };
-        Ok(Some(serde_json::from_slice(&bytes)?))
+        Ok(Some(serde_json::from_slice(bytes)?))
     }
 }
