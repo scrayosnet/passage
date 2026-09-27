@@ -183,12 +183,11 @@ pub fn init_tracing(config: &Config) -> Result<Telemetry, Box<dyn std::error::Er
 
     let subscriber = tracing_subscriber::registry()
         .with(
-            tracing_subscriber::fmt::layer().compact().with_filter(
-                EnvFilter::builder()
-                    .with_default_directive(LevelFilter::INFO.into())
-                    .from_env_lossy(),
-            ),
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
         )
+        .with(tracing_subscriber::fmt::layer().compact())
         // Each of these is `None` when its endpoint is not configured, and a `None` layer is one
         // that is not installed at all.
         .with(
