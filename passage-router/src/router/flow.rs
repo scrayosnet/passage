@@ -13,7 +13,7 @@ use crate::adapter::status::DynStatusAdapter;
 use crate::cookie::{AuthCookie, Cookie, SessionCookie};
 use crate::crypto;
 use crate::router::state::State;
-use crate::router::{DynRoute, Passage};
+use crate::router::DynRoute;
 use futures::{SinkExt, StreamExt};
 use passage_adapters::authentication::Profile;
 use passage_adapters::{
@@ -70,12 +70,12 @@ fn routes_with(
     };
     let route = Route {
         hostname: Regex::new(HOST).expect("a pattern"),
-        status_adapter,
-        discovery_adapter: DynDiscoveryActionAdapter::FixedDiscovery(FixedDiscoveryAdapter::new(
+        status: status_adapter,
+        discovery: DynDiscoveryActionAdapter::FixedDiscovery(FixedDiscoveryAdapter::new(
             vec![target],
         )),
-        authentication_adapter,
-        localization_adapter: DynLocalizationAdapter::Fixed(FixedLocalizationAdapter::new(
+        authentication: authentication_adapter,
+        localization: DynLocalizationAdapter::Fixed(FixedLocalizationAdapter::new(
             "en_GB".to_owned(),
             Default::default(),
             true,

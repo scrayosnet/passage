@@ -22,7 +22,7 @@ passage-adapters = { workspace = true }
 
 thiserror = { workspace = true }
 anyhow = { workspace = true }
-tokio = { workspace = true, features = ["macros", "net"] }
+tokio = { workspace = true, features = ["macros", "net", "signal"] }
 tokio-util = { workspace = true, features = ["rt", "codec"] }
 proxy-header = { workspace = true }
 tracing = { workspace = true }

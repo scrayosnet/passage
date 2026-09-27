@@ -83,7 +83,7 @@ impl ConnRefExt for ConnRef<'_, State> {
         let status = self
             .route()
             .ok_or(AdapterError::reject_reason("router", "No route selected"))?
-            .status_adapter
+            .status
             .status(&self.client())
             .await?;
         Ok(status)
@@ -93,7 +93,7 @@ impl ConnRefExt for ConnRef<'_, State> {
         let profile = self
             .route()
             .ok_or(AdapterError::reject_reason("router", "No route selected"))?
-            .authentication_adapter
+            .authentication
             .authenticate(
                 &self.client(),
                 &self.player(),
@@ -110,7 +110,7 @@ impl ConnRefExt for ConnRef<'_, State> {
         };
 
         let message = route
-            .localization_adapter
+            .localization
             .localize(self.locale().as_deref(), key, params)
             .await;
         match message {

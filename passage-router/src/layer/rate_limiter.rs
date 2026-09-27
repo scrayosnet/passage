@@ -1,20 +1,23 @@
 use crate::metrics;
 use std::collections::HashMap;
 use std::hash::Hash;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
 use tracing::instrument;
+use passage_core::router::Layer;
 
 /// [`RateLimiter`] tracks connections per client address over some (approximate) time window.
-pub struct RateLimiter<T> {
+pub struct RateLimiter<Addr> {
     last_cleanup: Instant,
-    buckets: HashMap<T, (Instant, f32, f32)>,
+    buckets: HashMap<Addr, (Instant, f32, f32)>,
     duration: Duration,
     limit: f32,
 }
 
-impl<T> RateLimiter<T>
+impl<Addr> RateLimiter<Addr>
 where
-    T: Eq + Copy + Hash,
+    Addr: Eq + Copy + Hash,
 {
     pub fn new(duration: Duration, limit: usize) -> Self {
         assert!(duration.as_secs_f32() > 0f32);
@@ -28,7 +31,7 @@ where
     }
 
     #[instrument(skip_all)]
-    pub fn enqueue(&mut self, key: T) -> bool {
+    pub fn enqueue(&mut self, key: Addr) -> bool {
         // get the current time only once
         let now = Instant::now();
 
@@ -72,6 +75,42 @@ where
 
         // allow the request to pass
         true
+    }
+}
+
+pub struct RateLimiterLayer<Addr> {
+    rate_limiter: Option<Mutex<RateLimiter<Addr>>>,
+}
+
+impl<Addr> RateLimiterLayer<Addr> where
+    Addr: Eq + Hash + Copy,
+{
+    pub fn new(config: Option<crate::config::RateLimiter>) -> Self {
+        Self {
+            rate_limiter: config.map(|config| {
+                Mutex::new(RateLimiter::new(Duration::from_secs(config.duration), config.limit))
+            })
+        }
+    }
+}
+
+impl<Io, Addr> Layer<Io, Addr> for RateLimiterLayer<Addr>
+where
+    Io: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    Addr: Send + Sync + Eq + Hash + Copy + 'static,
+{
+    type Io = Io;
+
+    async fn admit(&self, io: Io, addr: Addr) -> Option<(Self::Io, Addr)> {
+        let Some(rate_limiter) = self.rate_limiter.as_ref() else {
+            return Some((io, addr))
+        };
+
+        let mut rate_limiter = rate_limiter.lock().await;
+        if !rate_limiter.enqueue(addr) {
+            return None;
+        }
+        Some((io, addr))
     }
 }
 

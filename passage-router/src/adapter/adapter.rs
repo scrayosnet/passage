@@ -21,13 +21,13 @@ pub struct Route<Stat, Disc, Auth, Loca> {
     /// Regular expression matched against the server address the client sent in the handshake.
     pub hostname: Regex,
     /// Adapter used to answer status ping requests for this route.
-    pub status_adapter: Stat,
+    pub status: Stat,
     /// Adapter pipeline used to discover and select a backend target for this route.
-    pub discovery_adapter: Disc,
+    pub discovery: Disc,
     /// Adapter used to authenticate the connecting player for this route.
-    pub authentication_adapter: Auth,
+    pub authentication: Auth,
     /// Adapter used to resolve localised messages for this route.
-    pub localization_adapter: Loca,
+    pub localization: Loca,
 }
 
 impl<Stat, Disc, Auth, Loca> Route<Stat, Disc, Auth, Loca>
@@ -46,7 +46,7 @@ where
     /// Returns `Err` if the pipeline produces no candidates.
     pub async fn select(&self, client: &Client, player: &Player) -> Result<Target> {
         let mut targets = Vec::new();
-        self.discovery_adapter
+        self.discovery
             .apply(client, player, &mut targets)
             .await?;
         targets
@@ -66,10 +66,10 @@ where
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Route")
             .field("hostname", &self.hostname)
-            .field("status_adapter", &self.status_adapter)
-            .field("discovery_adapter", &self.discovery_adapter)
-            .field("authentication_adapter", &self.authentication_adapter)
-            .field("localization_adapter", &self.localization_adapter)
+            .field("status_adapter", &self.status)
+            .field("discovery_adapter", &self.discovery)
+            .field("authentication_adapter", &self.authentication)
+            .field("localization_adapter", &self.localization)
             .finish()
     }
 }
@@ -82,7 +82,7 @@ where
     Loca: LocalizationAdapter,
 {
     async fn status(&self, client: &Client) -> Result<Option<ServerStatus>> {
-        self.status_adapter.status(client).await
+        self.status.status(client).await
     }
 }
 
@@ -99,7 +99,7 @@ where
         player: &Player,
         targets: &mut Vec<Target>,
     ) -> Result<()> {
-        self.discovery_adapter.apply(client, player, targets).await
+        self.discovery.apply(client, player, targets).await
     }
 }
 
@@ -117,7 +117,7 @@ where
         shared_secret: &[u8],
         encoded_public: &[u8],
     ) -> Result<Profile> {
-        self.authentication_adapter
+        self.authentication
             .authenticate(client, player, shared_secret, encoded_public)
             .await
     }
@@ -136,7 +136,7 @@ where
         key: &str,
         params: &[(&'static str, String)],
     ) -> Result<String> {
-        self.localization_adapter
+        self.localization
             .localize(locale, key, params)
             .await
     }

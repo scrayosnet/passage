@@ -12,8 +12,8 @@ use crate::adapter::status::DynStatusAdapter;
 use crate::config::Config;
 use passage_router::adapter::adapter::Route;
 use passage_router::config::{Config as ListenerConfig, ProxyProtocol};
+use passage_router::layer::rate_limiter::RateLimiter;
 use passage_router::listener::Listener;
-use passage_router::rate_limiter::RateLimiter;
 use regex::Regex;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -38,11 +38,11 @@ pub async fn start(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     for route in config.routes {
         routes.push(Arc::new(Route {
             hostname: Regex::new(&route.hostname)?,
-            status_adapter: DynStatusAdapter::from_config(route.status).await?,
-            discovery_adapter: DynDiscoveryActionAdapter::from_config(route.discovery).await?,
-            authentication_adapter: DynAuthenticationAdapter::from_config(route.authentication)
+            status: DynStatusAdapter::from_config(route.status).await?,
+            discovery: DynDiscoveryActionAdapter::from_config(route.discovery).await?,
+            authentication: DynAuthenticationAdapter::from_config(route.authentication)
                 .await?,
-            localization_adapter: DynLocalizationAdapter::from_config(route.localization).await?,
+            localization: DynLocalizationAdapter::from_config(route.localization).await?,
         }));
     }
     debug!(routes = ?routes, "build routes");

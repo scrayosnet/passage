@@ -1,5 +1,5 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use passage_router::rate_limiter;
+use passage_router::layer::rate_limiter;
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("rw");
