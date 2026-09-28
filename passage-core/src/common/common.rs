@@ -56,6 +56,10 @@ pub(crate) const MAX_REGISTRY_ENTRIES: usize = 32_767;
 /// The maximum number of feature flags.
 pub(crate) const MAX_FEATURES: usize = 1_024;
 
+/// The maximum number of post-processing effects, which is the same bound as the feature flags:
+/// both are a bare list of identifiers with no limit of their own in the protocol.
+pub(crate) const MAX_POST_EFFECTS: usize = 1_024;
+
 /// The maximum number of registries, of tags per registry, and of IDs per tag.
 pub(crate) const MAX_TAGS: usize = 32_767;
 
@@ -139,7 +143,7 @@ pub enum ResourcePackResult {
     /// A reload of the resource pack failed.
     ReloadFailed,
     /// The resource pack was discarded.
-    Discorded,
+    Discarded,
 }
 
 impl Property for ResourcePackResult {
@@ -154,7 +158,7 @@ impl Property for ResourcePackResult {
             4 => Ok(ResourcePackResult::Downloaded),
             5 => Ok(ResourcePackResult::InvalidUrl),
             6 => Ok(ResourcePackResult::ReloadFailed),
-            7 => Ok(ResourcePackResult::Discorded),
+            7 => Ok(ResourcePackResult::Discarded),
             _ => Err(WireError::IllegalEnumValue {
                 field,
                 kind: Self::NAME,
@@ -176,7 +180,7 @@ impl Property for ResourcePackResult {
             ResourcePackResult::Downloaded => 4,
             ResourcePackResult::InvalidUrl => 5,
             ResourcePackResult::ReloadFailed => 6,
-            ResourcePackResult::Discorded => 7,
+            ResourcePackResult::Discarded => 7,
         };
         w.var_int(val);
         Ok(())

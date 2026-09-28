@@ -101,3 +101,9 @@ build/
 # local configuration
 config/config.*
 config/auth_secret
+
+# Byproducts of a Minecraft client run from the repository root. The conformance test confines its
+# client to a scratch directory, but a launch by hand does not.
+.lwjgl/
+logs/
+.minecraft-cache/

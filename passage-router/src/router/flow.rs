@@ -25,7 +25,7 @@ use passage_core::codec::{Aes128Cfb8, Frame, FrameCodec};
 use passage_core::common::{ChatMode, DisplayedSkinParts, MainHand, State as Intent};
 use passage_core::connection::Options;
 use passage_core::packet::{configuration, handshake, login, status};
-use passage_core::wire::{Bytes, Options as WireOptions, Reader};
+use passage_core::wire::{Bytes, BytesMut, Options as WireOptions, Reader, Writer};
 use passage_core::{Packet, ProtocolVersion, versions};
 use regex::Regex;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -44,14 +44,21 @@ fn peer() -> SocketAddr {
 /// The host the route below matches, and what the client puts in its handshake.
 const HOST: &str = "mc.justchunks.net";
 
+/// Every protocol version Passage serves, breakpoints and the releases between them alike.
+///
+/// The conversations below are replayed once per entry. The in-between versions are not padding:
+/// a packet whose ID table names the wrong threshold is correct at the breakpoints on either side
+/// and wrong only in the middle, which is exactly the shape of bug that reaches production.
+const SUPPORTED: std::ops::RangeInclusive<i32> = 766..=777;
+
 /// One route, answered entirely from memory: no session server, no discovery service.
 fn routes() -> Arc<[Arc<DynRoute>]> {
     routes_with(
         DynStatusAdapter::Fixed(FixedStatusAdapter::new(
             None,
-            versions::V26_1,
+            versions::V26_3,
             versions::V1_20_5,
-            versions::V26_1,
+            versions::V26_3,
         )),
         DynAuthenticationAdapter::Disabled(DisabledAuthenticationAdapter::new()),
     )
@@ -143,7 +150,7 @@ impl TestClient {
         let options = WireOptions::default();
         Self {
             framed: Framed::new(io, FrameCodec::new(options)),
-            version: versions::V26_1,
+            version: versions::V26_3,
             options,
         }
     }
@@ -152,6 +159,33 @@ impl TestClient {
     async fn send<P: Packet>(&mut self, packet: P) {
         let frame = Frame::of(&packet, self.version, self.options).expect("encodes");
         self.framed.send(frame).await.expect("writes");
+    }
+
+    /// Sends a packet under an ID of the test's choosing, for the versions where the packet has
+    /// none of its own: a client below 1.20.5 still sends a login start, and Passage still has to
+    /// do something sensible with it.
+    async fn send_as<P: Packet>(&mut self, id: i32, packet: P) {
+        let mut buf = BytesMut::new();
+        {
+            let mut writer = Writer::new(&mut buf).with_options(self.options);
+            writer.var_int(id);
+            packet.encode(&mut writer, self.version).expect("encodes");
+        }
+        let frame = Frame {
+            name: P::NAME,
+            id,
+            payload: buf.freeze(),
+        };
+        self.framed.send(frame).await.expect("writes");
+    }
+
+    /// Reads the next frame without asking which packet it is, for the versions whose IDs this
+    /// crate does not claim to know.
+    async fn next_raw(&mut self) -> Option<Frame> {
+        self.framed
+            .next()
+            .await
+            .map(|frame| frame.expect("the frame decodes"))
     }
 
     /// Reads the next packet, which must be the one asked for.
@@ -191,12 +225,19 @@ impl TestClient {
 }
 
 #[tokio::test]
-async fn a_status_ping_is_answered_and_the_connection_closed() {
+async fn a_status_ping_is_answered_at_every_supported_version() {
+    for protocol in SUPPORTED {
+        a_status_ping_is_answered_and_the_connection_closed(ProtocolVersion::new(protocol)).await;
+    }
+}
+
+async fn a_status_ping_is_answered_and_the_connection_closed(version: ProtocolVersion) {
     let (mut client, served) = serve();
+    client.version = version;
 
     client
         .send(handshake::ClientIntentionPacket {
-            protocol_version: versions::V26_1,
+            protocol_version: version,
             server_address: HOST.into(),
             server_port: 25_565,
             next_state: Intent::Status,
@@ -223,7 +264,7 @@ async fn a_hostname_no_route_matches_is_refused() {
 
     client
         .send(handshake::ClientIntentionPacket {
-            protocol_version: versions::V26_1,
+            protocol_version: versions::V26_3,
             server_address: "elsewhere.example".into(),
             server_port: 25_565,
             next_state: Intent::Status,
@@ -235,13 +276,23 @@ async fn a_hostname_no_route_matches_is_refused() {
 }
 
 #[tokio::test]
-async fn a_login_runs_to_the_transfer_packet() {
+async fn a_login_runs_to_the_transfer_packet_at_every_supported_version() {
+    // The whole conversation, replayed for every version Passage claims to serve. This is what
+    // would have caught 26.3 moving the transfer packet and 26.2 adding the session ID: both are
+    // invisible at the version the suite used to pin, and fatal one version over.
+    for protocol in SUPPORTED {
+        a_login_runs_to_the_transfer_packet(ProtocolVersion::new(protocol)).await;
+    }
+}
+
+async fn a_login_runs_to_the_transfer_packet(version: ProtocolVersion) {
     let (mut client, served) = serve();
+    client.version = version;
 
     // Handshake and login start, in the clear.
     client
         .send(handshake::ClientIntentionPacket {
-            protocol_version: versions::V26_1,
+            protocol_version: version,
             server_address: HOST.into(),
             server_port: 25_565,
             next_state: Intent::Login,
@@ -263,7 +314,10 @@ async fn a_login_runs_to_the_transfer_packet() {
         !encryption.verify_token.is_empty(),
         "the client has nothing to answer with otherwise",
     );
-    assert!(encryption.should_authenticate, "no auth cookie was offered");
+    assert!(
+        !encryption.should_authenticate,
+        "the route authenticates nobody, so the client must not be sent to Mojang",
+    );
 
     let public = crypto::KEY_PAIR.1.clone();
     let secret = b"0123456789abcdef";
@@ -333,7 +387,7 @@ async fn a_transfer_with_a_valid_auth_cookie_skips_authentication() {
 
     client
         .send(handshake::ClientIntentionPacket {
-            protocol_version: versions::V26_1,
+            protocol_version: versions::V26_3,
             server_address: HOST.into(),
             server_port: 25_565,
             next_state: Intent::Transfer,
@@ -415,7 +469,7 @@ async fn awaiting_the_auth_cookie() -> (TestClient, JoinHandle<Option<&'static s
     let (mut client, served) = serve_with(Some(SECRET));
     client
         .send(handshake::ClientIntentionPacket {
-            protocol_version: versions::V26_1,
+            protocol_version: versions::V26_3,
             server_address: HOST.into(),
             server_port: 25_565,
             next_state: Intent::Transfer,
@@ -440,7 +494,7 @@ async fn a_packet_that_is_not_what_the_step_waits_for_is_refused() {
 
     client
         .send(handshake::ClientIntentionPacket {
-            protocol_version: versions::V26_1,
+            protocol_version: versions::V26_3,
             server_address: HOST.into(),
             server_port: 25_565,
             next_state: Intent::Login,
@@ -500,7 +554,7 @@ async fn a_cookie_nobody_asked_for_at_all_is_refused() {
 
     client
         .send(handshake::ClientIntentionPacket {
-            protocol_version: versions::V26_1,
+            protocol_version: versions::V26_3,
             server_address: HOST.into(),
             server_port: 25_565,
             next_state: Intent::Login,
@@ -534,7 +588,7 @@ async fn a_ping_may_not_overtake_the_status_it_is_timing() {
 
     client
         .send(handshake::ClientIntentionPacket {
-            protocol_version: versions::V26_1,
+            protocol_version: versions::V26_3,
             server_address: HOST.into(),
             server_port: 25_565,
             next_state: Intent::Status,
@@ -565,9 +619,9 @@ async fn a_second_encryption_response_cannot_arrive_during_authentication() {
         routes_with(
             DynStatusAdapter::Fixed(FixedStatusAdapter::new(
                 None,
-                versions::V26_1,
+                versions::V26_3,
                 versions::V1_20_5,
-                versions::V26_1,
+                versions::V26_3,
             )),
             DynAuthenticationAdapter::Held(authentication),
         ),
@@ -576,7 +630,7 @@ async fn a_second_encryption_response_cannot_arrive_during_authentication() {
 
     client
         .send(handshake::ClientIntentionPacket {
-            protocol_version: versions::V26_1,
+            protocol_version: versions::V26_3,
             server_address: HOST.into(),
             server_port: 25_565,
             next_state: Intent::Login,
@@ -609,4 +663,110 @@ async fn a_second_encryption_response_cannot_arrive_during_authentication() {
     client.expect_eof().await;
     assert_eq!(served.await.expect("no panic"), Some("unexpected_step"));
     release.release();
+}
+
+#[tokio::test]
+async fn a_client_older_than_the_transfer_packet_is_told_which_version_to_install() {
+    // 1.20.4: the last version without the transfer packet, and the whole reason
+    // `disconnect_unsupported` exists. It has to arrive as a login disconnect -- a dropped
+    // connection is what the client reports as "connection reset", and nothing else.
+    const V1_20_4: ProtocolVersion = ProtocolVersion::new(765);
+    let (mut client, served) = serve();
+    client.version = V1_20_4;
+
+    client
+        .send(handshake::ClientIntentionPacket {
+            protocol_version: V1_20_4,
+            server_address: HOST.into(),
+            server_port: 25_565,
+            next_state: Intent::Login,
+        })
+        .await;
+    // 1.20.4's login start is the same two fields under the same ID. It simply has no ID *in this
+    // crate* below 1.20.5, so the frame is addressed by hand -- which is exactly what the client
+    // does.
+    client
+        .send_as(
+            0x00,
+            login::ClientLoginStartPacket {
+                name: "Hydrofin".into(),
+                uuid: Uuid::from_u128(7),
+            },
+        )
+        .await;
+
+    // The reply is read raw for the same reason: the disconnect has no ID at 765 either, so
+    // `expect` would be asserting against a table that does not cover this client.
+    let frame = client
+        .next_raw()
+        .await
+        .expect("an old client is answered rather than dropped");
+    assert_eq!(frame.id, 0x00, "the login disconnect");
+    let mut reader = Reader::new(frame.payload);
+    reader.var_int("packet_id").expect("the ID leads");
+    let disconnect =
+        login::ServerDisconnectPacket::decode(&mut reader, V1_20_4).expect("the packet decodes");
+    // The route's message table is empty, so the localization adapter hands back the key -- which
+    // is still the assertion that matters: the client is told *this*, rather than dropped or sent
+    // something meant for another situation.
+    assert_eq!(disconnect.reason, "disconnect_unsupported");
+
+    client.expect_eof().await;
+    assert_eq!(served.await.expect("no panic"), None, "a clean ending");
+}
+
+#[tokio::test]
+async fn the_client_is_only_sent_to_mojang_when_the_route_will_check_the_answer() {
+    // `should_authenticate` is an instruction to the client, not a note to ourselves: when it is
+    // set, the client posts to the session server and refuses to continue if that fails. So it has
+    // to follow the route's adapter. A route that authenticates nobody and still demands a Mojang
+    // session turns away exactly the players it was configured to let in.
+    let profile = Profile {
+        id: Uuid::from_u128(7),
+        name: "Hydrofin".into(),
+        properties: Vec::new(),
+        profile_actions: Vec::new(),
+    };
+    let (authentication, release) = HeldAuthenticationAdapter::new(profile);
+    let (mut client, served) = serve_routes(
+        routes_with(
+            DynStatusAdapter::Fixed(FixedStatusAdapter::new(
+                None,
+                versions::V26_3,
+                versions::V1_20_5,
+                versions::V26_3,
+            )),
+            DynAuthenticationAdapter::Held(authentication),
+        ),
+        None,
+    );
+
+    client
+        .send(handshake::ClientIntentionPacket {
+            protocol_version: versions::V26_3,
+            server_address: HOST.into(),
+            server_port: 25_565,
+            next_state: Intent::Login,
+        })
+        .await;
+    client
+        .send(login::ClientLoginStartPacket {
+            name: "Hydrofin".into(),
+            uuid: Uuid::from_u128(7),
+        })
+        .await;
+
+    let encryption = client
+        .expect::<login::ServerEncryptionRequestPacket>()
+        .await;
+    assert!(
+        encryption.should_authenticate,
+        "an adapter that consults Mojang has to have the client do so first",
+    );
+
+    // The counterpart is asserted in `a_login_runs_to_the_transfer_packet`, whose route disables
+    // authentication and therefore must not set the flag.
+    release.release();
+    drop(client);
+    let _ = served.await;
 }

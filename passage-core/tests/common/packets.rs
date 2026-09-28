@@ -215,18 +215,18 @@ impl Packet for LoginSuccess {
     const NAME: &'static str = "LoginSuccess";
     const PHASE: Phase = Phase::Login;
     const IDS: &'static [(ProtocolVersion, i32)] =
-        &[(versions::V26_1, 0x02), (ProtocolVersion::UNKNOWN, 0x01)];
+        &[(versions::V26_3, 0x02), (ProtocolVersion::UNKNOWN, 0x01)];
 
     fn decode(r: &mut Reader, version: ProtocolVersion) -> WireResult<Self> {
         Ok(Self {
             user_name: r.string("user_name", 16)?,
-            session_id: r.gated(version.at_least(versions::V26_1), |r| r.uuid("session_id"))?,
+            session_id: r.gated(version.at_least(versions::V26_3), |r| r.uuid("session_id"))?,
         })
     }
 
     fn encode(&self, w: &mut Writer<'_>, version: ProtocolVersion) -> WireResult<()> {
         w.string("user_name", &self.user_name)?;
-        if version.at_least(versions::V26_1) {
+        if version.at_least(versions::V26_3) {
             w.uuid(&self.session_id.unwrap_or_else(Uuid::nil));
         }
         Ok(())

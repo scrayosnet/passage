@@ -20,7 +20,7 @@ routes:
     description: "\"Welcome to our server!\""
     favicon: "data:image/png;base64,..."
     enforces_secure_chat: true
-    preferred_version: 769
+    preferred_version: 777
     min_version: 766
     max_version: 1000
 ```
@@ -33,7 +33,7 @@ routes:
 | `description` | string | `"\"Minecraft Server Transfer Router\""` | MOTD as a JSON text component |
 | `favicon` | string | *(built-in icon)* | Base64-encoded 64x64 PNG (`data:image/png;base64,...`) |
 | `enforces_secure_chat` | bool | `true` | Whether the server enforces secure chat |
-| `preferred_version` | integer | `769` | Protocol version shown in the server list |
+| `preferred_version` | integer | `777` | Protocol version shown in the server list |
 | `min_version` | integer | `0` | Lowest protocol version reported as compatible |
 | `max_version` | integer | `1000` | Highest protocol version reported as compatible |
 
@@ -66,7 +66,12 @@ Some reference points:
 
 | Version | Protocol |
 |---------|----------|
-| 1.21.4 | `769` |
+| 26.3 | `777` |
+| 26.2 | `776` |
+| 26.1 | `775` |
+| 1.21.11 | `774` |
+| 1.21.9 | `773` |
+| 1.21.6 | `771` |
 | 1.21.2 | `768` |
 | 1.21 | `767` |
 | 1.20.5 | `766` |
@@ -85,7 +90,7 @@ The only login that Passage itself rejects on version grounds is one below proto
 reach the configuration phase at all. Those clients receive the
 [`disconnect_unsupported`](/advanced/localization/#disconnect_unsupported) message, whose `{preferred}`
 parameter is filled with this adapter's `name`. Set `name` to the version you want those players to
-install (e.g. `"1.21.5"`) if you rely on that message.
+install (e.g. `"26.3"`) if you rely on that message.
 :::
 
 ---
@@ -116,7 +121,7 @@ The endpoint must accept a GET request and return JSON matching the Minecraft st
 
 ```json
 {
-  "version": {"name": "My Network", "protocol": 769},
+  "version": {"name": "My Network", "protocol": 777},
   "players": {"online": 42, "max": 100, "sample": []},
   "description": "{\"text\":\"Welcome!\",\"color\":\"gold\"}",
   "favicon": "data:image/png;base64,...",

@@ -22,6 +22,12 @@ impl DisabledAuthenticationAdapter {
 }
 
 impl AuthenticationAdapter for DisabledAuthenticationAdapter {
+    /// Nothing here consults Mojang, so nothing may demand that the client does either -- which is
+    /// what makes this the adapter an offline client can actually reach.
+    fn requires_session(&self) -> bool {
+        false
+    }
+
     #[tracing::instrument(level = "info", skip_all, fields(adapter = ADAPTER_TYPE))]
     async fn authenticate(
         &self,

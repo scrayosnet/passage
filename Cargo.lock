@@ -2852,6 +2852,8 @@ dependencies = [
  "config",
  "passage-router",
  "regex",
+ "reqwest",
+ "serde_json",
  "tokio",
 ]
 

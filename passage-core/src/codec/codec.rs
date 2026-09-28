@@ -233,7 +233,7 @@ mod tests {
         const NAME: &'static str = "Greeting";
         const PHASE: Phase = Phase::Login;
         const IDS: &'static [(ProtocolVersion, i32)] =
-            &[(versions::V26_1, 0x42), (versions::V1_20_5, 0x07)];
+            &[(versions::V26_3, 0x42), (versions::V1_20_5, 0x07)];
 
         fn decode(r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self {
@@ -284,7 +284,7 @@ mod tests {
         // wrote no ID would put the payload's first byte where the peer looks for one.
         let encoded = Frame::of(
             &Greeting { text: "hi".into() },
-            versions::V26_1,
+            versions::V26_3,
             Options::default(),
         )
         .expect("the packet exists in 26.1");
@@ -303,7 +303,7 @@ mod tests {
         // The router skips the ID again before handing the rest to `Packet::decode`.
         let mut reader = Reader::new(decoded.payload.clone());
         assert_eq!(reader.var_int("packet_id").expect("reads"), 0x42);
-        let greeting = Greeting::decode(&mut reader, versions::V26_1).expect("decodes");
+        let greeting = Greeting::decode(&mut reader, versions::V26_3).expect("decodes");
         assert_eq!(greeting.text, "hi");
         reader.finish(Greeting::NAME).expect("nothing is left");
     }
@@ -423,7 +423,7 @@ mod tests {
             &Greeting {
                 text: "x".repeat(64).into(),
             },
-            versions::V26_1,
+            versions::V26_3,
             Options {
                 max_frame_len: 16,
                 ..Options::default()

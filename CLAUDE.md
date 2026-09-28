@@ -36,6 +36,9 @@ cargo machete --with-metadata
 # Security audit
 cargo deny check
 cargo audit
+
+# Boot the official Minecraft client against the real binary (needs Xvfb, a JDK and disk)
+xvfb-run -a cargo test -p passage --test client_conformance -- --ignored --nocapture
 ```
 
 ## Workspace Structure
@@ -95,6 +98,26 @@ Uses the `config` crate. See `passage/src/config.rs`.
 ### Protocol State Machine
 
 Connections progress through states: `Handshake → Status | Login → Configuration → Transfer`. The configuration phase handles resource pack delivery with keep-alive packets sent on 16-second intervals.
+
+### Packet versioning
+
+Each packet in `passage-core/src/packet` declares `IDS`: its ID in every protocol version that
+changed it, newest first. The router reads those thresholds to decide how many dispatch tables to
+build, so adding a version to `passage-core/src/common/version.rs` is only meaningful if a packet
+actually names it.
+
+IDs and field layouts are transcribed by hand from the
+[protocol documentation](https://minecraft.wiki/w/Java_Edition_protocol/Packets), which is the
+cheapest thing to get right while implementing and the cheapest to re-check by eye. Nothing in the
+Rust test suite can confirm them: the flow tests in `passage-router/src/router/flow.rs` replay whole
+conversations at every supported version, but both ends share `Packet::IDS` and the same encoder, so
+a wrong ID or a field gated at the wrong version makes them agree with each other and pass.
+
+What does confirm them is `tests/client_conformance.rs`, which boots the *official Minecraft client*
+against the shipped binary once per breakpoint and requires it to follow the transfer. It is the
+only test that shares no code with what it is judging. `#[ignore]`d; nightly via
+`.github/workflows/conformance.yml`. When a new Minecraft version lands, add it to `BREAKPOINTS`
+there and to `versions` in `passage-core/src/common/version.rs`.
 
 ### Observability
 

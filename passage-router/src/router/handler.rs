@@ -5,6 +5,7 @@ use crate::{crypto, metrics};
 use anyhow::{Context, anyhow};
 use opentelemetry::global;
 use opentelemetry::trace::TraceContextExt;
+use passage_adapters::authentication::AuthenticationAdapter;
 use passage_core::codec::{Aes128Cfb8, SECRET_LEN};
 use passage_core::connection::{ConnRef, DispatchError};
 use passage_core::packet::{configuration, handshake, login, status};
@@ -416,7 +417,7 @@ pub(crate) async fn on_login_login_start(
 
     // The transfer packet arrived with the configuration phase in 1.20.5, so anything older is
     // told which version to use instead.
-    if conn.version() < versions::V1_20_5 {
+    if !conn.version().placed().at_least(versions::V1_20_5) {
         let preferred = conn
             .status()
             .await
@@ -484,6 +485,11 @@ pub(crate) async fn on_login_login_start(
     }
     Span::current().record("authenticated", authenticated);
 
+    // Whether the client is told to prove itself to Mojang first.
+    let requires_session = conn
+        .route()
+        .is_none_or(|route| route.authentication.requires_session());
+
     // Send the encryption message.
     let verify_token = crypto::generate_token()
         .map_err(|err| DispatchError::internal("verify_token_error", err))?;
@@ -492,7 +498,7 @@ pub(crate) async fn on_login_login_start(
             server_id: ByteString::new(),
             public_key: crypto::ENCODED_PUB.clone(),
             verify_token: verify_token.clone(),
-            should_authenticate: !authenticated,
+            should_authenticate: !authenticated && requires_session,
         })?;
         c.state.step = Step::Encrypt {
             verify_token,

@@ -96,6 +96,8 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 [dev-dependencies]
 config = { workspace = true }
 regex = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
 
 [features]
 default = ["sentry", "adapters-grpc", "adapters-agones", "adapters-http", "adapters-dns"]

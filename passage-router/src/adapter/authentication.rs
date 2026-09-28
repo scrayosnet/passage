@@ -45,6 +45,19 @@ impl Display for DynAuthenticationAdapter {
 }
 
 impl AuthenticationAdapter for DynAuthenticationAdapter {
+    fn requires_session(&self) -> bool {
+        match self {
+            DynAuthenticationAdapter::Disabled(adapter) => adapter.requires_session(),
+            DynAuthenticationAdapter::Fixed(adapter) => adapter.requires_session(),
+            #[cfg(feature = "adapters-grpc")]
+            DynAuthenticationAdapter::Grpc(adapter) => adapter.requires_session(),
+            #[cfg(feature = "adapters-http")]
+            DynAuthenticationAdapter::Mojang(adapter) => adapter.requires_session(),
+            #[cfg(test)]
+            DynAuthenticationAdapter::Held(adapter) => adapter.requires_session(),
+        }
+    }
+
     async fn authenticate(
         &self,
         client: &Client,

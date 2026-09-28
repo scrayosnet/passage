@@ -49,7 +49,7 @@ fn status_client() -> Router<Notes> {
 /// Runs a status client over `io` and returns what it saw.
 async fn ping(io: DuplexStream) -> Vec<String> {
     client(io, status_client())
-        .initial_version(versions::V26_1)
+        .initial_version(versions::V26_3)
         .connect()
         .await
         .expect("preconnected")
@@ -329,13 +329,13 @@ async fn shutdown_stops_accepting_and_ends_the_connections_it_already_has() {
     let running = Harness::new(status_server()).start();
 
     // A connection that is live and has been answered, but not closed.
-    let mut live = RawClient::new(running.incoming.connect(1)).at(versions::V26_1);
-    live.send(&Handshake::new(versions::V26_1, Intent::Status))
+    let mut live = RawClient::new(running.incoming.connect(1)).at(versions::V26_3);
+    live.send(&Handshake::new(versions::V26_3, Intent::Status))
         .await;
     tokio::task::yield_now().await;
 
     // A connection handed over after the signal is never served at all.
-    let mut late = RawClient::new(running.incoming.connect(2)).at(versions::V26_1);
+    let mut late = RawClient::new(running.incoming.connect(2)).at(versions::V26_3);
     running.shutdown.cancel();
 
     live.expect_eof().await;
@@ -372,8 +372,8 @@ async fn the_drain_timeout_bounds_how_long_the_server_waits() {
             .serve(),
     );
 
-    let mut peer = RawClient::new(incoming.connect(1)).at(versions::V26_1);
-    peer.send(&Handshake::new(versions::V26_1, Intent::Status))
+    let mut peer = RawClient::new(incoming.connect(1)).at(versions::V26_3);
+    peer.send(&Handshake::new(versions::V26_3, Intent::Status))
         .await;
     tokio::task::yield_now().await;
 

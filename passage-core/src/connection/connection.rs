@@ -473,7 +473,7 @@ mod tests {
         // A client knows both before it says anything; a server learns them from the handshake.
         let options = Options {
             initial_phase: Phase::Status,
-            initial_version: crate::versions::V26_1,
+            initial_version: crate::versions::V26_3,
             ..Options::default()
         };
         let connection = Connection::<_, (), ()>::builder(duplex(64).0)
@@ -482,12 +482,12 @@ mod tests {
 
         // The phase lives in the cell, so it is read back from the outcome rather than a field.
         assert_eq!(connection.config.initial_phase, Phase::Status);
-        assert_eq!(connection.version, crate::versions::V26_1);
+        assert_eq!(connection.version, crate::versions::V26_3);
         assert!(connection.lifetime.is_some());
 
         let outcome = connection.run().await;
         assert_eq!(outcome.phase, Phase::Status, "and nothing moved it");
-        assert_eq!(outcome.version, crate::versions::V26_1);
+        assert_eq!(outcome.version, crate::versions::V26_3);
     }
 
     #[tokio::test]

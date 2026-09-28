@@ -17,6 +17,17 @@ use std::fmt::Debug;
 /// A successful call returns the player's full [`Profile`]. Returning [`Err`] causes the
 /// connection to be dropped with an appropriate disconnect message.
 pub trait AuthenticationAdapter: Debug + Send + Sync {
+    /// Whether the client has to prove itself to Mojang's session server before this adapter can
+    /// verify it.
+    ///
+    /// This decides the `should_authenticate` flag of the encryption request, which is an
+    /// instruction to the *client*: when it is set, the client posts to the session server and
+    /// refuses to continue if that fails. An adapter that never asks Mojang anything must answer
+    /// `false`. Defaults to `true`.
+    fn requires_session(&self) -> bool {
+        true
+    }
+
     /// Authenticates a connecting player.
     fn authenticate(
         &self,

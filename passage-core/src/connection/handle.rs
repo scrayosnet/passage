@@ -359,7 +359,7 @@ mod tests {
     impl Packet for Recent {
         const NAME: &'static str = "Recent";
         const PHASE: Phase = Phase::Configuration;
-        const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V26_1, 0x0B)];
+        const IDS: &'static [(ProtocolVersion, i32)] = &[(versions::V26_3, 0x0B)];
 
         fn decode(_r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self)
@@ -373,7 +373,7 @@ mod tests {
     fn cell() -> ConnCell<Vec<&'static str>> {
         ConnCell::new(
             Vec::new(),
-            versions::V26_1,
+            versions::V26_3,
             Phase::Handshake,
             Options::default(),
         )
@@ -396,12 +396,12 @@ mod tests {
         let conn = cell.as_ref();
 
         conn.with(|c| {
-            c.set_version(versions::V26_1);
+            c.set_version(versions::V26_3);
             c.set_phase(Phase::Login);
             c.state.push("recorded");
         });
 
-        assert_eq!(conn.version(), versions::V26_1);
+        assert_eq!(conn.version(), versions::V26_3);
         assert_eq!(conn.phase(), Phase::Login);
         conn.with(|c| assert_eq!(c.state, vec!["recorded"]));
     }
@@ -444,7 +444,7 @@ mod tests {
         assert!(matches!(error, ConnectionError::Codec(_)), "{error}");
         assert!(drained(conn).is_empty(), "nothing may be queued");
 
-        conn.with(|c| c.set_version(versions::V26_1));
+        conn.with(|c| c.set_version(versions::V26_3));
         conn.send(Recent).expect("it exists here");
         assert_eq!(drained(conn), vec!["Frame(Recent)"]);
     }

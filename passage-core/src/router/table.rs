@@ -144,7 +144,7 @@ mod tests {
             entry(
                 "Newer",
                 Phase::Login,
-                &[(versions::V26_1, 0x05), (versions::V1_20_5, 0x02)],
+                &[(versions::V26_3, 0x05), (versions::V1_20_5, 0x02)],
             ),
             entry("Older", Phase::Login, &[(versions::V1_20_5, 0x03)]),
             entry(
@@ -155,7 +155,7 @@ mod tests {
         ];
         assert_eq!(
             Table::breakpoints(&entries),
-            vec![ProtocolVersion::UNKNOWN, versions::V1_20_5, versions::V26_1],
+            vec![ProtocolVersion::UNKNOWN, versions::V1_20_5, versions::V26_3],
             "ascending, deduplicated, and the floor is always present",
         );
     }
@@ -164,10 +164,10 @@ mod tests {
     fn the_floor_is_present_even_when_no_packet_names_it() {
         // It is what a pre-handshake connection, and anything the version table cannot place,
         // dispatches against.
-        let entries: Vec<Entry<()>> = vec![entry("Only", Phase::Login, &[(versions::V26_1, 0x01)])];
+        let entries: Vec<Entry<()>> = vec![entry("Only", Phase::Login, &[(versions::V26_3, 0x01)])];
         assert_eq!(
             Table::breakpoints(&entries),
-            vec![ProtocolVersion::UNKNOWN, versions::V26_1],
+            vec![ProtocolVersion::UNKNOWN, versions::V26_3],
         );
         assert_eq!(
             Table::breakpoints::<()>(&[]),
@@ -197,13 +197,13 @@ mod tests {
     #[test]
     fn a_packet_that_does_not_exist_in_a_version_is_not_in_its_table() {
         let entries: Vec<Entry<()>> =
-            vec![entry("Newer", Phase::Login, &[(versions::V26_1, 0x05)])];
+            vec![entry("Newer", Phase::Login, &[(versions::V26_3, 0x05)])];
         assert_eq!(
             Table::new(&entries, versions::V1_20_5).lookup(Phase::Login, 0x05),
             None,
         );
         assert_eq!(
-            Table::new(&entries, versions::V26_1).lookup(Phase::Login, 0x05),
+            Table::new(&entries, versions::V26_3).lookup(Phase::Login, 0x05),
             Some(0),
         );
     }
