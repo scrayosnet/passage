@@ -28,10 +28,25 @@
 //! xvfb-run -a cargo test -p passage --test client_conformance -- --ignored --nocapture
 //! ```
 //!
-//! It needs an X display (`xvfb-run` supplies one), a JDK of at least 25, Mesa for software
-//! rendering, and several gigabytes of cache for client jars, libraries and assets. The first run
-//! downloads all of it; later runs reuse it. Assets are content-addressed, so the seven versions
-//! share most of theirs.
+//! `xvfb-run` only supplies a display. On a desktop session there is already one, so it can be
+//! dropped -- at the cost of seven Minecraft windows opening in turn and taking the focus with
+//! them. Two variables make that bearable:
+//!
+//! ```text
+//! # one version instead of the whole matrix
+//! PASSAGE_CLIENT_VERSIONS=26.3 cargo test -p passage --test client_conformance -- --ignored --nocapture
+//! # and the real GPU instead of llvmpipe, which is only the right default for a headless runner
+//! LIBGL_ALWAYS_SOFTWARE=0 GALLIUM_DRIVER= MESA_LOADER_DRIVER_OVERRIDE= PASSAGE_CLIENT_VERSIONS=26.3 \
+//!   cargo test -p passage --test client_conformance -- --ignored --nocapture
+//! ```
+//!
+//! It needs an X display, a JDK of at least 25, Mesa for software rendering, and several gigabytes
+//! of cache for client jars, libraries and assets. The first run downloads all of it; later runs
+//! reuse it. Assets are content-addressed, so the seven versions share most of theirs.
+//!
+//! Everything the client writes -- logs, crash reports, the LWJGL native cache -- goes under the
+//! run directory rather than the working directory, so running this from the repository root
+//! leaves nothing behind in it.
 //!
 //! 26.3 replaced GLFW with SDL3 and prefers Vulkan: without a software Vulkan driver
 //! (`mesa-vulkan-drivers`, which provides lavapipe) that version does not fail, it *hangs*, which
@@ -430,15 +445,24 @@ fn launch(
         .args(["--userType", "legacy"])
         .args(["--versionType", "release"])
         .args(["--quickPlayMultiplayer", target])
-        // Software rendering, and the EGL path 26.3's SDL3 backend needs. Older versions ignore
-        // the SDL variable entirely.
-        .env("LIBGL_ALWAYS_SOFTWARE", "1")
-        .env("GALLIUM_DRIVER", "llvmpipe")
-        .env("MESA_LOADER_DRIVER_OVERRIDE", "llvmpipe")
-        .env("SDL_VIDEO_FORCE_EGL", "1")
         .current_dir(dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    // Software rendering under Xvfb, and the EGL path 26.3's SDL3 backend needs; older versions
+    // ignore the SDL variable entirely. Each is a default rather than an override, so a run on a
+    // desktop with a real GPU keeps its own driver simply by exporting the variable first --
+    // llvmpipe is what a headless runner needs, not what a developer watching the window wants.
+    for (key, value) in [
+        ("LIBGL_ALWAYS_SOFTWARE", "1"),
+        ("GALLIUM_DRIVER", "llvmpipe"),
+        ("MESA_LOADER_DRIVER_OVERRIDE", "llvmpipe"),
+        ("SDL_VIDEO_FORCE_EGL", "1"),
+    ] {
+        if std::env::var_os(key).is_none() {
+            command.env(key, value);
+        }
+    }
 
     let mut child = command.spawn().expect("java is on the PATH");
     let (sender, receiver) = channel();
@@ -585,8 +609,27 @@ async fn transfer_once(
 async fn the_official_client_follows_a_transfer_at_every_breakpoint() {
     assert!(
         std::env::var_os("DISPLAY").is_some(),
-        "no DISPLAY -- run this under `xvfb-run -a cargo test ...`",
+        "no DISPLAY -- run this under `xvfb-run -a cargo test ...`, or on a desktop session, \
+         where the client opens a real window instead",
     );
+
+    // `PASSAGE_CLIENT_VERSIONS=26.3,26.2` narrows the matrix, which is what makes a local run
+    // bearable: the whole list is seven clients, one after another, each allowed several minutes.
+    let filter = std::env::var("PASSAGE_CLIENT_VERSIONS").ok();
+    let wanted: Vec<&(&str, i32)> = BREAKPOINTS
+        .iter()
+        .filter(|(version, _)| {
+            filter
+                .as_deref()
+                .is_none_or(|filter| filter.split(',').any(|want| want.trim() == *version))
+        })
+        .collect();
+    assert!(
+        !wanted.is_empty(),
+        "PASSAGE_CLIENT_VERSIONS matched nothing; the breakpoints are {:?}",
+        BREAKPOINTS.iter().map(|(v, _)| *v).collect::<Vec<_>>(),
+    );
+
     std::fs::create_dir_all(cache()).expect("the cache directory is writable");
     progress!("caching clients in {}", cache().display());
 
@@ -605,7 +648,7 @@ async fn the_official_client_follows_a_transfer_at_every_breakpoint() {
     // Every version is attempted even after one fails, because "26.3 broke" and "everything broke"
     // call for very different mornings.
     let mut failures = Vec::new();
-    for (version, protocol) in BREAKPOINTS {
+    for (version, protocol) in wanted.iter().copied() {
         if let Err(failure) = transfer_once(&http, &manifest, version, *protocol).await {
             progress!("{failure}");
             failures.push(failure);
@@ -615,7 +658,7 @@ async fn the_official_client_follows_a_transfer_at_every_breakpoint() {
         failures.is_empty(),
         "{} of {} clients did not follow the transfer:\n\n{}",
         failures.len(),
-        BREAKPOINTS.len(),
+        wanted.len(),
         failures.join("\n\n"),
     );
 }

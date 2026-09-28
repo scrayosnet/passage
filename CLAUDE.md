@@ -37,8 +37,11 @@ cargo machete --with-metadata
 cargo deny check
 cargo audit
 
-# Boot the official Minecraft client against the real binary (needs Xvfb, a JDK and disk)
+# Boot the official Minecraft client against the real binary (needs a display, a JDK and disk)
 xvfb-run -a cargo test -p passage --test client_conformance -- --ignored --nocapture
+
+# The same on a desktop session, one version only (opens a real Minecraft window)
+PASSAGE_CLIENT_VERSIONS=26.3 cargo test -p passage --test client_conformance -- --ignored --nocapture
 ```
 
 ## Workspace Structure
