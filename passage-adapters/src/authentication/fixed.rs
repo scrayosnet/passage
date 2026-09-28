@@ -24,7 +24,7 @@ impl FixedAuthenticationAdapter {
 }
 
 impl AuthenticationAdapter for FixedAuthenticationAdapter {
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(level = "info", skip_all, fields(adapter = ADAPTER_TYPE))]
     async fn authenticate(
         &self,
         _client: &Client,

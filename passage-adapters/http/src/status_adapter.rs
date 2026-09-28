@@ -8,7 +8,7 @@ use tokio::select;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "http_status_adapter";
@@ -66,7 +66,16 @@ impl HttpStatusAdapter {
     }
 
     /// Fetches the next status from HTTP. Any error status will resul in the status not getting updated.
-    #[instrument(skip_all)]
+    #[instrument(
+        level = "debug",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            http.request.method = "GET",
+            url.full = url,
+            adapter = ADAPTER_TYPE,
+        ),
+    )]
     async fn fetch(url: &str) -> Result<Option<ServerStatus>, AdapterError> {
         HTTP_CLIENT
             // send fetch request
@@ -100,10 +109,12 @@ impl Drop for HttpStatusAdapter {
 }
 
 impl StatusAdapter for HttpStatusAdapter {
+    #[instrument(level = "info", skip_all, fields(adapter = ADAPTER_TYPE))]
     async fn status(&self, _client: &Client) -> Result<Option<ServerStatus>, AdapterError> {
         let start = Instant::now();
         let status = self.inner.read().await.clone();
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        trace!(cached = status.is_some(), "passing the cached HTTP status");
         Ok(status)
     }
 }

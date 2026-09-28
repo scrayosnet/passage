@@ -14,7 +14,7 @@ use passage_core::packet::{configuration, login};
 use passage_core::wire::ByteString;
 use std::sync::Arc;
 use tokio::sync::oneshot;
-use tracing::{debug, instrument, warn};
+use tracing::{Span, debug, field, instrument, trace, warn};
 
 /// [`ConnRefExt`] provides a set of convenience methods for interacting with a connection of [`State`].
 pub(crate) trait ConnRefExt {
@@ -79,22 +79,38 @@ impl ConnRefExt for ConnRef<'_, State> {
         self.with(|c| c.state.locale.clone())
     }
 
-    #[instrument(skip_all)]
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            adapter = field::Empty,
+        ),
+    )]
     async fn status(&self) -> crate::Result<Option<ServerStatus>, AdapterError> {
-        let status = self
+        let route = self
             .route()
-            .ok_or(AdapterError::reject_reason("router", "No route selected"))?
-            .status
-            .status(&self.client())
-            .await?;
+            .ok_or(AdapterError::reject_reason("router", "No route selected"))?;
+        Span::current().record("adapter", field::display(&route.status));
+        let status = route.status.status(&self.client()).await?;
         Ok(status)
     }
 
-    #[instrument(skip_all, fields(player = %self.player().name))]
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            adapter = field::Empty,
+            player = %self.player().name,
+        ),
+    )]
     async fn authorize(&self, shared_secret: &[u8]) -> crate::Result<Profile, AdapterError> {
-        let profile = self
+        let route = self
             .route()
-            .ok_or(AdapterError::reject_reason("router", "No route selected"))?
+            .ok_or(AdapterError::reject_reason("router", "No route selected"))?;
+        Span::current().record("adapter", field::display(&route.authentication));
+        let profile = route
             .authentication
             .authenticate(
                 &self.client(),
@@ -106,8 +122,17 @@ impl ConnRefExt for ConnRef<'_, State> {
         Ok(profile)
     }
 
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            key = key,
+        ),
+    )]
     async fn localize(&self, key: &str, params: &[(&'static str, String)]) -> ByteString {
         let Some(route) = self.route() else {
+            debug!("no route to localize with, falling back to the key");
             return ByteString::from(key);
         };
 
@@ -128,17 +153,36 @@ impl ConnRefExt for ConnRef<'_, State> {
         }
     }
 
-    #[instrument(skip_all, fields(player = %self.player().name))]
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            pipeline = field::Empty,
+            player = %self.player().name,
+            target = field::Empty,
+        ),
+    )]
     async fn target(&self) -> crate::Result<Target, AdapterError> {
-        let target = self
+        let route = self
             .route()
-            .ok_or(AdapterError::reject_reason("router", "No route selected"))?
-            .select(&self.client(), &self.player())
-            .await?;
+            .ok_or(AdapterError::reject_reason("router", "No route selected"))?;
+        let span = Span::current();
+        span.record(
+            "pipeline",
+            route
+                .discovery
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" -> "),
+        );
+        let target = route.select(&self.client(), &self.player()).await?;
+        span.record("target", field::display(&target.identifier));
         Ok(target)
     }
 
-    #[instrument(skip_all, fields(key = C::KEY))]
+    #[instrument(level = "debug", skip_all, fields(key = C::KEY))]
     async fn cookie<C: Cookie>(&self) -> crate::Result<Option<C>, DispatchError> {
         let (rx, secret) = self.with(|c| {
             // Only one cookie can be awaited at a time: the step a request returns to is the one it
@@ -178,6 +222,7 @@ impl ConnRefExt for ConnRef<'_, State> {
         })?;
 
         // Wait for the cookie. The handler that answers it puts the step back.
+        trace!("waiting for the client to answer the cookie request");
         let payload = rx
             .await
             .map_err(|_| DispatchError::internal("cookie_error", anyhow!("Cookie never received")));
@@ -186,11 +231,19 @@ impl ConnRefExt for ConnRef<'_, State> {
         // ignore it.
         let payload = match payload {
             Ok(Some(payload)) => payload,
-            Ok(None) => return Ok(None),
+            Ok(None) => {
+                debug!("the client holds no such cookie");
+                return Ok(None);
+            }
             Err(err) => return Err(err),
         };
         let cookie = C::decode(secret.as_deref(), payload.as_ref())
             .map_err(|err| DispatchError::internal("cookie_decode_error", err))?;
+        debug!(
+            length = payload.len(),
+            valid = cookie.is_some(),
+            "the client answered with a cookie",
+        );
         Ok(cookie)
     }
 }

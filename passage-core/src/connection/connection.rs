@@ -308,6 +308,11 @@ where
                 frame = self.framed.next() => {
                     match frame.transpose() {
                         Ok(Some(frame)) => {
+                            trace!(
+                                id = frame.id,
+                                length = frame.payload.len(),
+                                "read frame",
+                            );
                             let gated = conn.with(|c| c.gated().then(|| c.phase()));
                             match gated {
                                 Some(phase) => conn.with(|c| {

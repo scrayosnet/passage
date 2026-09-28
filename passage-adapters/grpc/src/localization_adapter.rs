@@ -10,6 +10,10 @@ use tracing::instrument;
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "grpc_localization_adapter";
 
+/// The fully qualified gRPC service this adapter calls, as
+/// [`rpc.service`](https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/) wants it.
+const RPC_SERVICE: &str = "scrayosnet.passage.adapter.Localization";
+
 /// Localization adapter that resolves message keys via an external gRPC service.
 pub struct GrpcLocalizationAdapter {
     /// The client by which requests are made.
@@ -39,7 +43,6 @@ impl GrpcLocalizationAdapter {
         })
     }
 
-    #[instrument(skip_all)]
     async fn localize(
         &self,
         locale: Option<&str>,
@@ -67,7 +70,21 @@ impl GrpcLocalizationAdapter {
 }
 
 impl LocalizationAdapter for GrpcLocalizationAdapter {
-    #[instrument(skip_all)]
+    #[instrument(
+        level = "info",
+        name = "localize",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            otel.name = "scrayosnet.passage.adapter.Localization/Localize",
+            rpc.system = "grpc",
+            rpc.service = RPC_SERVICE,
+            rpc.method = "Localize",
+            adapter = ADAPTER_TYPE,
+            locale = locale,
+            key = key,
+        ),
+    )]
     async fn localize(
         &self,
         locale: Option<&str>,

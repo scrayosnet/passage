@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::fmt::{Debug, Formatter};
 use std::time::Duration;
 use tokio::time::Instant;
-use tracing::{debug, warn};
+use tracing::{Span, debug, field, instrument, trace, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// The name of the adapter. It is primarily used for logging and metrics.
@@ -83,12 +83,23 @@ impl AgonesDiscoveryAdapter {
     /// `"UnAllocated"` responses up to the configured back-off limit.
     ///
     /// Returns `Ok(None)` if no server could be allocated within the attempt budget.
+    #[instrument(
+        level = "info",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            adapter = ADAPTER_TYPE,
+            k8s.namespace.name = self.config.namespace.as_deref(),
+            attempts = field::Empty,
+            target = field::Empty,
+        ),
+    )]
     pub async fn allocate(
         &self,
         client: &passage_adapters::Client,
     ) -> Result<Option<Target>, AdapterError> {
         // Build the allocation request.
-        let trace_id = tracing::Span::current()
+        let trace_id = Span::current()
             .context()
             .span()
             .span_context()
@@ -131,8 +142,11 @@ impl AgonesDiscoveryAdapter {
         };
 
         // Try to allocate a server with up to max attempts.
+        let span = Span::current();
         for attempt in 1..(self.config.backoff.max_attempts + 1) {
             // Make the allocation request.
+            span.record("attempts", attempt);
+            trace!(attempt, "submitting a game server allocation");
             let result = self
                 .api
                 .create(&kube::api::PostParams::default(), &allocation)
@@ -149,10 +163,18 @@ impl AgonesDiscoveryAdapter {
             // Convert the allocation (if any) into a target.
             match status.state.as_deref() {
                 Some("Allocated") => {
-                    let target = result.try_into().map_err(|err| AdapterError::FailedParse {
-                        adapter_type: ADAPTER_TYPE,
-                        cause: Box::new(err),
-                    })?;
+                    let target: Target =
+                        result.try_into().map_err(|err| AdapterError::FailedParse {
+                            adapter_type: ADAPTER_TYPE,
+                            cause: Box::new(err),
+                        })?;
+                    span.record("target", field::display(&target.identifier));
+                    debug!(
+                        target = %target.identifier,
+                        address = %target.address,
+                        attempt,
+                        "allocated a game server",
+                    );
                     return Ok(Some(target));
                 }
                 Some("UnAllocated") => debug!("agones allocation returned unallocated, retrying"),
@@ -163,6 +185,7 @@ impl AgonesDiscoveryAdapter {
             let Some(wait_secs) = self.config.backoff.secs_after(attempt).await else {
                 break;
             };
+            trace!(wait_secs, "backing off before the next allocation attempt");
             tokio::time::sleep(Duration::from_secs(wait_secs)).await;
         }
 

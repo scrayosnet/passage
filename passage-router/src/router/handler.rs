@@ -4,6 +4,7 @@ use crate::router::utils::ConnRefExt;
 use crate::{crypto, metrics};
 use anyhow::{Context, anyhow};
 use opentelemetry::global;
+use opentelemetry::trace::TraceContextExt;
 use passage_core::codec::{Aes128Cfb8, SECRET_LEN};
 use passage_core::connection::{ConnRef, DispatchError};
 use passage_core::packet::{configuration, handshake, login, status};
@@ -14,7 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
 use tokio::time::Instant;
-use tracing::{debug, info, instrument, warn};
+use tracing::{Span, debug, field, info, instrument, trace, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
@@ -44,6 +45,15 @@ const GRACE: Duration = Duration::from_secs(1);
 /// Everything this connection does on a clock: keep the client alive while it waits for a target,
 /// and tell it why if the connection is about to go away. The connection has no timer of its own
 /// beyond its deadline, so this runs for as long as the connection does.
+#[instrument(
+    level = "info"
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        reason = field::Empty,
+    ),
+)]
 pub(crate) async fn on_open(conn: ConnRef<'_, State>) -> crate::Result<(), DispatchError> {
     let shutdown = conn.with(|c| c.shutdown().clone());
     let deadline = conn.with(|c| c.deadline());
@@ -53,6 +63,7 @@ pub(crate) async fn on_open(conn: ConnRef<'_, State>) -> crate::Result<(), Dispa
         () = shutdown.cancelled() => "disconnect_restart",
         () = expiring(deadline) => "disconnect_timeout",
     };
+    Span::current().record("reason", reason);
     farewell(conn, reason).await
 }
 
@@ -71,11 +82,13 @@ async fn keep_alives(conn: ConnRef<'_, State>) -> crate::Result<(), DispatchErro
 
         // A keep alive that was never answered means the client is gone.
         if pending.is_some() {
+            debug!(sent = ?pending, "the client never answered its keep alive");
             return farewell(conn, "disconnect_timeout").await;
         }
 
         // Send the next keep alive packet, and remember what the client has to answer with.
         let id = crypto::generate_keep_alive();
+        trace!(id, "sending keep alive");
         conn.with(|c| {
             c.send(configuration::ServerKeepAlivePacket::new(id))?;
             let informed = expect_step!(c, Step::Transfer { informed, .. } => informed)?;
@@ -100,12 +113,25 @@ async fn expiring(deadline: Option<Instant>) {
 ///
 /// The phase decides which disconnect packet to use; a connection that never got past the handshake
 /// has none to use, so it is simply dropped.
+#[instrument(
+    level = "info"
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        reason = reason,
+    ),
+)]
 async fn farewell(
     conn: ConnRef<'_, State>,
     reason: &'static str,
 ) -> crate::Result<(), DispatchError> {
     let phase = conn.phase();
     if !matches!(phase, Phase::Login | Phase::Configuration) {
+        trace!(
+            ?phase,
+            "no disconnect packet exists in this phase, dropping"
+        );
         return Err(DispatchError::peer(reason, anyhow!("{reason}")));
     }
 
@@ -124,12 +150,21 @@ async fn farewell(
     })
 }
 
+/// The packet that decides what the rest of the connection is: which version it speaks, which
+/// hostname it dialed, and therefore which route's adapters answer it.
 #[instrument(
+    level = "info",
     skip_all,
     fields(
-        version = %packet.protocol_version,
-        hostname = %packet.server_address,
-        intent = ?packet.next_state,
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        client.address = field::Empty,
+        client.port = field::Empty,
+        server.address = %packet.server_address,
+        server.port = packet.server_port,
+        network.protocol.version = %packet.protocol_version,
+        packet.intent = ?packet.next_state,
+        route = field::Empty,
     ),
 )]
 pub(crate) async fn on_handshake_intention_packet(
@@ -151,14 +186,22 @@ pub(crate) async fn on_handshake_intention_packet(
         c.state.client.server_address = packet.server_address;
         c.state.client.server_port = packet.server_port;
 
+        let span = Span::current();
+        span.record(
+            "client.address",
+            field::display(c.state.client.address.ip()),
+        );
+        span.record("client.port", c.state.client.address.port());
+
         // A hostname nobody configured has no adapters to answer it with, so there is nothing this
         // connection could do from here on.
-        if c.state.route_index.is_none() {
+        let Some(route) = c.state.route() else {
             return Err(DispatchError::peer(
                 "no_route",
                 anyhow!("no route matches `{}`", c.state.client.server_address),
             ));
-        }
+        };
+        span.record("route", field::display(&route.hostname));
         c.state.step = packet.next_state.into();
         Ok(())
     })
@@ -167,6 +210,16 @@ pub(crate) async fn on_handshake_intention_packet(
 /// Hands a cookie the client sent back to the handler that asked for it, and returns the connection
 /// to the step that asked. A cookie nobody is waiting for, or one for another key, is the client
 /// speaking out of turn.
+#[instrument(
+    level = "info"
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        cookie.key = key,
+        cookie.length = ?payload.as_ref().map(|p| p.len()),
+    )
+)]
 fn accept_cookie(
     conn: ConnRef<'_, State>,
     key: &str,
@@ -187,6 +240,15 @@ fn accept_cookie(
     })
 }
 
+#[instrument(
+    level = "info"
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        packet.key = %packet.key,
+    )
+)]
 pub(crate) async fn on_login_cookie_response(
     conn: ConnRef<'_, State>,
     packet: login::ClientCookieResponsePacket,
@@ -194,6 +256,15 @@ pub(crate) async fn on_login_cookie_response(
     accept_cookie(conn, &packet.key, packet.payload)
 }
 
+#[instrument(
+    level = "info"
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        packet.key = %packet.key,
+    )
+)]
 pub(crate) async fn on_configuration_cookie_response(
     conn: ConnRef<'_, State>,
     packet: configuration::ClientCookieResponsePacket,
@@ -203,28 +274,58 @@ pub(crate) async fn on_configuration_cookie_response(
 
 /// The brand and any other channel the client opens with. Passage answers none of them, but a
 /// client that sends one has not done anything wrong.
+#[instrument(
+    level = "info"
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        packet.channel = %packet.channel,
+        packet.payload.length = %packet.data.len(),
+    )
+)]
 pub(crate) async fn on_configuration_custom_payload(
     conn: ConnRef<'_, State>,
     packet: configuration::ClientCustomPayloadPacket,
 ) -> crate::Result<(), DispatchError> {
-    let _ = conn;
-    debug!(channel = %packet.channel, "ignoring plugin message");
+    let _ = (conn, packet);
+    trace!("ignoring plugin message");
     Ok(())
 }
 
 /// Passage pushes no resource packs, so an answer about one is ignored rather than refused.
+#[instrument(
+    level = "info"
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        packet.uuid = %packet.uuid,
+        packet.result = ?packet.result,
+    )
+)]
 pub(crate) async fn on_configuration_resource_pack(
     conn: ConnRef<'_, State>,
     packet: configuration::ClientResourcePackPacket,
 ) -> crate::Result<(), DispatchError> {
     let _ = (conn, packet);
+    trace!("ignoring resource pack response");
     Ok(())
 }
 
+#[instrument(
+    level = "info"
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+    )
+)]
 pub(crate) async fn on_status_request_packet(
     conn: ConnRef<'_, State>,
-    _packet: status::ClientStatusRequestPacket,
+    packet: status::ClientStatusRequestPacket,
 ) -> crate::Result<(), DispatchError> {
+    _ = packet;
     conn.with(|c| {
         // Ensure that the connection is in the right state.
         expect_step!(c, Step::StatusRequest => ())?;
@@ -236,7 +337,9 @@ pub(crate) async fn on_status_request_packet(
     let status = match conn.status().await {
         Ok(status) => status.unwrap_or_default(),
         Err(err) => {
-            if !err.is_rejected() {
+            if err.is_rejected() {
+                debug!(err = %err, "the status adapter rejected the request");
+            } else {
                 warn!(err = %err, "status adapter error");
             }
             conn.close();
@@ -255,6 +358,15 @@ pub(crate) async fn on_status_request_packet(
     })
 }
 
+#[instrument(
+    level = "trace",
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        packet.payload = %packet.payload,
+    )
+)]
 pub(crate) async fn on_status_ping_request_packet(
     conn: ConnRef<'_, State>,
     packet: status::ClientPingRequestPacket,
@@ -273,7 +385,17 @@ pub(crate) async fn on_status_ping_request_packet(
     })
 }
 
-#[instrument(skip_all, fields(player = %packet.name, id = %packet.uuid))]
+#[instrument(
+    level = "info",
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        packet.player.name = %packet.name,
+        packet.player.uuid = %packet.uuid,
+        authenticated = field::Empty,
+    )
+)]
 pub(crate) async fn on_login_login_start(
     conn: ConnRef<'_, State>,
     packet: login::ClientLoginStartPacket,
@@ -302,6 +424,10 @@ pub(crate) async fn on_login_login_start(
             .unwrap_or_default()
             .version
             .name;
+        debug!(
+            preferred,
+            "the client predates the transfer packet, telling it which version to use",
+        );
         let reason = conn
             .localize("disconnect_unsupported", &[("preferred", preferred)])
             .await;
@@ -334,12 +460,21 @@ pub(crate) async fn on_login_login_start(
             if auth_cookie.client_addr.ip() != client_address.ip()
                 || (auth_cookie.timestamp + cookie_expiry) < now
             {
-                debug!("invalid auth cookie payload received, skipping auth cookie");
+                debug!(
+                    age = now.saturating_sub(auth_cookie.timestamp),
+                    same_address = auth_cookie.client_addr.ip() == client_address.ip(),
+                    "invalid auth cookie payload received, skipping auth cookie",
+                );
                 break 'transfer;
             }
 
             // Update the auth state
             authenticated = true;
+            debug!(
+                player = %auth_cookie.user_name,
+                id = %auth_cookie.user_id,
+                "the auth cookie vouches for this player, skipping authentication",
+            );
             conn.with(|c| {
                 c.state.player.name = auth_cookie.user_name.to_string();
                 c.state.player.id = auth_cookie.user_id;
@@ -347,6 +482,7 @@ pub(crate) async fn on_login_login_start(
             })
         }
     }
+    Span::current().record("authenticated", authenticated);
 
     // Send the encryption message.
     let verify_token = crypto::generate_token()
@@ -367,7 +503,19 @@ pub(crate) async fn on_login_login_start(
     Ok(())
 }
 
-#[instrument(skip_all)]
+#[instrument(
+    level = "info",
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        packet.shared_secret.length = packet.shared_secret.len(),
+        packet.verify_token.length = packet.verify_token.len(),
+        player.name = field::Empty,
+        player.uuid = field::Empty,
+        session.id = field::Empty,
+    )
+)]
 pub(crate) async fn on_login_encryption_response(
     conn: ConnRef<'_, State>,
     packet: login::ClientEncryptionResponsePacket,
@@ -401,10 +549,10 @@ pub(crate) async fn on_login_encryption_response(
     // Verify the shared secret against the keypair. If the secret is invalid, then we try to send
     // a disconnect packet. It is possible that the client cannot decrypt it, but that's still better
     // than just closing the connection.
-    debug!("verifying verify token");
+    trace!("verifying verify token");
     if !crypto::verify_token(&verify_token, &decrypted_verify_token) {
         let message = conn.localize("disconnect_invalid_session", &[]).await;
-        info!("received invalid verify token, closing connection");
+        debug!("received invalid verify token, closing connection");
         return conn.with(|c| {
             c.state.step = Step::Completed;
             c.send(login::ServerDisconnectPacket::text(message))?;
@@ -422,10 +570,12 @@ pub(crate) async fn on_login_encryption_response(
         let profile = match conn.authorize(&shared_secret).await {
             Ok(profile) => profile,
             Err(err) => {
-                if !err.is_rejected() {
+                let reason = err.reason().unwrap_or("disconnect_unauthenticated");
+                if err.is_rejected() {
+                    debug!(reason, err = %err, "the player was not authenticated");
+                } else {
                     warn!(err = %err, "profile adapter error");
                 }
-                let reason = err.reason().unwrap_or("disconnect_unauthenticated");
                 let message = conn.localize(reason, &[]).await;
                 return conn.with(|c| {
                     c.state.step = Step::Completed;
@@ -435,6 +585,7 @@ pub(crate) async fn on_login_encryption_response(
                 });
             }
         };
+        debug!(player = %profile.name, id = %profile.id, "authenticated the player");
         conn.with(|c| {
             c.state.player.name = profile.name.to_string();
             c.state.player.id = profile.id;
@@ -442,9 +593,28 @@ pub(crate) async fn on_login_encryption_response(
         });
     }
 
+    let span = Span::current();
+    conn.with(|c| {
+        span.record("player.name", field::display(&c.state.player.name));
+        span.record("player.uuid", field::display(&c.state.player.id));
+    });
+
     // Get the session information of the client. A client without one is given a new session once
     // it is transferred.
     let session = conn.cookie::<SessionCookie>().await?;
+    if let Some(session) = &session {
+        span.record("session.id", field::display(&session.id));
+        // A session cookie carries the trace of the connection that issued it, which is what ties
+        // a transfer back to the login it came from. It is a link and not a parent: this
+        // connection's trace was already rooted before the cookie could be asked for.
+        global::get_text_map_propagator(|propagator| {
+            let context = propagator.extract(&session.extra);
+            let linked = context.span().span_context().clone();
+            if linked.is_valid() {
+                span.add_link(linked);
+            }
+        });
+    }
 
     // Complete the login phase and prepare the target selection.
     conn.with(|c| {
@@ -461,12 +631,22 @@ pub(crate) async fn on_login_encryption_response(
     })
 }
 
-#[instrument(skip_all)]
+#[instrument(
+    level = "info",
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        target.identifier = field::Empty,
+        target.address = field::Empty,
+    )
+)]
 pub(crate) async fn on_login_login_acknowledged(
     conn: ConnRef<'_, State>,
-    _: login::ClientLoginAcknowledgedPacket,
+    packet: login::ClientLoginAcknowledgedPacket,
 ) -> crate::Result<(), DispatchError> {
     // Ensure that the connection is in the right state.
+    _ = packet;
     let informed = conn.with(|c| {
         expect_step!(c, Step::LoginAck => ())?;
         c.set_phase(Phase::Configuration);
@@ -484,10 +664,12 @@ pub(crate) async fn on_login_login_acknowledged(
     let target = match target {
         Ok(target) => target,
         Err(err) => {
-            if !err.is_rejected() {
+            let reason = err.reason().unwrap_or("disconnect_no_target");
+            if err.is_rejected() {
+                debug!(reason, err = %err, "no target was selected for the player");
+            } else {
                 warn!(err = %err, "target selection error");
             }
-            let reason = err.reason().unwrap_or("disconnect_no_target");
             let message = conn.localize(reason, &[]).await;
             return conn.with(|c| {
                 c.state.step = Step::Completed;
@@ -497,6 +679,10 @@ pub(crate) async fn on_login_login_acknowledged(
             });
         }
     };
+
+    let span = Span::current();
+    span.record("target.identifier", field::display(&target.identifier));
+    span.record("target.address", field::display(target.address));
 
     // Store a fresh auth cookie, so the next transfer can skip authentication.
     conn.with(|c| {
@@ -544,6 +730,7 @@ pub(crate) async fn on_login_login_acknowledged(
             server_port: c.state.client.server_port,
             extra,
         };
+        debug!(session = %cookie.id, "issuing a session to a client that had none");
         let encoded = match cookie.encode(None) {
             Ok(encoded) => encoded,
             Err(err) => {
@@ -576,6 +763,23 @@ pub(crate) async fn on_login_login_acknowledged(
     })
 }
 
+#[instrument(
+    level = "info"
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        packet.locale = %packet.locale,
+        packet.view_distance = %packet.view_distance,
+        packet.chat_mode = ?packet.chat_mode,
+        packet.chat_colors = %packet.chat_colors,
+        packet.displayed_skin_parts = ?packet.displayed_skin_parts,
+        packet.main_hand = ?packet.main_hand,
+        packet.enable_text_filtering = %packet.enable_text_filtering,
+        packet.allow_server_listings = %packet.allow_server_listings,
+        packet.particle_status = ?packet.particle_status,
+    )
+)]
 pub(crate) async fn on_configuration_client_information(
     conn: ConnRef<'_, State>,
     packet: configuration::ClientClientInformationPacket,
@@ -597,6 +801,15 @@ pub(crate) async fn on_configuration_client_information(
     })
 }
 
+#[instrument(
+    level = "trace",
+    skip_all,
+    fields(
+        conn.protocol = ?conn.version(),
+        conn.phase = ?conn.phase(),
+        packet.id = packet.id,
+    )
+)]
 pub(crate) async fn on_configuration_keep_alive(
     conn: ConnRef<'_, State>,
     packet: configuration::ClientKeepAlivePacket,

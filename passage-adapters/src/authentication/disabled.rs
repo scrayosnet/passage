@@ -22,7 +22,7 @@ impl DisabledAuthenticationAdapter {
 }
 
 impl AuthenticationAdapter for DisabledAuthenticationAdapter {
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(level = "info", skip_all, fields(adapter = ADAPTER_TYPE))]
     async fn authenticate(
         &self,
         _client: &Client,

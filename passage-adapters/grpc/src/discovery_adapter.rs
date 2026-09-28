@@ -5,10 +5,14 @@ use passage_adapters::{AdapterError, Client, Result, Target, metrics};
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
 use tonic::transport::Channel;
-use tracing::instrument;
+use tracing::{Span, debug, field, instrument};
 
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "grpc_discovery_adapter";
+
+/// The fully qualified gRPC service this adapter calls, as
+/// [`rpc.service`](https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/) wants it.
+const RPC_SERVICE: &str = "scrayosnet.passage.adapter.Discovery";
 
 /// Discovery adapter that fetches the available backend targets from an external gRPC service.
 pub struct GrpcDiscoveryAdapter {
@@ -39,9 +43,7 @@ impl GrpcDiscoveryAdapter {
         })
     }
 
-    #[instrument(skip_all)]
     async fn discover(&self, client: &Client) -> Result<Vec<Target>> {
-        let start = Instant::now();
         let request = tonic::Request::new(TargetRequest {
             client: Some(client.clone().into()),
         });
@@ -55,24 +57,40 @@ impl GrpcDiscoveryAdapter {
                 cause: err.into(),
             })?;
 
-        let targets = response
+        response
             .into_inner()
             .targets
             .into_iter()
             .map(TryInto::try_into)
-            .collect::<_>();
-
-        metrics::adapter_duration::record(ADAPTER_TYPE, start);
-        targets
+            .collect::<_>()
     }
 }
 
 impl DiscoveryAdapter for GrpcDiscoveryAdapter {
-    #[instrument(skip_all)]
+    #[instrument(
+        level = "info",
+        name = "discover",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            otel.name = "scrayosnet.passage.adapter.Discovery/GetTargets",
+            rpc.system = "grpc",
+            rpc.service = RPC_SERVICE,
+            rpc.method = "GetTargets",
+            adapter = ADAPTER_TYPE,
+            targets = field::Empty,
+        ),
+    )]
     async fn discover(&self, client: &Client) -> Result<Vec<Target>> {
         let start = Instant::now();
         let targets = self.discover(client).await;
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        match &targets {
+            Ok(targets) => {
+                Span::current().record("targets", targets.len());
+            }
+            Err(err) => debug!(err = %err, "the discovery service returned no targets"),
+        }
         targets
     }
 }

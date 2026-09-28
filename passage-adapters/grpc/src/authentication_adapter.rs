@@ -5,10 +5,14 @@ use passage_adapters::{AdapterError, Client, Player, metrics, reject, reject_rea
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
 use tonic::transport::Channel;
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "grpc_authentication_adapter";
+
+/// The fully qualified gRPC service this adapter calls, as
+/// [`rpc.service`](https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/) wants it.
+const RPC_SERVICE: &str = "scrayosnet.passage.adapter.Authentication";
 
 /// Authentication adapter that delegates player validation to an external gRPC service.
 ///
@@ -42,7 +46,6 @@ impl GrpcAuthenticationAdapter {
         })
     }
 
-    #[instrument(skip_all)]
     async fn authenticate(
         &self,
         client: &Client,
@@ -76,7 +79,19 @@ impl GrpcAuthenticationAdapter {
 }
 
 impl AuthenticationAdapter for GrpcAuthenticationAdapter {
-    #[instrument(skip_all)]
+    #[instrument(
+        level = "info",
+        name = "authenticate",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            otel.name = "scrayosnet.passage.adapter.Authentication/Authenticate",
+            rpc.system = "grpc",
+            rpc.service = RPC_SERVICE,
+            rpc.method = "Authenticate",
+            adapter = ADAPTER_TYPE,
+        ),
+    )]
     async fn authenticate(
         &self,
         client: &Client,
@@ -89,6 +104,9 @@ impl AuthenticationAdapter for GrpcAuthenticationAdapter {
             .authenticate(client, player, shared_secret, encoded_public)
             .await;
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        if let Err(err) = &profile {
+            debug!(err = %err, "the authentication service did not return a profile");
+        }
         profile
     }
 }

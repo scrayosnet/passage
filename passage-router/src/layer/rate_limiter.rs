@@ -31,7 +31,7 @@ where
         }
     }
 
-    #[instrument(skip_all)]
+    #[instrument(level = "trace", skip_all)]
     pub fn enqueue(&mut self, key: Addr) -> bool {
         // get the current time only once
         let now = Instant::now();

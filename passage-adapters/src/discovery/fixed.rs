@@ -23,7 +23,7 @@ impl FixedDiscoveryAdapter {
 }
 
 impl DiscoveryAdapter for FixedDiscoveryAdapter {
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(level = "info", skip_all, fields(adapter = ADAPTER_TYPE))]
     async fn discover(&self, _client: &Client) -> Result<Vec<Target>> {
         trace!(len = self.targets.len(), "passing fixed targets");
         metrics::adapter_duration::record(ADAPTER_TYPE, Instant::now());
