@@ -1,5 +1,6 @@
 use crate::codec::CodecError;
 use crate::common::Phase;
+use std::io;
 use thiserror::Error;
 
 /// The connection result type, defaulting to [`ConnectionError`].
@@ -94,8 +95,11 @@ impl ConnectionError {
     #[must_use]
     pub fn is_peer_error(&self) -> bool {
         match self {
-            // A malformed frame is the peer's doing; a broken socket is nobody's.
+            // A malformed frame is the peer's doing, and so is a socket the peer tore down: a
+            // health probe that connects and resets, a scanner that leaves, a client that is gone
+            // by the time we answer. Only a transport that broke for some other reason is ours.
             ConnectionError::Codec(CodecError::Wire(_)) => true,
+            ConnectionError::Codec(CodecError::Io(err)) => is_hangup(err),
             ConnectionError::Codec(_) => false,
             ConnectionError::Closed {
                 reason: CloseReason::Peer | CloseReason::Timeout,
@@ -123,6 +127,22 @@ impl ConnectionError {
     }
 }
 
+/// Whether an I/O error is the peer dropping the connection rather than the transport failing us.
+///
+/// A clean FIN never gets here -- it reads as end-of-stream, not as an error. What does get here is
+/// every less polite ending: an RST from a peer that stopped caring, a write to a socket it already
+/// closed, a frame cut in half by either. None of them is an operator's problem.
+pub(crate) fn is_hangup(err: &io::Error) -> bool {
+    matches!(
+        err.kind(),
+        io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::NotConnected
+            | io::ErrorKind::UnexpectedEof
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,7 +150,8 @@ mod tests {
     fn every_error() -> Vec<ConnectionError> {
         vec![
             ConnectionError::Codec(crate::wire::WireError::Utf8 { field: "host" }.into()),
-            ConnectionError::Codec(std::io::Error::from(std::io::ErrorKind::BrokenPipe).into()),
+            ConnectionError::Codec(io::Error::from(io::ErrorKind::ConnectionReset).into()),
+            ConnectionError::Codec(io::Error::from(io::ErrorKind::OutOfMemory).into()),
             ConnectionError::shutdown(),
             ConnectionError::peer(),
             ConnectionError::timeout(),
@@ -150,6 +171,7 @@ mod tests {
             vec![
                 "codec",
                 "codec",
+                "codec",
                 "shutdown",
                 "peer-closed",
                 "peer-timeout",
@@ -160,13 +182,31 @@ mod tests {
 
     #[test]
     fn blame_decides_the_log_level_and_is_never_guessed() {
-        // A malformed frame is the peer's doing; a broken socket is nobody's, and an unclassified
-        // handler failure is ours -- because assuming the peer's fault would hide our own bugs.
+        // A malformed frame and a socket the peer tore down are both the peer's doing; a transport
+        // that broke for any other reason is ours -- because assuming the peer's fault there would
+        // hide our own bugs.
         let blame: Vec<_> = every_error()
             .iter()
             .map(ConnectionError::is_peer_error)
             .collect();
-        assert_eq!(blame, vec![true, false, false, true, true, true]);
+        assert_eq!(blame, vec![true, true, false, false, true, true, true]);
+    }
+
+    #[test]
+    fn a_probe_that_connects_and_resets_is_not_an_operators_problem() {
+        // A load balancer health check, a port scanner and a client that quits mid-handshake all
+        // arrive as a reset during `Handshake`. Reporting those at `error` buries the failures that
+        // do need someone.
+        for kind in [
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::BrokenPipe,
+            io::ErrorKind::NotConnected,
+            io::ErrorKind::UnexpectedEof,
+        ] {
+            let error = ConnectionError::Codec(io::Error::from(kind).into());
+            assert!(error.is_peer_error(), "{kind:?}");
+        }
     }
 
     #[test]

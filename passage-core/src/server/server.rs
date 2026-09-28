@@ -1,6 +1,8 @@
 use crate::common::Phase;
 use crate::common::ProtocolVersion;
-use crate::connection::{Connection, Dispatcher, MakeDispatcher, Options as ConnectionConfig};
+use crate::connection::{
+    Connection, Dispatcher, MakeDispatcher, Options as ConnectionConfig, is_hangup,
+};
 use crate::router::{Layer, Stack};
 use crate::server::listener::Listener;
 use crate::wire::Options as WireOptions;
@@ -387,12 +389,9 @@ fn panic_message(payload: &(dyn Any + Send)) -> String {
 }
 
 /// Checks whether the io error is raised by the peer.
+///
+/// The same endings a live connection can meet, plus the one only accepting has: a signal that
+/// interrupted the call, which costs us nothing but the connection that was half-way in.
 fn is_peer_error(err: &io::Error) -> bool {
-    matches!(
-        err.kind(),
-        io::ErrorKind::ConnectionAborted
-            | io::ErrorKind::ConnectionReset
-            | io::ErrorKind::NotConnected
-            | io::ErrorKind::Interrupted
-    )
+    is_hangup(err) || err.kind() == io::ErrorKind::Interrupted
 }
