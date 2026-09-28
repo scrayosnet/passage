@@ -6,10 +6,14 @@ use passage_adapters::{
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
 use tonic::transport::Channel;
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "grpc_status_adapter";
+
+/// The fully qualified gRPC service this adapter calls, as
+/// [`rpc.service`](https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/) wants it.
+const RPC_SERVICE: &str = "scrayosnet.passage.adapter.Status";
 
 /// Status adapter that retrieves server status from an external gRPC service.
 pub struct GrpcStatusAdapter {
@@ -40,7 +44,6 @@ impl GrpcStatusAdapter {
         })
     }
 
-    #[instrument(skip_all)]
     async fn status(&self, client: &Client) -> Result<Option<ServerStatus>> {
         let request = tonic::Request::new(StatusRequest {
             client_address: Some(Address {
@@ -70,11 +73,26 @@ impl GrpcStatusAdapter {
 }
 
 impl StatusAdapter for GrpcStatusAdapter {
-    #[instrument(skip_all)]
+    #[instrument(
+        level = "info",
+        name = "status",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            otel.name = "scrayosnet.passage.adapter.Status/GetStatus",
+            rpc.system = "grpc",
+            rpc.service = RPC_SERVICE,
+            rpc.method = "GetStatus",
+            adapter = ADAPTER_TYPE,
+        ),
+    )]
     async fn status(&self, client: &Client) -> Result<Option<ServerStatus>> {
         let start = Instant::now();
         let status = self.status(client).await;
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        if let Err(err) = &status {
+            debug!(err = %err, "the status service did not return a status");
+        }
         status
     }
 }

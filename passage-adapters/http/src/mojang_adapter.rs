@@ -3,10 +3,19 @@ use passage_adapters::authentication::{AuthenticationAdapter, Profile, minecraft
 use passage_adapters::{Client, Player, metrics, reject};
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "mojang_authentication_adapter";
+
+/// The host the session server lives on, reported as `server.address`.
+const SESSION_SERVER: &str = "sessionserver.mojang.com";
+
+/// The endpoint the join is verified against, reported as `url.path`.
+///
+/// The full URL is deliberately not recorded: it carries the player's name and the handshake hash,
+/// neither of which belongs in a span attribute.
+const HAS_JOINED_PATH: &str = "/session/minecraft/hasJoined";
 
 /// Authentication adapter that validates players against Mojang's session server.
 ///
@@ -42,7 +51,7 @@ impl MojangAdapter {
         // Issue a request to the Mojang authentication endpoint
         let username = &player.name;
         let url = format!(
-            "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}"
+            "https://{SESSION_SERVER}{HAS_JOINED_PATH}?username={username}&serverId={hash}"
         );
         let response = HTTP_CLIENT
             .get(&url)
@@ -60,7 +69,10 @@ impl MojangAdapter {
 
         // If the response is empty, then the client did not make an auth request
         if response.status() == 204 {
-            debug!("client did not make an authentication request");
+            debug!(
+                http.response.status_code = response.status().as_u16(),
+                "client did not make an authentication request",
+            );
             return Err(reject(ADAPTER_TYPE));
         }
 
@@ -84,6 +96,19 @@ impl Debug for MojangAdapter {
 }
 
 impl AuthenticationAdapter for MojangAdapter {
+    #[instrument(
+        level = "info",
+        name = "authenticate",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            http.request.method = "GET",
+            server.address = SESSION_SERVER,
+            url.path = HAS_JOINED_PATH,
+            adapter = ADAPTER_TYPE,
+            player = %player.name,
+        ),
+    )]
     async fn authenticate(
         &self,
         _client: &Client,
@@ -96,6 +121,9 @@ impl AuthenticationAdapter for MojangAdapter {
             .authenticate(player, shared_secret, encoded_public)
             .await;
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        if let Err(err) = &profile {
+            debug!(err = %err, "the session server did not vouch for the player");
+        }
         profile
     }
 }

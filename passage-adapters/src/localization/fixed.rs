@@ -70,7 +70,7 @@ impl Default for FixedLocalizationAdapter {
 }
 
 impl LocalizationAdapter for FixedLocalizationAdapter {
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(level = "info", skip_all, fields(adapter = ADAPTER_TYPE))]
     async fn localize(
         &self,
         locale: Option<&str>,

@@ -142,7 +142,8 @@ pub fn init_tracing(config: &Config) -> Result<Telemetry, Box<dyn std::error::Er
     };
 
     // Spans: batched, and with the W3C propagator installed so that the trace a session cookie
-    // carries continues into the connection that presents it.
+    // carries is linked from the connection that presents it. Without an endpoint there is no
+    // propagator either, and the link is simply not made -- see `on_login_encryption_response`.
     let tracer_provider = match &config.otel.traces {
         None => None,
         Some(endpoint) => {

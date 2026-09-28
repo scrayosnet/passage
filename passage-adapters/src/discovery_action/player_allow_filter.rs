@@ -1,7 +1,7 @@
 use crate::{Client, DiscoveryActionAdapter, Player, Target, error::Result, metrics};
 use regex::Regex;
 use tokio::time::Instant;
-use tracing::trace;
+use tracing::{debug, trace};
 use uuid::Uuid;
 
 /// The name of the adapter. It is primarily used for logging and metrics.
@@ -43,7 +43,7 @@ impl PlayerAllowFilterAdapter {
 }
 
 impl DiscoveryActionAdapter for PlayerAllowFilterAdapter {
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(level = "info", skip_all, fields(adapter = ADAPTER_TYPE))]
     async fn apply(
         &self,
         _client: &Client,
@@ -86,6 +86,14 @@ impl DiscoveryActionAdapter for PlayerAllowFilterAdapter {
         }
 
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        // The one outcome worth more than trace: clearing the list is what turns into
+        // `disconnect_no_target` further up, and nothing there can say it was this filter's doing.
+        debug!(
+            player = %player.name,
+            id = %player.id,
+            dropped = targets.len(),
+            "the player is not on the allow-list, dropping every target",
+        );
         targets.clear();
         Ok(())
     }

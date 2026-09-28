@@ -5,10 +5,14 @@ use passage_adapters::{AdapterError, Client, Player, Target, metrics, reject_rea
 use std::fmt::{Debug, Formatter};
 use tokio::time::Instant;
 use tonic::transport::Channel;
-use tracing::instrument;
+use tracing::{Span, debug, field, instrument};
 
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "grpc_discovery_action_adapter";
+
+/// The fully qualified gRPC service this adapter calls, as
+/// [`rpc.service`](https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/) wants it.
+const RPC_SERVICE: &str = "scrayosnet.passage.adapter.DiscoveryAction";
 
 /// Discovery action adapter that delegates target filtering and selection to an external gRPC
 /// service.
@@ -43,7 +47,6 @@ impl GrpcDiscoveryActionAdapter {
         })
     }
 
-    #[instrument(skip_all)]
     async fn apply(
         &self,
         client: &Client,
@@ -82,7 +85,21 @@ impl GrpcDiscoveryActionAdapter {
 }
 
 impl DiscoveryActionAdapter for GrpcDiscoveryActionAdapter {
-    #[instrument(skip_all)]
+    #[instrument(
+        level = "info",
+        name = "apply",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            otel.name = "scrayosnet.passage.adapter.DiscoveryAction/Apply",
+            rpc.system = "grpc",
+            rpc.service = RPC_SERVICE,
+            rpc.method = "Apply",
+            adapter = ADAPTER_TYPE,
+            targets.before = targets.len(),
+            targets.after = field::Empty,
+        ),
+    )]
     async fn apply(
         &self,
         client: &Client,
@@ -92,6 +109,12 @@ impl DiscoveryActionAdapter for GrpcDiscoveryActionAdapter {
         let start = Instant::now();
         let target = self.apply(client, player, targets).await;
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        match &target {
+            Ok(()) => {
+                Span::current().record("targets.after", targets.len());
+            }
+            Err(err) => debug!(err = %err, "the discovery action service refused the request"),
+        }
         target
     }
 }

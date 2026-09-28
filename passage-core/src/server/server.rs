@@ -1,6 +1,8 @@
 use crate::common::Phase;
 use crate::common::ProtocolVersion;
-use crate::connection::{Connection, Dispatcher, MakeDispatcher, Options as ConnectionConfig};
+use crate::connection::{
+    Connection, Dispatcher, MakeDispatcher, Options as ConnectionConfig, is_hangup,
+};
 use crate::router::{Layer, Stack};
 use crate::server::listener::Listener;
 use crate::wire::Options as WireOptions;
@@ -15,7 +17,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tracing::{Instrument, Span, debug, error, field, info_span, warn};
+use tracing::{Instrument, Span, debug, error, field, info_span, trace, warn};
 
 /// How long to wait before accepting again after an error that is not the peer's doing.
 ///
@@ -225,7 +227,9 @@ where
                 () = self.shutdown.cancelled() => break,
                 accepted = self.listener.accept() => match accepted {
                     Ok(accepted) => {
-                        debug!(address = ?accepted.1, "accepted a connection");
+                        // Trace, not debug: this fires for every scanner on the internet, and the
+                        // connection span below is what an operator actually follows.
+                        trace!(address = ?accepted.1, "accepted a connection");
                         accepted
                     },
                     Err(err) if is_peer_error(&err) => {
@@ -249,7 +253,15 @@ where
             let started = Instant::now();
             let dispatcher = self.dispatcher.make();
             let shutdown = self.shutdown.child_token();
-            let span = info_span!("connection", peer = field::Empty);
+            let span = info_span!(
+                "connection",
+                otel.kind = "server",
+                otel.status_code = field::Empty,
+                network.protocol.name = "minecraft",
+                network.protocol.version = field::Empty,
+                error.type = field::Empty,
+                peer = field::Empty,
+            );
             tasks.spawn(
                 connection::<L, S, F, M::Dispatcher, A>(
                     Arc::clone(&shared),
@@ -323,10 +335,11 @@ async fn connection<L, S, F, D, A>(
     // Apply the layer stack. If the layer stack is empty, then the connection is just a raw I/O.
     // Afterward, the final peer address is recorded.
     let _permit = permit;
+    let span = Span::current();
     let Some((io, addr)) = shared.layers.admit(io, addr).await else {
         return;
     };
-    Span::current().record("peer", field::debug(&addr));
+    span.record("peer", field::debug(&addr));
 
     // Build and run the connection and log the result.
     let connection = Connection::<_, (), ()>::builder(io)
@@ -340,33 +353,43 @@ async fn connection<L, S, F, D, A>(
             let elapsed = started.elapsed();
             let version = outcome.version;
             let phase = outcome.phase;
+            span.record("network.protocol.version", field::display(version));
             match &outcome.error {
                 // A handler closed it. There is nothing to report.
                 None => debug!(?elapsed, ?version, ?phase, "connection closed"),
                 // A hangup, a timeout, a peer that sent nonsense. All ordinary weather, and a
                 // scanner that took its MOTD and left looks exactly like the first of them.
-                Some(err) if err.is_peer_error() => debug!(
-                    ?elapsed,
-                    ?version,
-                    ?phase,
-                    reason = err.reason(),
-                    "connection ended"
-                ),
+                Some(err) if err.is_peer_error() => {
+                    span.record("error.type", err.reason());
+                    debug!(
+                        ?elapsed,
+                        ?version,
+                        ?phase,
+                        reason = err.reason(),
+                        "connection ended"
+                    );
+                }
                 // Our bug, or a dependency failing: the one case an operator has to see.
-                Some(err) => error!(
-                    ?elapsed,
-                    ?version,
-                    ?phase,
-                    reason = err.reason(),
-                    cause = %err,
-                    "connection failed"
-                ),
+                Some(err) => {
+                    span.record("otel.status_code", "error");
+                    span.record("error.type", err.reason());
+                    error!(
+                        ?elapsed,
+                        ?version,
+                        ?phase,
+                        reason = err.reason(),
+                        cause = %err,
+                        "connection failed"
+                    );
+                }
             }
         }
         Err(payload) => {
             // `as_ref`, not `&payload`: a `&Box<dyn Any>` coerces to a `dyn Any` whose concrete
             // type is the *box*, so every downcast inside would miss and every panic would be
             // reported as the fallback text.
+            span.record("otel.status_code", "error");
+            span.record("error.type", "panic");
             error!(
                 cause = panic_message(payload.as_ref()),
                 "connection panicked"
@@ -387,12 +410,9 @@ fn panic_message(payload: &(dyn Any + Send)) -> String {
 }
 
 /// Checks whether the io error is raised by the peer.
+///
+/// The same endings a live connection can meet, plus the one only accepting has: a signal that
+/// interrupted the call, which costs us nothing but the connection that was half-way in.
 fn is_peer_error(err: &io::Error) -> bool {
-    matches!(
-        err.kind(),
-        io::ErrorKind::ConnectionAborted
-            | io::ErrorKind::ConnectionReset
-            | io::ErrorKind::NotConnected
-            | io::ErrorKind::Interrupted
-    )
+    is_hangup(err) || err.kind() == io::ErrorKind::Interrupted
 }

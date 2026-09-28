@@ -92,7 +92,7 @@ impl MetaFilterAdapter {
 }
 
 impl DiscoveryActionAdapter for MetaFilterAdapter {
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(level = "info", skip_all, fields(adapter = ADAPTER_TYPE))]
     async fn apply(
         &self,
         _client: &Client,

@@ -39,7 +39,7 @@ impl FixedStatusAdapter {
 }
 
 impl StatusAdapter for FixedStatusAdapter {
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(level = "info", skip_all, fields(adapter = ADAPTER_TYPE))]
     async fn status(&self, client: &Client) -> Result<Option<ServerStatus>> {
         trace!(has_status = self.status.is_some(), "passing fixed status");
         let start = Instant::now();

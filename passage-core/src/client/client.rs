@@ -162,14 +162,25 @@ where
             .map_err(ClientError::Connect)?;
         debug!(address = ?addr, "opened a connection");
 
-        let span = info_span!("connection", peer = field::Empty);
+        let span = info_span!(
+            "connection",
+            otel.kind = "client",
+            otel.status_code = field::Empty,
+            network.protocol.name = "minecraft",
+            network.protocol.version = field::Empty,
+            error.type = field::Empty,
+            peer = field::Empty,
+        );
         async move {
             // Apply the layer stack. If the layer stack is empty, then the connection is just a raw
             // I/O. Afterward, the final peer address is recorded.
+            let span = Span::current();
             let Some((io, addr)) = self.layers.admit(io, addr).await else {
+                span.record("otel.status_code", "error");
+                span.record("error.type", "rejected");
                 return Err(ClientError::Rejected);
             };
-            Span::current().record("peer", field::debug(&addr));
+            span.record("peer", field::debug(&addr));
 
             // The connection runs on a child token, because it cancels its own on the way out and
             // the caller's token is not ours to spend.
@@ -181,16 +192,21 @@ where
                 .build();
 
             let outcome = connection.run().await;
+            span.record("network.protocol.version", field::display(outcome.version));
             match &outcome.error {
                 None => {
                     debug!(version = ?outcome.version, phase = ?outcome.phase, "connection closed")
                 }
-                Some(err) => debug!(
-                    version = ?outcome.version,
-                    phase = ?outcome.phase,
-                    reason = err.reason(),
-                    "connection ended"
-                ),
+                Some(err) => {
+                    span.record("otel.status_code", "error");
+                    span.record("error.type", err.reason());
+                    debug!(
+                        version = ?outcome.version,
+                        phase = ?outcome.phase,
+                        reason = err.reason(),
+                        "connection ended"
+                    );
+                }
             }
             Ok(outcome)
         }

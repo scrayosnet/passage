@@ -13,7 +13,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{Span, debug, field, info, instrument, trace, warn};
 
 /// The name of the adapter. It is primarily used for logging and metrics.
 const ADAPTER_TYPE: &str = "dns_discovery_adapter";
@@ -109,6 +109,17 @@ impl DnsDiscoveryAdapter {
     }
 
     /// Queries SRV records and returns targets.
+    #[instrument(
+        level = "debug",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            adapter = ADAPTER_TYPE,
+            dns.question.name = domain,
+            dns.question.type = "SRV",
+            targets = field::Empty,
+        ),
+    )]
     async fn query_srv(
         resolver: &Resolver<TokioRuntimeProvider>,
         domain: &str,
@@ -147,10 +158,22 @@ impl DnsDiscoveryAdapter {
             }
         }
 
+        Span::current().record("targets", targets.len());
         Ok(targets)
     }
 
     /// Queries A/AAAA records and returns targets.
+    #[instrument(
+        level = "debug",
+        skip_all,
+        fields(
+            otel.kind = "client",
+            adapter = ADAPTER_TYPE,
+            dns.question.name = domain,
+            dns.question.type = "A",
+            targets = field::Empty,
+        ),
+    )]
     async fn query_a(
         resolver: &Resolver<TokioRuntimeProvider>,
         domain: &str,
@@ -175,6 +198,7 @@ impl DnsDiscoveryAdapter {
             });
         }
 
+        Span::current().record("targets", targets.len());
         Ok(targets)
     }
 }
@@ -186,10 +210,12 @@ impl Drop for DnsDiscoveryAdapter {
 }
 
 impl DiscoveryAdapter for DnsDiscoveryAdapter {
+    #[instrument(level = "info", skip_all, fields(adapter = ADAPTER_TYPE))]
     async fn discover(&self, _client: &Client) -> passage_adapters::Result<Vec<Target>> {
         let start = Instant::now();
         let servers = self.inner.read().await.clone();
         metrics::adapter_duration::record(ADAPTER_TYPE, start);
+        trace!(len = servers.len(), "passing the resolved DNS targets");
         Ok(servers)
     }
 }

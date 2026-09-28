@@ -1,7 +1,7 @@
 use crate::{Client, DiscoveryActionAdapter, Player, Target, error::Result, metrics};
 use regex::Regex;
 use tokio::time::Instant;
-use tracing::trace;
+use tracing::{debug, trace};
 use uuid::Uuid;
 
 /// The name of the adapter. It is primarily used for logging and metrics.
@@ -41,8 +41,19 @@ impl PlayerBlockFilterAdapter {
     }
 }
 
+/// Drops every target because the player is blocked.
+fn blocked(player: &Player, targets: &mut Vec<Target>) {
+    debug!(
+        player = %player.name,
+        id = %player.id,
+        dropped = targets.len(),
+        "the player is on the block-list, dropping every target",
+    );
+    targets.clear();
+}
+
 impl DiscoveryActionAdapter for PlayerBlockFilterAdapter {
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(level = "info", skip_all, fields(adapter = ADAPTER_TYPE))]
     async fn apply(
         &self,
         _client: &Client,
@@ -62,7 +73,7 @@ impl DiscoveryActionAdapter for PlayerBlockFilterAdapter {
             trace!("filtering block usernames");
             if items.iter().any(|item| item == &player.name) {
                 metrics::adapter_duration::record(ADAPTER_TYPE, start);
-                targets.clear();
+                blocked(player, targets);
                 return Ok(());
             }
         }
@@ -72,7 +83,7 @@ impl DiscoveryActionAdapter for PlayerBlockFilterAdapter {
             trace!("filtering block username");
             if item.is_match(&player.name) {
                 metrics::adapter_duration::record(ADAPTER_TYPE, start);
-                targets.clear();
+                blocked(player, targets);
                 return Ok(());
             }
         }
@@ -82,7 +93,7 @@ impl DiscoveryActionAdapter for PlayerBlockFilterAdapter {
             trace!("filtering block ids");
             if items.iter().any(|item| item == &player.id) {
                 metrics::adapter_duration::record(ADAPTER_TYPE, start);
-                targets.clear();
+                blocked(player, targets);
                 return Ok(());
             }
         }
