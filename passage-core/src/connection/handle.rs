@@ -9,6 +9,7 @@ use std::sync::{Mutex, TryLockError};
 use std::time::Duration;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+use tracing::Span;
 
 /// An operation that should be applied to the outgoing socket in order. This only applies to socket
 /// operations which are order-sensitive (e.g., send before encrypt).
@@ -37,6 +38,12 @@ impl std::fmt::Debug for Out {
 pub struct Conn<S> {
     /// The current per-connection state.
     pub state: S,
+
+    /// The span the connection itself runs in, which every handler span is a descendant of. A
+    /// handler that hands a trace context to somebody else -- a backend the player is transferred
+    /// to, say -- wants this one rather than its own: what follows belongs to the connection, not
+    /// to the packet that happened to be in flight when it was handed over.
+    span: Span,
 
     /// Queued outgoing operations. They are applied concurrently to the handlers.
     out: Vec<Out>,
@@ -71,6 +78,13 @@ pub struct Conn<S> {
 }
 
 impl<S> Conn<S> {
+    /// The span the connection runs in: the parent of every handler span, and what a handler
+    /// propagates when it hands the trace to another service.
+    #[must_use]
+    pub fn span(&self) -> &Span {
+        &self.span
+    }
+
     /// The protocol version the connection is in.
     #[must_use]
     pub fn version(&self) -> ProtocolVersion {
@@ -220,10 +234,15 @@ impl<S> ConnCell<S> {
     /// It starts with no deadline and a token nobody else holds; the connection arms both from its
     /// own configuration before it runs. The peer is free to speak: a handler shuts the gate when
     /// it wants it quiet.
+    ///
+    /// The span is taken from where this is built, which is inside the connection's own span: the
+    /// cell is created by [`Connection::run`](crate::connection::Connection::run), and every
+    /// handler future is polled from that same task.
     pub(crate) fn new(state: S, version: ProtocolVersion, phase: Phase, options: Options) -> Self {
         Self {
             inner: Mutex::new(Conn {
                 state,
+                span: Span::current(),
                 out: Vec::new(),
                 version,
                 phase,
@@ -304,6 +323,13 @@ impl<'a, S> ConnRef<'a, S> {
             }
         };
         f(&mut conn)
+    }
+
+    /// The span the connection runs in: the parent of every handler span, and what a handler
+    /// propagates when it hands the trace to another service.
+    #[must_use]
+    pub fn span(self) -> Span {
+        self.with(|conn| conn.span().clone())
     }
 
     /// The protocol version the connection is in.
@@ -576,6 +602,28 @@ mod tests {
         conn.with(Conn::close);
         assert!(conn.with(|c| c.closing()));
         assert!(conn.with(|c| c.take_error()).is_none());
+    }
+
+    #[test]
+    fn the_span_a_handler_hands_on_is_the_connection_and_not_itself() {
+        // What a transferred player's trace hangs off. A handler that propagates its own span makes
+        // the backend a child of whichever packet happened to be in flight; the connection is what
+        // the work actually belongs to, so that is what the cell remembers.
+        tracing::subscriber::with_default(tracing_subscriber::registry(), || {
+            let connection = tracing::info_span!("connection");
+            let cell = connection.in_scope(cell);
+
+            let handler = tracing::info_span!("on_login_login_acknowledged");
+            handler.in_scope(|| {
+                assert_ne!(
+                    handler.id(),
+                    connection.id(),
+                    "two spans, or nothing to tell"
+                );
+                assert_eq!(Span::current().id(), handler.id());
+                assert_eq!(cell.as_ref().span().id(), connection.id());
+            });
+        });
     }
 
     #[test]
