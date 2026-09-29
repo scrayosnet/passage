@@ -612,12 +612,14 @@ pub(crate) async fn on_login_encryption_response(
         span.record("session.id", field::display(&session.id));
         // A session cookie carries the trace of the connection that issued it, which is what ties
         // a transfer back to the login it came from. It is a link and not a parent: this
-        // connection's trace was already rooted before the cookie could be asked for.
+        // connection's trace was already rooted before the cookie could be asked for. The link sits
+        // on the connection rather than on this handler, because that is the span the other end
+        // issued -- the two connections meet at the same height in both traces.
         global::get_text_map_propagator(|propagator| {
             let context = propagator.extract(&session.extra);
             let linked = context.span().span_context().clone();
             if linked.is_valid() {
-                span.add_link(linked);
+                conn.span().add_link(linked);
             }
         });
     }
@@ -721,14 +723,16 @@ pub(crate) async fn on_login_login_acknowledged(
     })?;
 
     // Give the client a session if it had none, so the next connection it makes is recognisable as
-    // the same one. It carries the current trace, which is what links the two together.
+    // the same one. It carries the trace of the connection -- not of this handler -- which is what
+    // links the two together: what the backend does after the transfer belongs beside the handlers
+    // in the connection, not underneath the one packet that happened to hand it over.
     conn.with(|c| {
         if c.state.session.is_some() {
             return Ok(());
         }
         let mut extra = HashMap::new();
         global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(&tracing::Span::current().context(), &mut extra);
+            propagator.inject_context(&c.span().context(), &mut extra);
         });
         let cookie = SessionCookie {
             id: Uuid::new_v4(),
