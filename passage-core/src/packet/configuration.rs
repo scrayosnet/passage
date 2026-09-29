@@ -3,10 +3,10 @@
 
 use crate::common::{
     ChatMode, DisplayedSkinParts, KnownPack, MAX_CODE_OF_CONDUCT_LEN, MAX_COOKIE_LEN, MAX_FEATURES,
-    MAX_HASH_LEN, MAX_IDENTIFIER_LEN, MAX_KNOWN_PACKS, MAX_LOCALE_LEN, MAX_REGISTRY_ENTRIES,
-    MAX_REPORT_DETAILS, MAX_SERVER_LINKS, MAX_TAGS, MAX_URL_LEN, MainHand, Nbt, ParticleStatus,
-    RegistryEntry, ReportDetail, ResourcePackResult, ServerLink, TagRegistry, TextComponent,
-    VarInt, versions,
+    MAX_HASH_LEN, MAX_IDENTIFIER_LEN, MAX_KNOWN_PACKS, MAX_LOCALE_LEN, MAX_POST_EFFECTS,
+    MAX_REGISTRY_ENTRIES, MAX_REPORT_DETAILS, MAX_SERVER_LINKS, MAX_TAGS, MAX_URL_LEN, MainHand,
+    Nbt, ParticleStatus, RegistryEntry, ReportDetail, ResourcePackResult, ServerLink, TagRegistry,
+    TextComponent, VarInt, versions,
 };
 use crate::wire::{Reader, WireError, Writer};
 use crate::{Packet, Phase, ProtocolVersion};
@@ -310,6 +310,36 @@ impl Packet for ServerResourcePackPushPacket {
     }
 }
 
+/// The [`ServerPostEffectsPacket`].
+///
+/// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Post_Effects)
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ServerPostEffectsPacket {
+    /// The identifiers of the post-processing effects the client is to activate.
+    pub effects: Vec<ByteString>,
+}
+
+impl Packet for ServerPostEffectsPacket {
+    const NAME: &'static str = "server::post_effects";
+    const PHASE: Phase = Phase::Configuration;
+    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V26_3, 0x0A)];
+
+    fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
+        Ok(Self {
+            effects: r.array("effects", MAX_POST_EFFECTS, |r| {
+                r.string("effect", MAX_IDENTIFIER_LEN)
+            })?,
+        })
+    }
+
+    fn encode(&self, w: &mut Writer<'_>, _: ProtocolVersion) -> Result<(), WireError> {
+        w.array("effects", &self.effects, |w, effect| {
+            w.string("effect", effect)
+        })?;
+        Ok(())
+    }
+}
+
 /// The [`ServerStoreCookiePacket`].
 ///
 /// [Minecraft Docs](https://minecraft.wiki/w/Java_Edition_protocol/Packets#Store_Cookie)
@@ -324,7 +354,8 @@ pub struct ServerStoreCookiePacket {
 impl Packet for ServerStoreCookiePacket {
     const NAME: &'static str = "server::store_cookie";
     const PHASE: Phase = Phase::Configuration;
-    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x0A)];
+    const IDS: &'static [(ProtocolVersion, VarInt)] =
+        &[(versions::V26_3, 0x0B), (versions::V1_20_5, 0x0A)];
 
     fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
@@ -354,7 +385,8 @@ pub struct ServerTransferPacket {
 impl Packet for ServerTransferPacket {
     const NAME: &'static str = "server::transfer";
     const PHASE: Phase = Phase::Configuration;
-    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x0B)];
+    const IDS: &'static [(ProtocolVersion, VarInt)] =
+        &[(versions::V26_3, 0x0C), (versions::V1_20_5, 0x0B)];
 
     fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         let host = r.string("host", MAX_URL_LEN)?;
@@ -385,7 +417,8 @@ pub struct ServerUpdateEnabledFeaturesPacket {
 impl Packet for ServerUpdateEnabledFeaturesPacket {
     const NAME: &'static str = "server::update_enabled_features";
     const PHASE: Phase = Phase::Configuration;
-    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x0C)];
+    const IDS: &'static [(ProtocolVersion, VarInt)] =
+        &[(versions::V26_3, 0x0D), (versions::V1_20_5, 0x0C)];
 
     fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
@@ -415,7 +448,8 @@ pub struct ServerUpdateTagsPacket {
 impl Packet for ServerUpdateTagsPacket {
     const NAME: &'static str = "server::update_tags";
     const PHASE: Phase = Phase::Configuration;
-    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x0D)];
+    const IDS: &'static [(ProtocolVersion, VarInt)] =
+        &[(versions::V26_3, 0x0E), (versions::V1_20_5, 0x0D)];
 
     fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
@@ -443,7 +477,8 @@ pub struct ServerSelectKnownPacksPacket {
 impl Packet for ServerSelectKnownPacksPacket {
     const NAME: &'static str = "server::select_known_packs";
     const PHASE: Phase = Phase::Configuration;
-    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x0E)];
+    const IDS: &'static [(ProtocolVersion, VarInt)] =
+        &[(versions::V26_3, 0x0F), (versions::V1_20_5, 0x0E)];
 
     fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
@@ -471,7 +506,8 @@ pub struct ServerCustomReportDetailsPacket {
 impl Packet for ServerCustomReportDetailsPacket {
     const NAME: &'static str = "server::custom_report_details";
     const PHASE: Phase = Phase::Configuration;
-    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_21_2, 0x0F)];
+    const IDS: &'static [(ProtocolVersion, VarInt)] =
+        &[(versions::V26_3, 0x10), (versions::V1_21, 0x0F)];
 
     fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
@@ -501,7 +537,8 @@ pub struct ServerLinksPacket {
 impl Packet for ServerLinksPacket {
     const NAME: &'static str = "server::server_links";
     const PHASE: Phase = Phase::Configuration;
-    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_21_2, 0x10)];
+    const IDS: &'static [(ProtocolVersion, VarInt)] =
+        &[(versions::V26_3, 0x11), (versions::V1_21, 0x10)];
 
     fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
@@ -526,7 +563,8 @@ pub struct ServerClearDialogPacket;
 impl Packet for ServerClearDialogPacket {
     const NAME: &'static str = "server::clear_dialog";
     const PHASE: Phase = Phase::Configuration;
-    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_21_6, 0x11)];
+    const IDS: &'static [(ProtocolVersion, VarInt)] =
+        &[(versions::V26_3, 0x12), (versions::V1_21_6, 0x11)];
 
     fn decode(_: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self)
@@ -549,7 +587,8 @@ pub struct ServerShowDialogPacket {
 impl Packet for ServerShowDialogPacket {
     const NAME: &'static str = "server::show_dialog";
     const PHASE: Phase = Phase::Configuration;
-    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_21_6, 0x12)];
+    const IDS: &'static [(ProtocolVersion, VarInt)] =
+        &[(versions::V26_3, 0x13), (versions::V1_21_6, 0x12)];
 
     fn decode(r: &mut Reader, version: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
@@ -575,7 +614,8 @@ pub struct ServerCodeOfConductPacket {
 impl Packet for ServerCodeOfConductPacket {
     const NAME: &'static str = "server::code_of_conduct";
     const PHASE: Phase = Phase::Configuration;
-    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_21_9, 0x13)];
+    const IDS: &'static [(ProtocolVersion, VarInt)] =
+        &[(versions::V26_3, 0x14), (versions::V1_21_9, 0x13)];
 
     fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
@@ -984,14 +1024,108 @@ mod tests {
         // Encoding one for a client that cannot read it is an internal error rather than a frame
         // the peer has to make sense of, which is what an absent ID buys.
         assert_eq!(ServerLinksPacket::id(versions::V1_20_5), None);
-        assert_eq!(ServerLinksPacket::id(versions::V1_21_2), Some(0x10));
+        assert_eq!(ServerLinksPacket::id(versions::V1_21), Some(0x10));
         assert_eq!(ServerShowDialogPacket::id(versions::V1_21_2), None);
         assert_eq!(ServerShowDialogPacket::id(versions::V1_21_6), Some(0x12));
         assert_eq!(ServerCodeOfConductPacket::id(versions::V1_21_6), None);
         assert_eq!(ServerCodeOfConductPacket::id(versions::V1_21_9), Some(0x13));
+        assert_eq!(ServerPostEffectsPacket::id(versions::V26_2), None);
+        assert_eq!(ServerPostEffectsPacket::id(versions::V26_3), Some(0x0A));
         // And nothing in the phase exists before the version that introduced transfers.
         assert_eq!(ServerTransferPacket::id(ProtocolVersion::new(765)), None);
         assert_eq!(ServerTransferPacket::id(versions::V1_20_5), Some(0x0B));
+    }
+
+    #[test]
+    fn everything_behind_the_post_effects_packet_moved_up_one_at_26_3() {
+        // 26.3 inserted a packet in the middle of the phase rather than appending one, so every
+        // ID behind it is off by one -- including the transfer, which is the whole point of
+        // Passage. A client on 26.3 sent the old ID reads a store cookie as a post effect list.
+        let shifted: [(&str, Option<i32>, Option<i32>); 10] = [
+            (
+                ServerStoreCookiePacket::NAME,
+                ServerStoreCookiePacket::id(versions::V26_2),
+                ServerStoreCookiePacket::id(versions::V26_3),
+            ),
+            (
+                ServerTransferPacket::NAME,
+                ServerTransferPacket::id(versions::V26_2),
+                ServerTransferPacket::id(versions::V26_3),
+            ),
+            (
+                ServerUpdateEnabledFeaturesPacket::NAME,
+                ServerUpdateEnabledFeaturesPacket::id(versions::V26_2),
+                ServerUpdateEnabledFeaturesPacket::id(versions::V26_3),
+            ),
+            (
+                ServerUpdateTagsPacket::NAME,
+                ServerUpdateTagsPacket::id(versions::V26_2),
+                ServerUpdateTagsPacket::id(versions::V26_3),
+            ),
+            (
+                ServerSelectKnownPacksPacket::NAME,
+                ServerSelectKnownPacksPacket::id(versions::V26_2),
+                ServerSelectKnownPacksPacket::id(versions::V26_3),
+            ),
+            (
+                ServerCustomReportDetailsPacket::NAME,
+                ServerCustomReportDetailsPacket::id(versions::V26_2),
+                ServerCustomReportDetailsPacket::id(versions::V26_3),
+            ),
+            (
+                ServerLinksPacket::NAME,
+                ServerLinksPacket::id(versions::V26_2),
+                ServerLinksPacket::id(versions::V26_3),
+            ),
+            (
+                ServerClearDialogPacket::NAME,
+                ServerClearDialogPacket::id(versions::V26_2),
+                ServerClearDialogPacket::id(versions::V26_3),
+            ),
+            (
+                ServerShowDialogPacket::NAME,
+                ServerShowDialogPacket::id(versions::V26_2),
+                ServerShowDialogPacket::id(versions::V26_3),
+            ),
+            (
+                ServerCodeOfConductPacket::NAME,
+                ServerCodeOfConductPacket::id(versions::V26_2),
+                ServerCodeOfConductPacket::id(versions::V26_3),
+            ),
+        ];
+        for (name, before, after) in shifted {
+            assert_eq!(
+                after,
+                before.map(|id| id + 1),
+                "{name} did not move up one at 26.3",
+            );
+        }
+
+        // Everything in front of it stayed where it was, and so did the whole other direction.
+        assert_eq!(
+            ServerResourcePackPushPacket::id(versions::V26_3),
+            Some(0x09)
+        );
+        assert_eq!(ServerCookieRequestPacket::id(versions::V26_3), Some(0x00));
+        assert_eq!(
+            ClientSelectKnownPacksPacket::id(versions::V26_3),
+            Some(0x07),
+        );
+        assert_eq!(
+            ClientAcceptCodeOfConductPacket::id(versions::V26_3),
+            Some(0x09),
+        );
+    }
+
+    #[test]
+    fn post_effects_round_trips_including_the_empty_list() {
+        let packet = ServerPostEffectsPacket { effects: vec![] };
+        assert_eq!(round_trip(&packet, versions::V26_3), packet);
+
+        let packet = ServerPostEffectsPacket {
+            effects: vec!["minecraft:blur".into(), "minecraft:invert".into()],
+        };
+        assert_eq!(round_trip(&packet, versions::V26_3), packet);
     }
 
     #[test]

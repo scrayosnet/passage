@@ -132,7 +132,7 @@ mod tests {
         const NAME: &'static str = "Moved";
         const PHASE: Phase = Phase::Login;
         const IDS: &'static [(ProtocolVersion, i32)] =
-            &[(versions::V26_1, 0x05), (versions::V1_20_5, 0x02)];
+            &[(versions::V26_3, 0x05), (versions::V1_20_5, 0x02)];
 
         fn decode(r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self {
@@ -190,7 +190,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_registered_packet_reaches_its_handler() {
-        let cell = cell(versions::V26_1);
+        let cell = cell(versions::V26_3);
         let mut dispatcher = router(UnknownPolicy::Reject).make();
 
         dispatcher.on_version(cell.as_ref()).expect("binds");
@@ -208,12 +208,12 @@ mod tests {
         // A client knows its version before it says anything, so nothing ever changes it. The
         // connection binds the table once before it dispatches anything, or the whole connection
         // would run against the floor -- where this packet does not exist at all.
-        let cell = cell(versions::V26_1);
+        let cell = cell(versions::V26_3);
         let mut dispatcher = router(UnknownPolicy::Reject).make();
         assert_eq!(dispatcher.table, (ProtocolVersion::UNKNOWN, 0));
 
         dispatcher.on_version(cell.as_ref()).expect("binds");
-        assert_eq!(dispatcher.table.0, versions::V26_1);
+        assert_eq!(dispatcher.table.0, versions::V26_3);
 
         let frame = payload(0x05, |w| w.string("text", "bound").expect("writes"));
         dispatcher
@@ -268,7 +268,7 @@ mod tests {
             Ok(())
         }
 
-        let cell = cell(versions::V26_1);
+        let cell = cell(versions::V26_3);
         let router = Arc::new(
             Router::<Seen>::builder()
                 .on(slow)
@@ -296,7 +296,7 @@ mod tests {
     #[tokio::test]
     async fn a_packet_nobody_registered_is_the_peers_doing() {
         // An unsupported client or someone probing: counted, logged at debug, nobody paged.
-        let cell = cell(versions::V26_1);
+        let cell = cell(versions::V26_3);
         let dispatcher = router(UnknownPolicy::Reject).make();
 
         let error = dispatcher
@@ -310,7 +310,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_minimal_driver_can_ignore_what_it_does_not_route() {
-        let cell = cell(versions::V26_1);
+        let cell = cell(versions::V26_3);
         let dispatcher = router(UnknownPolicy::Ignore).make();
 
         dispatcher
@@ -324,7 +324,7 @@ mod tests {
     async fn a_payload_the_packet_cannot_account_for_fails_the_dispatch() {
         // Either we are misreading the packet or the peer is smuggling data past us. Both are worth
         // failing on, and the failure names the packet rather than the byte.
-        let cell = cell(versions::V26_1);
+        let cell = cell(versions::V26_3);
         let mut dispatcher = router(UnknownPolicy::Reject).make();
         dispatcher.on_version(cell.as_ref()).expect("binds");
 
@@ -342,7 +342,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_router_without_hooks_answers_them_all_with_nothing() {
-        let cell = cell(versions::V26_1);
+        let cell = cell(versions::V26_3);
         let dispatcher = RouterDispatcher::new(Arc::new(Router::<Seen>::builder().build()));
 
         dispatcher
@@ -363,7 +363,7 @@ mod tests {
             Ok(())
         }
 
-        let cell = cell(versions::V26_1);
+        let cell = cell(versions::V26_3);
         let router = Arc::new(Router::<Seen>::builder().on_open(opened).build());
 
         router.make().on_open(cell.as_ref()).await.expect("opens");

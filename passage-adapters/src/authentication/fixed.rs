@@ -24,6 +24,11 @@ impl FixedAuthenticationAdapter {
 }
 
 impl AuthenticationAdapter for FixedAuthenticationAdapter {
+    /// The profile is configured rather than looked up, so the session server has no part in it.
+    fn requires_session(&self) -> bool {
+        false
+    }
+
     #[tracing::instrument(level = "info", skip_all, fields(adapter = ADAPTER_TYPE))]
     async fn authenticate(
         &self,

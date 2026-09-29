@@ -81,7 +81,6 @@ impl fmt::Display for ProtocolVersion {
     }
 }
 
-// TODO move into router implementation where these are actually used
 /// The known protocol versions (breakpoints). It only contains release versions that introduced breaking
 /// changes, mapping them against readable minecraft version names.
 pub mod versions {
@@ -91,7 +90,10 @@ pub mod versions {
     /// This is the oldest version Passage (router) can serve.
     pub const V1_20_5: V = V::new(766);
 
-    /// Minecraft 1.21.2: added the `Custom Report Details` and `Server Links` packets, and the
+    /// Minecraft 1.21: added the `Custom Report Details` and `Server Links` packets.
+    pub const V1_21: V = V::new(767);
+
+    /// Minecraft 1.21.2: dropped the strict error handling flag from `Login Success`, and added the
     /// particle status field to `Client Information`.
     pub const V1_21_2: V = V::new(768);
 
@@ -102,25 +104,30 @@ pub mod versions {
     /// Minecraft 1.21.9: added the code of conduct packets.
     pub const V1_21_9: V = V::new(773);
 
-    /// The 26.1 protocol: Added the session ID field to `Login Success`.
-    pub const V26_1: V = V::new(775);
+    /// The 26.2 protocol: added the session ID field to `Login Success`.
+    pub const V26_2: V = V::new(776);
+
+    /// The 26.3 protocol: added the `Post Effects` packet in the middle of the configuration
+    /// phase, which moved the ID of every client-bound packet behind it -- including the transfer.
+    pub const V26_3: V = V::new(777);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// 1.21: a release between the two breakpoints, which no list in this crate names.
-    const V1_21: ProtocolVersion = ProtocolVersion::new(767);
+    /// 26.1: a release between two breakpoints, which no list in this crate names because nothing
+    /// in the phases Passage speaks changed in it.
+    const V26_1: ProtocolVersion = ProtocolVersion::new(775);
 
     /// 24w03a, a 1.20.5 snapshot: numerically above every release, which is the trap.
     const SNAPSHOT: ProtocolVersion = ProtocolVersion::new(0x4000_0000 | 132);
 
     #[test]
     fn thresholds_are_inclusive_lower_bounds() {
-        assert!(!V1_21.at_least(versions::V26_1));
-        assert!(versions::V26_1.at_least(versions::V26_1));
-        assert!(versions::V26_1.at_least(versions::V1_20_5));
+        assert!(!V26_1.at_least(versions::V26_3));
+        assert!(versions::V26_3.at_least(versions::V26_3));
+        assert!(versions::V26_3.at_least(versions::V1_20_5));
         // 1.20.4: below the oldest version Passage can serve.
         assert!(!ProtocolVersion::new(765).at_least(versions::V1_20_5));
     }
@@ -139,12 +146,12 @@ mod tests {
     #[test]
     fn a_snapshot_outranks_every_release_and_is_refused_for_it() {
         // Anything gated on `at_least` would be written for a client that cannot read it.
-        assert!(SNAPSHOT.at_least(versions::V26_1));
+        assert!(SNAPSHOT.at_least(versions::V26_3));
         assert!(SNAPSHOT.is_snapshot());
         assert!(!SNAPSHOT.is_release());
 
         // Releases are not snapshots, and neither is the pre-handshake floor.
-        for version in [versions::V1_20_5, V1_21, versions::V26_1] {
+        for version in [versions::V1_20_5, V26_1, versions::V26_3] {
             assert!(version.is_release(), "{version}");
         }
         assert!(ProtocolVersion::UNKNOWN.is_release());
@@ -157,8 +164,8 @@ mod tests {
         for version in [
             ProtocolVersion::UNKNOWN,
             versions::V1_20_5,
-            V1_21,
-            versions::V26_1,
+            V26_1,
+            versions::V26_3,
         ] {
             assert_eq!(version.placed(), version, "{version}");
         }
@@ -178,14 +185,14 @@ mod tests {
     fn unknown_is_below_every_real_version() {
         // Load-bearing: it is what makes the pre-handshake state resolve to the version-independent
         // packets and nothing else.
-        for version in [versions::V1_20_5, V1_21, versions::V26_1] {
+        for version in [versions::V1_20_5, V26_1, versions::V26_3] {
             assert!(!ProtocolVersion::UNKNOWN.at_least(version), "{version}");
         }
     }
 
     #[test]
     fn a_raw_version_survives_the_round_trip() {
-        for raw in [0, 765, 775, -1, i32::MIN, i32::MAX] {
+        for raw in [0, 765, 777, -1, i32::MIN, i32::MAX] {
             let version = ProtocolVersion::from(raw);
             assert_eq!(version.get(), raw);
             assert_eq!(*version.as_ref(), raw);

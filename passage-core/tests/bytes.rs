@@ -34,7 +34,7 @@ async fn the_id_a_server_writes_is_the_one_a_peer_reads() {
     // something that shares no code with the connection that wrote it.
     let (mut peer, server) = Served::new(server()).start();
 
-    reach_status(&mut peer, versions::V26_1).await;
+    reach_status(&mut peer, versions::V26_3).await;
     peer.send(&StatusRequest).await;
 
     let response = peer.expect::<StatusResponse>().await;
@@ -52,7 +52,7 @@ async fn the_id_a_server_writes_is_the_one_a_peer_reads() {
 async fn an_id_nobody_registered_is_the_peers_doing() {
     let (mut peer, server) = Served::new(server()).start();
 
-    reach_status(&mut peer, versions::V26_1).await;
+    reach_status(&mut peer, versions::V26_3).await;
     // 0x7F exists in no phase of the test protocol.
     peer.send_raw(0x7F, &[]).await;
 
@@ -68,9 +68,9 @@ async fn a_payload_that_does_not_match_its_packet_is_the_peers_doing() {
     // the peer is smuggling data past us, and both are worth failing on.
     let (mut peer, server) = Served::new(server()).start();
 
-    reach_status(&mut peer, versions::V26_1).await;
+    reach_status(&mut peer, versions::V26_3).await;
     peer.send_raw(
-        StatusRequest::id(versions::V26_1).expect("exists"),
+        StatusRequest::id(versions::V26_3).expect("exists"),
         b"extra",
     )
     .await;
@@ -133,8 +133,8 @@ async fn a_frame_that_arrives_in_pieces_is_backpressure_not_an_error() {
         let mut payload = bytes::BytesMut::new();
         let mut writer = Writer::new(&mut payload);
         writer.var_int(0x00);
-        Handshake::new(versions::V26_1, Intent::Status)
-            .encode(&mut writer, versions::V26_1)
+        Handshake::new(versions::V26_3, Intent::Status)
+            .encode(&mut writer, versions::V26_3)
             .expect("encodes");
         let mut header = Writer::new(&mut frame);
         header.length("packet_length", payload.len()).expect("fits");
@@ -147,7 +147,7 @@ async fn a_frame_that_arrives_in_pieces_is_backpressure_not_an_error() {
     }
 
     // The handshake arrived, so the status phase is reachable.
-    peer.version = versions::V26_1;
+    peer.version = versions::V26_3;
     peer.send(&StatusRequest).await;
     assert_eq!(
         peer.expect::<StatusResponse>().await.body,
@@ -176,7 +176,7 @@ async fn a_peer_that_stops_reading_does_not_outlast_its_deadline() {
         .config(|config| config.max_lifetime = Some(Duration::from_secs(5)))
         .start();
 
-    reach_status(&mut peer, versions::V26_1).await;
+    reach_status(&mut peer, versions::V26_3).await;
     peer.send(&StatusRequest).await;
 
     // Nothing ever reads `peer`.

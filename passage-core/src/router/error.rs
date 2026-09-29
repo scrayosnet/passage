@@ -44,12 +44,12 @@ mod tests {
         let error = RouterError::UnorderedIds {
             packet: "LoginStart",
             previous: versions::V1_20_5,
-            version: versions::V26_1,
+            version: versions::V26_3,
         };
         let message = error.to_string();
         assert!(message.contains("LoginStart"), "{message}");
         assert!(
-            message.contains("766") && message.contains("775"),
+            message.contains("766") && message.contains("777"),
             "{message}"
         );
     }

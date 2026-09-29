@@ -292,7 +292,7 @@ mod tests {
         const NAME: &'static str = "Moved";
         const PHASE: Phase = Phase::Login;
         const IDS: &'static [(ProtocolVersion, i32)] =
-            &[(versions::V26_1, 0x05), (versions::V1_20_5, 0x02)];
+            &[(versions::V26_3, 0x05), (versions::V1_20_5, 0x02)];
 
         fn decode(_r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self)
@@ -310,7 +310,7 @@ mod tests {
         const NAME: &'static str = "Backwards";
         const PHASE: Phase = Phase::Login;
         const IDS: &'static [(ProtocolVersion, i32)] =
-            &[(versions::V1_20_5, 0x40), (versions::V26_1, 0x41)];
+            &[(versions::V1_20_5, 0x40), (versions::V26_3, 0x41)];
 
         fn decode(_r: &mut Reader, _version: ProtocolVersion) -> WireResult<Self> {
             Ok(Self)
@@ -363,7 +363,7 @@ mod tests {
             1,
             "1.21 is 1.20.5's table"
         );
-        assert_eq!(router.table(versions::V26_1), 2);
+        assert_eq!(router.table(versions::V26_3), 2);
         assert_eq!(router.table(ProtocolVersion::new(999)), 2);
     }
 
@@ -388,10 +388,10 @@ mod tests {
 
         assert_eq!(table(versions::V1_20_5).lookup(Phase::Login, 0x02), Some(1));
         assert_eq!(table(versions::V1_20_5).lookup(Phase::Login, 0x05), None);
-        assert_eq!(table(versions::V26_1).lookup(Phase::Login, 0x05), Some(1));
-        assert_eq!(table(versions::V26_1).lookup(Phase::Login, 0x02), None);
+        assert_eq!(table(versions::V26_3).lookup(Phase::Login, 0x05), Some(1));
+        assert_eq!(table(versions::V26_3).lookup(Phase::Login, 0x02), None);
         // The anchored packet is in every table, which is what lets any client be answered.
-        for version in [ProtocolVersion::UNKNOWN, versions::V1_20_5, versions::V26_1] {
+        for version in [ProtocolVersion::UNKNOWN, versions::V1_20_5, versions::V26_3] {
             assert_eq!(table(version).lookup(Phase::Status, 0x00), Some(0));
         }
     }
@@ -409,7 +409,7 @@ mod tests {
                     packet: "Backwards",
                     previous,
                     version,
-                } if previous == versions::V1_20_5 && version == versions::V26_1
+                } if previous == versions::V1_20_5 && version == versions::V26_3
             ),
             "{err}",
         );

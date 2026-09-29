@@ -104,7 +104,7 @@ impl Dispatcher<()> for Recorder {
         // handlers a router happens to hold.
         conn.with(|c| {
             if seen == 1 {
-                c.set_version(versions::V26_1);
+                c.set_version(versions::V26_3);
                 c.set_phase(Phase::Status);
             }
             if seen >= close_after {
@@ -150,7 +150,7 @@ async fn a_connection_runs_on_a_dispatcher_that_is_not_a_router() {
             // Opened at the configured version, then what the dispatcher itself asked for. The
             // first version is the one it starts at, told before anything is dispatched.
             opened: vec![ProtocolVersion::UNKNOWN],
-            versions: vec![ProtocolVersion::UNKNOWN, versions::V26_1],
+            versions: vec![ProtocolVersion::UNKNOWN, versions::V26_3],
             // The payload leads with the ID, so a two byte body is three bytes here.
             frames: vec![(7, 3), (9, 1)],
             keep_alives: 0,
@@ -166,7 +166,7 @@ async fn a_dispatcher_is_opened_at_the_version_the_connection_starts_with() {
     let (mut peer, server) = connect(
         make_with(move || recorder.clone()),
         Options {
-            initial_version: versions::V26_1,
+            initial_version: versions::V26_3,
             initial_phase: Phase::Login,
             ..Options::default()
         },
@@ -178,7 +178,7 @@ async fn a_dispatcher_is_opened_at_the_version_the_connection_starts_with() {
 
     assert_eq!(
         log.lock().expect("not poisoned").opened,
-        vec![versions::V26_1]
+        vec![versions::V26_3]
     );
 }
 
@@ -249,7 +249,7 @@ async fn a_dispatcher_can_be_chosen_at_runtime() {
         vec![versions::V1_20_5],
         "through the box as well"
     );
-    assert_eq!(log.versions, vec![versions::V1_20_5, versions::V26_1]);
+    assert_eq!(log.versions, vec![versions::V1_20_5, versions::V26_3]);
 }
 
 #[tokio::test]

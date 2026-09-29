@@ -53,7 +53,7 @@ fn status_client() -> passage_core::router::Router<Notes> {
 #[tokio::test]
 async fn a_status_ping_is_served_end_to_end() {
     let meeting = Scenario::new(status_server(), status_client())
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .run()
         .await;
 
@@ -205,7 +205,7 @@ fn login_client() -> passage_core::router::Router<Notes> {
 async fn a_field_that_only_exists_above_a_threshold_follows_the_peers_version() {
     // A new client must be sent the session id...
     let meeting = Scenario::new(login_server(), login_client())
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .run()
         .await;
     meeting.expect_clean();
@@ -263,7 +263,7 @@ async fn a_handler_that_re_pins_the_version_answers_in_it() {
     let server = router()
         .handle::<Handshake>(on_handshake)
         .handle::<LoginStart>(|conn, packet| {
-            conn.set_version(versions::V26_1);
+            conn.set_version(versions::V26_3);
             conn.send(LoginSuccess {
                 user_name: packet.user_name,
                 session_id: Some(uuid::Uuid::from_u128(7)),
@@ -276,7 +276,7 @@ async fn a_handler_that_re_pins_the_version_answers_in_it() {
     // The client reads at 26.1 too, so it can see the field that only exists there. If the packet
     // had gone out under the version the handler *started* in, this would not decode.
     let meeting = Scenario::new(server, login_client())
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .run()
         .await;
 
@@ -309,7 +309,7 @@ async fn what_a_handler_queued_before_it_failed_is_still_written() {
         .build();
 
     let meeting = Scenario::new(server, client)
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .run()
         .await;
 
@@ -344,7 +344,7 @@ async fn a_handler_that_answers_an_error_itself_closes_rather_than_failing() {
         .build();
 
     let meeting = Scenario::new(server, client)
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .run()
         .await;
 
@@ -391,7 +391,7 @@ async fn a_handler_can_answer_the_deadline_before_it_runs_out() {
         .build();
 
     let meeting = Scenario::new(server, client)
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .server_config(|config| config.max_lifetime = Some(Duration::from_millis(50)))
         .run()
         .await;
@@ -414,7 +414,7 @@ async fn a_deadline_nobody_answers_just_ends_the_connection() {
     let client = router().on_open(opening(Intent::Login)).build();
 
     let meeting = Scenario::new(server, client)
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .server_config(|config| config.max_lifetime = Some(Duration::from_millis(50)))
         .run()
         .await;
@@ -462,7 +462,7 @@ async fn state_is_recorded_before_the_packet_that_announces_it() {
         .build();
 
     let meeting = Scenario::new(server, login_client())
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .run()
         .await;
 
@@ -486,7 +486,7 @@ async fn a_packet_nobody_routes_ends_the_connection_as_a_peer_error() {
         .build();
 
     let meeting = Scenario::new(server, client)
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .run()
         .await;
 
@@ -516,7 +516,7 @@ async fn a_minimal_driver_can_ignore_what_it_does_not_route() {
         .build();
 
     let meeting = Scenario::new(server, client)
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .run()
         .await;
 
@@ -549,7 +549,7 @@ async fn a_packet_sent_during_an_exclusive_task_is_a_protocol_error() {
         .build();
 
     let meeting = Scenario::new(server, client)
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .run()
         .await;
 
@@ -579,7 +579,7 @@ async fn a_hangup_during_an_exclusive_task_ends_the_connection_at_once() {
         .build();
 
     let meeting = Scenario::new(server, client)
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .timeout(Duration::from_secs(5))
         .run()
         .await;
@@ -618,7 +618,7 @@ async fn spawned_work_runs_while_keep_alives_are_exchanged() {
         .build();
 
     let meeting = Scenario::new(server, client)
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .server_config(|config| config.max_lifetime = Some(Duration::from_secs(120)))
         .run()
         .await;
@@ -648,7 +648,7 @@ async fn a_connection_nobody_configured_still_has_a_deadline() {
     let client = router().on_open(opening(Intent::Login)).build();
 
     let meeting = Scenario::new(server, client)
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .client_config(|config| config.max_lifetime = Some(Duration::from_secs(3600)))
         .run()
         .await;
@@ -679,7 +679,7 @@ async fn cancelling_the_shutdown_token_ends_both_sides() {
     });
 
     let meeting = Scenario::new(server, client)
-        .version(versions::V26_1)
+        .version(versions::V26_3)
         .shutdown(shutdown)
         .run()
         .await;

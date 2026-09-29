@@ -1,0 +1,71 @@
+name: Conformance
+
+# The official Minecraft client, booted against the shipped Passage binary once per protocol
+# breakpoint. It is the only test that can catch a packet field Passage gets wrong in a way it also
+# reads back wrong -- everything else in the suite shares an encoder with the thing it is judging.
+#
+# Not on push: a client boot costs the better part of a minute, a couple of gigabytes of RAM and, on
+# a cold cache, several gigabytes of download. Nightly, and on demand when a protocol change lands.
+on:
+  schedule:
+  - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  client:
+    name: Official client
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+
+    - name: Checkout repository
+      uses: actions/checkout@v6
+
+    - name: Install protoc
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+    # Xvfb supplies the display the client refuses to start without. The Mesa packages supply
+    # software rendering: llvmpipe for the OpenGL versions, and lavapipe for 26.3, which moved to
+    # SDL3 and hangs for four minutes rather than failing when no Vulkan driver is installed.
+    - name: Install a virtual display and software rendering
+      run: |
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends -y \
+          xvfb libgl1-mesa-dri libegl1 libegl-mesa0 mesa-vulkan-drivers
+
+    - name: Install a JDK
+      uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: '25'
+
+    - name: Install toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: stable
+
+    - name: Rust cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: common
+        cache-all-crates: 'true'
+
+    # Client jars, libraries and assets, which are immutable per version and content-addressed
+    # across versions. The key names the breakpoint list, so adding a version fetches only the new
+    # one rather than everything.
+    - name: Minecraft cache
+      uses: actions/cache@v4
+      with:
+        path: .minecraft-cache
+        key: mc-client-${{ hashFiles('tests/client_conformance.rs') }}
+        restore-keys: mc-client-
+
+    - name: Run the client conformance test
+      env:
+        PASSAGE_CLIENT_CACHE: ${{ github.workspace }}/.minecraft-cache
+      run: >
+        xvfb-run -a
+        cargo test -p passage --test client_conformance
+        -- --ignored --nocapture --test-threads=1

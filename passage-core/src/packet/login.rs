@@ -45,7 +45,10 @@ impl Packet for ServerDisconnectPacket {
     // tell the two apart by.
     const NAME: &'static str = "server::login_disconnect";
     const PHASE: Phase = Phase::Login;
-    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x00)];
+    // Anchored at the floor: the one packet that has to be sendable to a client whose version
+    // resolves nothing else, because the message it carries is why that client is being turned
+    // away. Its ID and its JSON reason have been the same since the phase existed.
+    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
     fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
@@ -111,7 +114,9 @@ pub struct ServerLoginSuccessPacket {
     /// Whether the client disconnects on any packet error, between 1.20.5 and 1.21.2. The vanilla
     /// server sends `true`, which is what an absent value is written as.
     pub strict_error_handling: Option<bool>,
-    /// The session of the player, from 26.1 on.
+    /// The session of the player, from 26.2 on. It identifies the sitting of the server rather
+    /// than the player: the vanilla server generates one and hands the same value to everybody
+    /// until it empties out.
     pub session_id: Option<Uuid>,
 }
 
@@ -142,7 +147,7 @@ impl Packet for ServerLoginSuccessPacket {
             strict_error_handling: r.gated(!version.at_least(versions::V1_21_2), |r| {
                 r.bool("strict_error_handling")
             })?,
-            session_id: r.gated(version.at_least(versions::V26_1), |r| r.uuid("session_id"))?,
+            session_id: r.gated(version.at_least(versions::V26_2), |r| r.uuid("session_id"))?,
         })
     }
 
@@ -155,9 +160,9 @@ impl Packet for ServerLoginSuccessPacket {
         if !version.at_least(versions::V1_21_2) {
             w.bool(self.strict_error_handling.unwrap_or(true));
         }
-        if version.at_least(versions::V26_1) {
-            // A player Passage transfers has no session of ours to carry, and the nil UUID is what
-            // a server without one sends.
+        if version.at_least(versions::V26_2) {
+            // A player Passage transfers spends no time on a server of ours, so there is no sitting
+            // to name -- and the client only forwards the value in its telemetry.
             w.uuid(&self.session_id.unwrap_or(Uuid::nil()));
         }
         Ok(())
@@ -265,7 +270,10 @@ pub struct ClientLoginStartPacket {
 impl Packet for ClientLoginStartPacket {
     const NAME: &'static str = "client::login_start";
     const PHASE: Phase = Phase::Login;
-    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(versions::V1_20_5, 0x00)];
+    // Anchored at the floor, so that a client Passage cannot transfer still reaches a handler and
+    // can be told so. The two fields have been these two since 1.20.2; older clients send a shape
+    // this does not decode, and are refused for that instead of for having no ID.
+    const IDS: &'static [(ProtocolVersion, VarInt)] = &[(ProtocolVersion::UNKNOWN, 0x00)];
 
     fn decode(r: &mut Reader, _: ProtocolVersion) -> Result<Self, WireError> {
         Ok(Self {
@@ -499,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn login_success_loses_a_field_at_1_21_2_and_gains_one_at_26_1() {
+    fn login_success_loses_a_field_at_1_21_2_and_gains_one_at_26_2() {
         // Two thresholds in one packet, in opposite directions: a client that is sent the wrong
         // set of them reads the profile of whoever logs in next.
         let packet = ServerLoginSuccessPacket {
@@ -525,12 +533,12 @@ mod tests {
             "1.21.2 dropped strict error handling",
         );
         assert_eq!(
-            round_trip(&packet, versions::V26_1),
+            round_trip(&packet, versions::V26_2),
             ServerLoginSuccessPacket {
                 strict_error_handling: None,
                 ..packet.clone()
             },
-            "26.1 added the session",
+            "26.2 added the session",
         );
 
         // And what an absent value is written as, for each of the two.
@@ -541,9 +549,38 @@ mod tests {
             "the vanilla server sends `true`",
         );
         assert_eq!(
-            round_trip(&packet, versions::V26_1).session_id,
+            round_trip(&packet, versions::V26_2).session_id,
             Some(Uuid::nil()),
         );
+    }
+
+    #[test]
+    fn login_success_is_the_length_the_vanilla_server_sends() {
+        // Byte-for-byte against what the official server actually put on the socket for the same
+        // profile: 26.1 ends after the (empty) property array, 26.2 carries sixteen bytes more.
+        // The lengths were taken by logging into a vanilla 26.1 and 26.2 server and counting the
+        // payload, which is the only way to settle a field that is absent in one version and
+        // present in the next -- the encoder and the decoder here would agree either way.
+        let packet = ServerLoginSuccessPacket {
+            uuid: Uuid::from_u128(1),
+            name: "Probe".into(),
+            properties: vec![],
+            strict_error_handling: None,
+            session_id: None,
+        };
+        let encode = |version| {
+            let mut buf = BytesMut::new();
+            packet
+                .encode(&mut Writer::new(&mut buf), version)
+                .expect("encodes");
+            buf.len()
+        };
+        // 16 (uuid) + 1 (name length) + 5 (name) + 1 (property count).
+        assert_eq!(encode(ProtocolVersion::new(775)), 23, "26.1");
+        assert_eq!(encode(versions::V26_2), 23 + 16, "26.2 adds the session");
+        assert_eq!(encode(versions::V26_3), 23 + 16, "26.3 keeps it");
+        // 1.20.5 has no session, but it does have the strict error handling flag.
+        assert_eq!(encode(versions::V1_20_5), 24, "1.20.5");
     }
 
     #[test]
@@ -602,17 +639,26 @@ mod tests {
 
     #[test]
     fn the_phase_does_not_exist_below_the_version_passage_speaks() {
-        // Below 1.20.5 there is no cookie to ask for and no transfer to follow, so the whole phase
-        // resolves to nothing rather than to IDs a client would read as other packets.
-        assert_eq!(
-            ServerCookieRequestPacket::id(ProtocolVersion::new(765)),
-            None
-        );
+        // 1.20.4. Below 1.20.5 there is no cookie to ask for and no transfer to follow, so the
+        // phase resolves to nothing rather than to IDs a client would read as other packets.
+        const V1_20_4: ProtocolVersion = ProtocolVersion::new(765);
+        assert_eq!(ServerCookieRequestPacket::id(V1_20_4), None);
         assert_eq!(ServerCookieRequestPacket::id(versions::V1_20_5), Some(0x05));
-        assert_eq!(ClientLoginStartPacket::id(ProtocolVersion::new(765)), None);
-        assert_eq!(ClientLoginStartPacket::id(versions::V1_20_5), Some(0x00));
-        // And the IDs are stable from there on, in both directions.
-        assert_eq!(ServerLoginSuccessPacket::id(versions::V26_1), Some(0x02));
-        assert_eq!(ClientCookieResponsePacket::id(versions::V26_1), Some(0x04));
+        assert_eq!(ServerLoginSuccessPacket::id(V1_20_4), None);
+
+        // The two exceptions, which is what lets such a client be turned away with a reason rather
+        // than dropped: it says who it is, and it is told which version to install.
+        assert_eq!(ClientLoginStartPacket::id(V1_20_4), Some(0x00));
+        assert_eq!(ServerDisconnectPacket::id(V1_20_4), Some(0x00));
+        // Including a version nothing can place, which is what a snapshot resolves as.
+        let snapshot = ProtocolVersion::new(0x4000_0000 | 132);
+        assert_eq!(ClientLoginStartPacket::id(snapshot), Some(0x00));
+        assert_eq!(ServerDisconnectPacket::id(snapshot), Some(0x00));
+        assert_eq!(ServerLoginSuccessPacket::id(snapshot), None);
+
+        // And the IDs are stable from there on, in both directions. The login phase is the one
+        // Passage speaks whose IDs have not moved once since 1.20.5.
+        assert_eq!(ServerLoginSuccessPacket::id(versions::V26_3), Some(0x02));
+        assert_eq!(ClientCookieResponsePacket::id(versions::V26_3), Some(0x04));
     }
 }

@@ -805,7 +805,7 @@
         "preferred_version": {
           "description": "The preferred protocol version of the server.",
           "$ref": "#/$defs/ProtocolVersion",
-          "default": 769
+          "default": 777
         }
       }
     },

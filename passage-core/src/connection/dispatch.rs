@@ -324,7 +324,7 @@ mod tests {
 
     /// Runs every hook on `dispatcher`, so a test only has to say what it expects to be recorded.
     async fn run_every_hook(mut dispatcher: impl Dispatcher<()>) {
-        let cell = ConnCell::new((), versions::V26_1, Phase::Login, Options::default());
+        let cell = ConnCell::new((), versions::V26_3, Phase::Login, Options::default());
         let conn = cell.as_ref();
 
         dispatcher.on_open(conn).await.expect("opens");

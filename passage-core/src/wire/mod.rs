@@ -26,7 +26,7 @@ pub use self::{
     reader::Reader, reader::read_var_int, writer::Writer,
 };
 
-// The two types every packet field is made of, so that writing one does not mean depending on the
+// The types every packet field is made of, so that writing one does not mean depending on the
 // exact versions of `bytes` and `bytestring` this crate resolved.
-pub use bytes::Bytes;
+pub use bytes::{Bytes, BytesMut};
 pub use bytestring::ByteString;

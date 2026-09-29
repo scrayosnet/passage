@@ -366,7 +366,7 @@ Static server status from configuration.
 | `description` | string (optional) | `"\"Minecraft Server Transfer Router\""` | MOTD as JSON text component. |
 | `favicon` | string (optional) | Passage logo | Base64-encoded PNG (`data:image/png;base64,...`). |
 | `enforces_secure_chat` | boolean (optional) | `true` | Whether secure chat is enforced. |
-| `preferred_version` | integer | `769` (1.21.4) | Protocol version shown to clients. |
+| `preferred_version` | integer | `777` (26.3) | Protocol version shown to clients. |
 | `min_version` | integer | `0` | Lowest protocol version reported as compatible in the server list. |
 | `max_version` | integer | `1000` | Highest protocol version reported as compatible in the server list. |
 
@@ -376,7 +376,7 @@ status:
   name: "My Network"
   description: "{\"text\":\"Welcome!\",\"color\":\"gold\"}"
   enforces_secure_chat: true
-  preferred_version: 769
+  preferred_version: 777
   min_version: 766
   max_version: 1000
 ```
