@@ -605,24 +605,30 @@ pub(crate) async fn on_login_encryption_response(
         span.record("player.uuid", field::display(&c.state.player.id));
     });
 
-    // Get the session information of the client. A client without one is given a new session once
-    // it is transferred.
-    let session = conn.cookie::<SessionCookie>().await?;
-    if let Some(session) = &session {
-        span.record("session.id", field::display(&session.id));
-        // A session cookie carries the trace of the connection that issued it, which is what ties
-        // a transfer back to the login it came from. It is a link and not a parent: this
-        // connection's trace was already rooted before the cookie could be asked for. The link sits
-        // on the connection rather than on this handler, because that is the span the other end
-        // issued -- the two connections meet at the same height in both traces.
-        global::get_text_map_propagator(|propagator| {
-            let context = propagator.extract(&session.extra);
-            let linked = context.span().span_context().clone();
-            if linked.is_valid() {
-                conn.span().add_link(linked);
-            }
-        });
-    }
+    // Get the session information of the client. A client without one is given a new session. The
+    // session information is also attached to the span.
+    let session = conn.cookie::<SessionCookie>().await?.unwrap_or_else(|| {
+        conn.with(|c| {
+            SessionCookie::new(
+                c.state.client.server_address.to_string(),
+                c.state.client.server_port,
+            )
+        })
+    });
+
+    // A session cookie carries the trace of the connection that issued it, which is what ties
+    // a transfer back to the login it came from. It is a link and not a parent: this
+    // connection's trace was already rooted before the cookie could be asked for. The link sits
+    // on the connection rather than on this handler, because that is the span the other end
+    // issued -- the two connections meet at the same height in both traces.
+    span.record("session.id", field::display(&session.id));
+    global::get_text_map_propagator(|propagator| {
+        let context = propagator.extract(&session.extra);
+        let linked = context.span().span_context().clone();
+        if linked.is_valid() {
+            conn.span().add_link(linked);
+        }
+    });
 
     // Complete the login phase and prepare the target selection.
     conn.with(|c| {
@@ -631,9 +637,9 @@ pub(crate) async fn on_login_encryption_response(
             name: c.state.player.name.as_str().into(),
             properties: c.state.player.profile_properties.clone(),
             strict_error_handling: Some(true),
-            session_id: session.as_ref().map(|cookie| cookie.id),
+            session_id: Some(session.id),
         })?;
-        c.state.session = session;
+        c.state.session = Some(session);
         c.state.step = Step::LoginAck;
         Ok::<_, DispatchError>(())
     })
@@ -722,25 +728,19 @@ pub(crate) async fn on_login_login_acknowledged(
         })
     })?;
 
-    // Give the client a session if it had none, so the next connection it makes is recognisable as
+    // Give the client a session if it had one, so the next connection it makes is recognizable as
     // the same one. It carries the trace of the connection -- not of this handler -- which is what
     // links the two together: what the backend does after the transfer belongs beside the handlers
     // in the connection, not underneath the one packet that happened to hand it over.
     conn.with(|c| {
-        if c.state.session.is_some() {
+        let context = c.span().context();
+        let Some(cookie) = &mut c.state.session else {
             return Ok(());
-        }
-        let mut extra = HashMap::new();
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(&c.span().context(), &mut extra);
-        });
-        let cookie = SessionCookie {
-            id: Uuid::new_v4(),
-            server_address: c.state.client.server_address.to_string(),
-            server_port: c.state.client.server_port,
-            extra,
         };
-        debug!(session = %cookie.id, "issuing a session to a client that had none");
+        global::get_text_map_propagator(|propagator| {
+            propagator.inject_context(&context, &mut cookie.extra);
+        });
+        debug!(session = %cookie.id, "issuing a session to a client");
         let encoded = match cookie.encode(None) {
             Ok(encoded) => encoded,
             Err(err) => {
