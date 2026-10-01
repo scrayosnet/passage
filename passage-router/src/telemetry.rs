@@ -37,8 +37,8 @@ const SERVICE_NAME: &str = "passage";
 /// The namespace every Passage deployment is reported under.
 const SERVICE_NAMESPACE_VALUE: &str = "scrayosnet";
 
-/// The instance id of this service. It is generated once for each deployment.
-const INSTANCE_ID: LazyLock<Uuid> = LazyLock::new(|| Uuid::new_v4());
+/// The instance id of this process, which is what tells two replicas of the same deployment apart.
+static INSTANCE_ID: LazyLock<Uuid> = LazyLock::new(Uuid::new_v4);
 
 /// Holds everything that has to outlive the server, and flushes it when it does not.
 ///

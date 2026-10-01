@@ -346,6 +346,14 @@ async fn a_login_runs_to_the_transfer_packet(version: ProtocolVersion) {
 
     let success = client.expect::<login::ServerLoginSuccessPacket>().await;
     assert_eq!(success.name, "Hydrofin");
+    if version.at_least(versions::V26_2) {
+        // The session is minted before the login success rather than at the transfer, so even a
+        // client that arrived without one is told which session it is in.
+        assert!(
+            success.session_id.is_some_and(|id| !id.is_nil()),
+            "a client without a session is given one before it is named a session",
+        );
+    }
     client.send(login::ClientLoginAcknowledgedPacket).await;
 
     // The configuration phase: the client says who it is, and the server answers with a target.
@@ -376,6 +384,106 @@ async fn a_login_runs_to_the_transfer_packet(version: ProtocolVersion) {
     let transfer = client.expect::<configuration::ServerTransferPacket>().await;
     assert_eq!(transfer.host, "10.0.0.1");
     assert_eq!(transfer.port, 25_566);
+
+    client.expect_eof().await;
+    assert_eq!(served.await.expect("no panic"), None, "a clean ending");
+}
+
+#[tokio::test]
+async fn a_client_that_brings_a_session_keeps_it_and_is_handed_it_back() {
+    // The session is the thread between two hops, so the one the client arrives with is the one it
+    // leaves with: a second ID minted here would make the same player look like two, and the
+    // address in it has to stay the one the player first connected to rather than being rewritten
+    // to whatever hostname this hop was reached under.
+    //
+    // It is handed back on every hop and not only to a client that had none, because the trace
+    // inside it is refreshed to this connection's -- that is what makes the next hop link to the
+    // one it came from instead of to the first in the chain.
+    let (mut client, served) = serve();
+
+    client
+        .send(handshake::ClientIntentionPacket {
+            protocol_version: versions::V26_3,
+            server_address: HOST.into(),
+            server_port: 25_565,
+            next_state: Intent::Login,
+        })
+        .await;
+    client
+        .send(login::ClientLoginStartPacket {
+            name: "Hydrofin".into(),
+            uuid: Uuid::from_u128(7),
+        })
+        .await;
+
+    let encryption = client
+        .expect::<login::ServerEncryptionRequestPacket>()
+        .await;
+    let public = crypto::KEY_PAIR.1.clone();
+    let secret = b"0123456789abcdef";
+    client
+        .send(login::ClientEncryptionResponsePacket {
+            shared_secret: crypto::encrypt(&public, secret).expect("encrypts").into(),
+            verify_token: crypto::encrypt(&public, &encryption.verify_token)
+                .expect("encrypts")
+                .into(),
+        })
+        .await;
+    client.encrypt(secret);
+
+    // The session this client was given on an earlier hop, under a hostname that is not this one.
+    let presented = SessionCookie {
+        id: Uuid::from_u128(11),
+        server_address: "first.justchunks.net".to_owned(),
+        server_port: 25_564,
+        extra: Default::default(),
+    };
+    let request = client.expect::<login::ServerCookieRequestPacket>().await;
+    assert_eq!(request.key, SessionCookie::KEY);
+    client
+        .send(login::ClientCookieResponsePacket {
+            key: request.key,
+            payload: Some(presented.encode(None).expect("encodes")),
+        })
+        .await;
+
+    let success = client.expect::<login::ServerLoginSuccessPacket>().await;
+    assert_eq!(
+        success.session_id,
+        Some(presented.id),
+        "the session the client brought, not a fresh one",
+    );
+    client.send(login::ClientLoginAcknowledgedPacket).await;
+    client
+        .send(configuration::ClientClientInformationPacket {
+            locale: "en_GB".into(),
+            view_distance: 12,
+            chat_mode: ChatMode::Enabled,
+            chat_colors: true,
+            displayed_skin_parts: DisplayedSkinParts(0x7f),
+            main_hand: MainHand::Right,
+            enable_text_filtering: false,
+            allow_server_listings: true,
+            particle_status: None,
+        })
+        .await;
+
+    let store = client
+        .expect::<configuration::ServerStoreCookiePacket>()
+        .await;
+    assert_eq!(store.key, SessionCookie::KEY);
+    let returned = SessionCookie::decode(None, &store.payload)
+        .expect("decodes")
+        .expect("a session");
+    assert_eq!(returned.id, presented.id, "the same session, not a new one");
+    assert_eq!(
+        returned.server_address, presented.server_address,
+        "where the player first came in, not where this hop was reached",
+    );
+    assert_eq!(returned.server_port, presented.server_port);
+
+    let transfer = client.expect::<configuration::ServerTransferPacket>().await;
+    assert_eq!(transfer.host, "10.0.0.1");
 
     client.expect_eof().await;
     assert_eq!(served.await.expect("no panic"), None, "a clean ending");

@@ -1,6 +1,6 @@
 use crate::cookie::{AuthCookie, Cookie, SessionCookie};
 use crate::router::state::{State, Step};
-use crate::router::utils::ConnRefExt;
+use crate::router::utils::{ConnRefExt, user_hash};
 use crate::{crypto, metrics};
 use anyhow::{Context, anyhow};
 use opentelemetry::global;
@@ -11,14 +11,12 @@ use passage_core::connection::{ConnRef, DispatchError};
 use passage_core::packet::{configuration, handshake, login, status};
 use passage_core::wire::{ByteString, Bytes};
 use passage_core::{Phase, versions};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
 use tokio::time::Instant;
 use tracing::{Span, debug, field, info, instrument, trace, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use uuid::Uuid;
 
 /// Expects the provided step, unwrapping it using the expression. The step is replaced with `working`
 /// and should be replaced with a different step before the client sends the next packet. Returns
@@ -517,9 +515,6 @@ pub(crate) async fn on_login_login_start(
         conn.phase = ?conn.phase(),
         packet.shared_secret.length = packet.shared_secret.len(),
         packet.verify_token.length = packet.verify_token.len(),
-        player.name = field::Empty,
-        player.uuid = field::Empty,
-        session.id = field::Empty,
     )
 )]
 pub(crate) async fn on_login_encryption_response(
@@ -599,14 +594,20 @@ pub(crate) async fn on_login_encryption_response(
         });
     }
 
-    let span = Span::current();
+    // Who the connection belongs to is settled from here on, so it goes on the connection span and
+    // not on this handler: that is the span an operator follows, and this one is nested under it.
+    // `user.hash` is written alongside the UUID rather than instead of it, because it is what a
+    // dashboard that may not show the UUID correlates on.
     conn.with(|c| {
-        span.record("player.name", field::display(&c.state.player.name));
-        span.record("player.uuid", field::display(&c.state.player.id));
+        let span = c.span();
+        span.record("user.id", field::display(&c.state.player.id));
+        span.record("user.name", field::display(&c.state.player.name));
+        span.record("user.hash", user_hash(&c.state.player.id));
     });
 
-    // Get the session information of the client. A client without one is given a new session. The
-    // session information is also attached to the span.
+    // Get the session information of the client. A client without one is given a new session here
+    // rather than at the transfer, so that everything below -- the span, the login success and the
+    // cookie handed back at the end -- names the same session either way.
     let session = conn.cookie::<SessionCookie>().await?.unwrap_or_else(|| {
         conn.with(|c| {
             SessionCookie::new(
@@ -621,7 +622,9 @@ pub(crate) async fn on_login_encryption_response(
     // connection's trace was already rooted before the cookie could be asked for. The link sits
     // on the connection rather than on this handler, because that is the span the other end
     // issued -- the two connections meet at the same height in both traces.
-    span.record("session.id", field::display(&session.id));
+    conn.with(|c| {
+        c.span().record("session.id", field::display(&session.id));
+    });
     global::get_text_map_propagator(|propagator| {
         let context = propagator.extract(&session.extra);
         let linked = context.span().span_context().clone();
@@ -728,10 +731,12 @@ pub(crate) async fn on_login_login_acknowledged(
         })
     })?;
 
-    // Give the client a session if it had one, so the next connection it makes is recognizable as
-    // the same one. It carries the trace of the connection -- not of this handler -- which is what
-    // links the two together: what the backend does after the transfer belongs beside the handlers
-    // in the connection, not underneath the one packet that happened to hand it over.
+    // Hand the session back on every hop, not only to a client that arrived without one: the ID
+    // stays the same, but the trace it carries is refreshed to this connection's, so the next hop
+    // links to the one it actually came from rather than to the first in the chain. It carries the
+    // trace of the connection -- not of this handler -- which is what links the two together: what
+    // the backend does after the transfer belongs beside the handlers in the connection, not
+    // underneath the one packet that happened to hand it over.
     conn.with(|c| {
         let context = c.span().context();
         let Some(cookie) = &mut c.state.session else {
@@ -740,7 +745,7 @@ pub(crate) async fn on_login_login_acknowledged(
         global::get_text_map_propagator(|propagator| {
             propagator.inject_context(&context, &mut cookie.extra);
         });
-        debug!(session = %cookie.id, "issuing a session to a client");
+        debug!(session = %cookie.id, "handing the session back to the client");
         let encoded = match cookie.encode(None) {
             Ok(encoded) => encoded,
             Err(err) => {

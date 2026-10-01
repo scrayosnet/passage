@@ -12,9 +12,12 @@ use passage_core::Phase;
 use passage_core::connection::{ConnRef, DispatchError};
 use passage_core::packet::{configuration, login};
 use passage_core::wire::ByteString;
+use sha2::{Digest, Sha256};
+use std::fmt::Write;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tracing::{Span, debug, field, instrument, trace, warn};
+use uuid::Uuid;
 
 /// [`ConnRefExt`] provides a set of convenience methods for interacting with a connection of [`State`].
 pub(crate) trait ConnRefExt {
@@ -245,5 +248,51 @@ impl ConnRefExt for ConnRef<'_, State> {
             "the client answered with a cookie",
         );
         Ok(cookie)
+    }
+}
+
+/// The anonymized form of a player's identity, for the `user.hash` attribute: the SHA-256 of the
+/// UUID in the hyphenated, lowercase form the client itself uses, hex-encoded in lowercase.
+///
+/// It is what lets a player be followed across traces by someone who may not see the UUID, which is
+/// only worth anything if everyone producing it agrees on the exact bytes being hashed -- the string
+/// form and not the 16 raw bytes, hyphenated and not compact, lowercase on both sides of the hash.
+pub(crate) fn user_hash(id: &Uuid) -> String {
+    let mut buffer = Uuid::encode_buffer();
+    let id = id.hyphenated().encode_lower(&mut buffer);
+
+    let mut hash = String::with_capacity(Sha256::output_size() * 2);
+    for byte in Sha256::digest(id.as_bytes()) {
+        write!(hash, "{byte:02x}").expect("writing into a String cannot fail");
+    }
+    hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_user_hash_is_the_lowercase_hex_sha256_of_the_hyphenated_uuid() {
+        // Pinned against a value computed outside this crate. The attribute is only useful if it
+        // matches what every other producer writes for the same player, so the shape of the input
+        // -- hyphenated, lowercase, as a string -- is part of the contract and not an detail.
+        let id = Uuid::parse_str("069a79f4-44e9-4726-a5be-fca90e38aaf5").expect("a uuid");
+        assert_eq!(
+            user_hash(&id),
+            "992225b786aba63f4ab4e664e44a8a6141042cca540cd7fe2423823d5077b2b8",
+        );
+    }
+
+    #[test]
+    fn a_user_hash_does_not_depend_on_how_the_uuid_was_written() {
+        // The same player, parsed from the compact and the uppercase form: a hash that followed the
+        // spelling rather than the value would split one player into three.
+        let hyphenated = Uuid::parse_str("069a79f4-44e9-4726-a5be-fca90e38aaf5").expect("a uuid");
+        let compact = Uuid::parse_str("069a79f444e94726a5befca90e38aaf5").expect("a uuid");
+        let upper = Uuid::parse_str("069A79F4-44E9-4726-A5BE-FCA90E38AAF5").expect("a uuid");
+
+        assert_eq!(user_hash(&hyphenated), user_hash(&compact));
+        assert_eq!(user_hash(&hyphenated), user_hash(&upper));
     }
 }

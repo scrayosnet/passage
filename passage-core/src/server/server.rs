@@ -253,6 +253,12 @@ where
             let started = Instant::now();
             let dispatcher = self.dispatcher.make();
             let shutdown = self.shutdown.child_token();
+            // The fields a dispatcher fills in later have to be declared here: `record` on a field
+            // the span was not opened with is a no-op, so an identity that arrives mid-connection
+            // is only exported if its place was kept. The `user.*` and `session.*` names are the
+            // OpenTelemetry semantic conventions, and they sit on the connection rather than on the
+            // handler that learns them: this is the span an operator follows, and every handler is
+            // nested underneath it anyway.
             let span = info_span!(
                 "connection",
                 otel.kind = "server",
@@ -261,6 +267,10 @@ where
                 network.protocol.version = field::Empty,
                 error.type = field::Empty,
                 peer = field::Empty,
+                user.id = field::Empty,
+                user.name = field::Empty,
+                user.hash = field::Empty,
+                session.id = field::Empty,
             );
             tasks.spawn(
                 connection::<L, S, F, M::Dispatcher, A>(
