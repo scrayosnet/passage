@@ -20,20 +20,25 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE;
 use opentelemetry_semantic_conventions::{
     SCHEMA_URL,
-    attribute::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_VERSION},
+    attribute::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_INSTANCE_ID, SERVICE_VERSION},
 };
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use tracing::level_filters::LevelFilter;
 use tracing::{info, warn};
 use tracing_opentelemetry::{MetricsLayer, OpenTelemetryLayer};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
+use uuid::Uuid;
 
 /// The instrumentation scope reported for everything this process exports.
 const SERVICE_NAME: &str = "passage";
 
 /// The namespace every Passage deployment is reported under.
 const SERVICE_NAMESPACE_VALUE: &str = "scrayosnet";
+
+/// The instance id of this service. It is generated once for each deployment.
+const INSTANCE_ID: LazyLock<Uuid> = LazyLock::new(|| Uuid::new_v4());
 
 /// Holds everything that has to outlive the server, and flushes it when it does not.
 ///
@@ -85,6 +90,7 @@ fn resource(environment: &str) -> Resource {
             [
                 KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
                 KeyValue::new(SERVICE_NAMESPACE, SERVICE_NAMESPACE_VALUE),
+                KeyValue::new(SERVICE_INSTANCE_ID, INSTANCE_ID.to_string()),
                 KeyValue::new(DEPLOYMENT_ENVIRONMENT_NAME, environment.to_owned()),
             ],
             SCHEMA_URL,
