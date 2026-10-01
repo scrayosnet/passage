@@ -105,8 +105,9 @@ pub struct State {
     /// The current step of the connection. This binds the client to the server protocol.
     pub(crate) step: Step,
 
-    /// The session the client presented, if it had one. A client without one is given a new session
-    /// when it is transferred.
+    /// The session of the client: the one it presented, or the one it was given for not having had
+    /// any. Set once the connection is private enough to ask for the cookie, and `None` only before
+    /// that -- every player that gets as far as the login success is in a session.
     pub(crate) session: Option<SessionCookie>,
 
     /// The secret used to sign the session cookie.

@@ -29,6 +29,18 @@ pub struct SessionCookie {
     pub extra: HashMap<String, String>,
 }
 
+impl SessionCookie {
+    /// Generates a new session with a random id.
+    pub fn new(server_address: impl Into<String>, server_port: u16) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            server_address: server_address.into(),
+            server_port,
+            extra: Default::default(),
+        }
+    }
+}
+
 impl Cookie for SessionCookie {
     const KEY: &'static str = SESSION_COOKIE_KEY;
 

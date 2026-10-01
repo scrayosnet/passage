@@ -161,8 +161,8 @@ impl Packet for ServerLoginSuccessPacket {
             w.bool(self.strict_error_handling.unwrap_or(true));
         }
         if version.at_least(versions::V26_2) {
-            // A player Passage transfers spends no time on a server of ours, so there is no sitting
-            // to name -- and the client only forwards the value in its telemetry.
+            // The nil UUID is what a server with no session to name writes: the client only
+            // forwards the value in its telemetry, so an absent one costs nothing.
             w.uuid(&self.session_id.unwrap_or(Uuid::nil()));
         }
         Ok(())
