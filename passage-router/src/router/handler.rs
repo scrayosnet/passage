@@ -3,8 +3,6 @@ use crate::router::state::{State, Step};
 use crate::router::utils::{ConnRefExt, user_hash};
 use crate::{crypto, metrics};
 use anyhow::{Context, anyhow};
-use opentelemetry::global;
-use opentelemetry::trace::TraceContextExt;
 use passage_adapters::authentication::AuthenticationAdapter;
 use passage_core::codec::{Aes128Cfb8, SECRET_LEN};
 use passage_core::connection::{ConnRef, DispatchError};
@@ -622,16 +620,16 @@ pub(crate) async fn on_login_encryption_response(
     // connection's trace was already rooted before the cookie could be asked for. The link sits
     // on the connection rather than on this handler, because that is the span the other end
     // issued -- the two connections meet at the same height in both traces.
+    //
+    // Only a session that really arrived with a trace is linked. A fresh one carries none, and
+    // asking for one it does not have must not answer with the span standing here -- see
+    // `SessionCookie::linked_context`.
     conn.with(|c| {
         c.span().record("session.id", field::display(&session.id));
     });
-    global::get_text_map_propagator(|propagator| {
-        let context = propagator.extract(&session.extra);
-        let linked = context.span().span_context().clone();
-        if linked.is_valid() {
-            conn.span().add_link(linked);
-        }
-    });
+    if let Some(linked) = session.linked_context() {
+        conn.span().add_link(linked);
+    }
 
     // Complete the login phase and prepare the target selection.
     conn.with(|c| {
@@ -742,9 +740,7 @@ pub(crate) async fn on_login_login_acknowledged(
         let Some(cookie) = &mut c.state.session else {
             return Ok(());
         };
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(&context, &mut cookie.extra);
-        });
+        cookie.set_trace(&context);
         debug!(session = %cookie.id, "handing the session back to the client");
         let encoded = match cookie.encode(None) {
             Ok(encoded) => encoded,
