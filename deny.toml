@@ -7,8 +7,14 @@ no-default-features = false
 feature-depth = 1
 
 [advisories]
-# rsa module is vulnerable, but no new version available
-ignore = ["RUSTSEC-2023-0071"]
+ignore = [
+    # rsa module is vulnerable, but no new version available
+    "RUSTSEC-2023-0071",
+    # unsafe-libyaml is unmaintained, but kube-client still depends on it through serde_yaml
+    "RUSTSEC-2024-0449",
+    # astral-tokio-tar is unmaintained, but testcontainers (tests only) still depends on it
+    "RUSTSEC-2026-0440",
+]
 
 [licenses]
 allow = [
