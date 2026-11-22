@@ -7,14 +7,14 @@ use rand::TryRng;
 use rand::rand_core::UnwrapErr;
 use rand::rngs::SysRng;
 use rsa::pkcs8::EncodePublicKey;
-use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
+use rsa::{Pkcs1v15Encrypt, PrivateKey, PublicKey};
 use std::convert::Into;
 use std::sync::LazyLock;
 use tokio::time::Instant;
 use tokio_util::bytes::BytesMut;
 
 /// The RSA keypair of the application.
-pub static KEY_PAIR: LazyLock<(RsaPrivateKey, RsaPublicKey)> =
+pub static KEY_PAIR: LazyLock<(PrivateKey, PublicKey)> =
     LazyLock::new(|| generate_keypair().expect("failed to generate keypair"));
 
 /// The encoded public key.
@@ -35,25 +35,25 @@ pub fn generate_keep_alive() -> i64 {
 }
 
 /// Generates a new RSA keypair.
-fn generate_keypair() -> Result<(RsaPrivateKey, RsaPublicKey), Error> {
+fn generate_keypair() -> Result<(PrivateKey, PublicKey), Error> {
     // retrieve a new mutable instance of an OS RNG
     let mut rng = UnwrapErr(SysRng);
 
     // generate the corresponding key pair
-    let private_key = RsaPrivateKey::new(&mut rng, 1024)?;
-    let public_key = RsaPublicKey::from(&private_key);
+    let private_key = PrivateKey::new(&mut rng, 1024)?;
+    let public_key = PublicKey::from(&private_key);
 
     // return the newly generated key pair
     Ok((private_key, public_key))
 }
 
 /// Encodes an RSA public key for the Minecraft protocol.
-fn encode_public_key(key: &RsaPublicKey) -> Result<Vec<u8>, Error> {
+fn encode_public_key(key: &PublicKey) -> Result<Vec<u8>, Error> {
     Ok(key.to_public_key_der()?.into_vec())
 }
 
 /// Encrypts some value with an RSA public key for the Minecraft protocol.
-pub fn encrypt(key: &RsaPublicKey, value: &[u8]) -> Result<Vec<u8>, Error> {
+pub fn encrypt(key: &PublicKey, value: &[u8]) -> Result<Vec<u8>, Error> {
     // retrieve a new mutable instance of an OS RNG
     let mut rng = UnwrapErr(SysRng);
 
@@ -61,7 +61,7 @@ pub fn encrypt(key: &RsaPublicKey, value: &[u8]) -> Result<Vec<u8>, Error> {
 }
 
 /// Decrypts some value with an RSA public key for the Minecraft protocol.
-pub fn decrypt(key: &RsaPrivateKey, value: &[u8]) -> Result<Vec<u8>, Error> {
+pub fn decrypt(key: &PrivateKey, value: &[u8]) -> Result<Vec<u8>, Error> {
     Ok(key.decrypt(Pkcs1v15Encrypt, value)?)
 }
 
