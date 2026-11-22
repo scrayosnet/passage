@@ -50,7 +50,7 @@ sudo mv passage /usr/local/bin/passage
 Prebuilt binaries and the published container image are `x86_64` only -- there are currently no `aarch64` builds for Linux or Apple Silicon. On those platforms, build from source as shown below.
 :::
 
-Build from source (requires Rust 1.88 or newer and `protoc` for the gRPC adapters):
+Build from source (requires Rust 1.89 or newer and `protoc` for the gRPC adapters):
 
 ```bash
 git clone https://github.com/scrayosnet/passage.git
