@@ -41,7 +41,7 @@ criterion = { version = "0.8", features = ["async_tokio"] }
 reqwest = { version = "0.13", features = ["json"] }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-opentelemetry = { version = "0.33", features = ["metrics"] }
+tracing-opentelemetry = { version = "0.34", features = ["metrics"] }
 opentelemetry-appender-tracing = { version = "0.32" }
 opentelemetry = { version = "0.32", features = ["trace", "metrics", "logs"] }
 opentelemetry_sdk = { version = "0.32" }
