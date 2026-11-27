@@ -42,11 +42,11 @@ reqwest = { version = "0.13", features = ["json"] }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-opentelemetry = { version = "0.33", features = ["metrics"] }
-opentelemetry-appender-tracing = { version = "0.32" }
-opentelemetry = { version = "0.32", features = ["trace", "metrics", "logs"] }
-opentelemetry_sdk = { version = "0.32" }
-opentelemetry-semantic-conventions = { version = "0.32", features = ["semconv_experimental"] }
-opentelemetry-otlp = { version = "0.32", features = ["http-proto", "metrics", "trace"] }
+opentelemetry-appender-tracing = { version = "0.33" }
+opentelemetry = { version = "0.33", features = ["trace", "metrics", "logs"] }
+opentelemetry_sdk = { version = "0.33" }
+opentelemetry-semantic-conventions = { version = "0.33", features = ["semconv_experimental"] }
+opentelemetry-otlp = { version = "0.33", features = ["http-proto", "metrics", "trace"] }
 sentry = { version = "0.48", default-features = false }
 sentry-tracing = { version = "0.48" }
 tonic = { version = "0.14" }
